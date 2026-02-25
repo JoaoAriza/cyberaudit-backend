@@ -7,9 +7,9 @@ import lombok.Data;
 @AllArgsConstructor
 public class PortFinding {
     private int port;
-    private String service;
-    private boolean open;
-    private String severity;
-    private String impact;
-    private String recommendation;
+    private String service;     // ex: HTTP, HTTPS, FTP, MySQL...
+    private String state;       // OPEN | CLOSED | FILTERED
+    private String severity;    // INFO | LOW | MEDIUM | HIGH
+    private Long latencyMs;     // tempo de resposta do connect
+    private String evidence;    // ex: "HTTP Server: nginx", "FTP banner: ..."
 }

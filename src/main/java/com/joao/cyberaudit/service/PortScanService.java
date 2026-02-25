@@ -3,116 +3,231 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.model.PortFinding;
 import org.springframework.stereotype.Service;
 
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 @Service
 public class PortScanService {
 
+    // Lista “comum” — não varre 65k portas (mais seguro e mais rápido)
     private static final List<Integer> COMMON_PORTS = List.of(
-            21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995, 8080,
-            1433, 1521, 3306, 5432, 6379, 27017
-    );
-
-    private static final Map<Integer, String> SERVICE_NAMES = Map.ofEntries(
-            Map.entry(21, "FTP"),
-            Map.entry(22, "SSH"),
-            Map.entry(23, "TELNET"),
-            Map.entry(25, "SMTP"),
-            Map.entry(53, "DNS"),
-            Map.entry(80, "HTTP"),
-            Map.entry(110, "POP3"),
-            Map.entry(143, "IMAP"),
-            Map.entry(443, "HTTPS"),
-            Map.entry(465, "SMTPS"),
-            Map.entry(587, "SMTP Submission"),
-            Map.entry(993, "IMAPS"),
-            Map.entry(995, "POP3S"),
-            Map.entry(8080, "HTTP Alt"),
-            Map.entry(1433, "MS SQL Server"),
-            Map.entry(1521, "Oracle"),
-            Map.entry(3306, "MySQL"),
-            Map.entry(5432, "PostgreSQL"),
-            Map.entry(6379, "Redis"),
-            Map.entry(27017, "MongoDB")
+            21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587,
+            993, 995, 1433, 1521, 3306, 5432, 6379, 8080, 8443, 9200
     );
 
     public List<PortFinding> scanCommonPorts(String host) {
-        List<PortFinding> findings = new ArrayList<>();
-        if (host == null || host.isBlank()) return findings;
+        // limites pra não “matar” a infra e evitar timeouts no Render
+        int threads = 30; // bom equilíbrio
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
 
-        for (int port : COMMON_PORTS) {
-            boolean open = isPortOpen(host, port, 180);
-            if (open) {
-                findings.add(buildFinding(port));
-            }
+        try {
+            List<CompletableFuture<PortFinding>> futures = COMMON_PORTS.stream()
+                    .map(port -> CompletableFuture.supplyAsync(() -> scanOne(host, port), pool))
+                    .collect(Collectors.toList());
+
+            List<PortFinding> results = futures.stream()
+                    .map(f -> {
+                        try { return f.get(8, TimeUnit.SECONDS); } // tempo total por porta
+                        catch (Exception e) { return null; }
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            // normalmente você só quer mostrar OPEN (e opcionalmente FILTERED)
+            return results.stream()
+                    .filter(r -> "OPEN".equals(r.getState()))
+                    .sorted(Comparator.comparingInt(PortFinding::getPort))
+                    .collect(Collectors.toList());
+
+        } finally {
+            pool.shutdownNow();
         }
-        return findings;
     }
 
-    private boolean isPortOpen(String host, int port, int timeoutMs) {
+    private PortFinding scanOne(String host, int port) {
+        String guessedService = guessService(port);
+
+        // timeouts dinâmicos (opção 5)
+        int connectTimeoutMs = connectTimeoutFor(port);
+        int readTimeoutMs = readTimeoutFor(port);
+
+        long start = System.currentTimeMillis();
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), 180);
-            return true;
+            socket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
+            long latency = System.currentTimeMillis() - start;
+            socket.setSoTimeout(readTimeoutMs);
+
+            // OPEN -> tentar evidência leve (opção 2)
+            String evidence = probeEvidence(host, port, socket);
+            String severity = classifySeverity(port, guessedService);
+
+            return new PortFinding(port, guessedService, "OPEN", severity, latency, evidence);
+
+        } catch (ConnectException ce) {
+            long latency = System.currentTimeMillis() - start;
+            return new PortFinding(port, guessedService, "CLOSED", "INFO", latency, null);
+
+        } catch (SocketTimeoutException te) {
+            long latency = System.currentTimeMillis() - start;
+            return new PortFinding(port, guessedService, "FILTERED", "INFO", latency,
+                    "Sem resposta no timeout (pode ser firewall/CDN/edge)");
+
         } catch (Exception e) {
-            return false;
+            long latency = System.currentTimeMillis() - start;
+            return new PortFinding(port, guessedService, "FILTERED", "INFO", latency,
+                    "Erro: " + e.getClass().getSimpleName());
         }
     }
 
-    private PortFinding buildFinding(int port) {
-        String service = SERVICE_NAMES.getOrDefault(port, "UNKNOWN");
+    private String probeEvidence(String host, int port, Socket socket) {
+        try {
+            // HTTP: HEAD request (bem leve)
+            if (port == 80 || port == 8080 || port == 8000) {
+                return httpHeadEvidence(host, port, false);
+            }
+            if (port == 443 || port == 8443) {
+                return httpHeadEvidence(host, port, true);
+            }
 
-        // severidade + recomendações simples (v1)
-        if (port == 23) {
-            return new PortFinding(port, service, true, "HIGH",
-                    "Telnet transmite dados sem criptografia (credenciais podem vazar).",
-                    "Desabilitar TELNET e usar SSH (porta 22) com configurações seguras."
-            );
+            // FTP / SMTP / POP3 / IMAP: lê banner (1 linha, curto)
+            if (port == 21 || port == 25 || port == 110 || port == 143 || port == 587) {
+                BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                String line = br.readLine();
+                if (line != null && !line.isBlank()) return "Banner: " + trim(line, 140);
+            }
+
+            // Redis às vezes manda banner/erro em texto, mas nem sempre.
+            // MySQL/SQLServer/Oracle geralmente protocolo binário -> não force.
+            return null;
+
+        } catch (Exception ignored) {
+            return null;
         }
+    }
 
-        if (port == 21) {
-            return new PortFinding(port, service, true, "HIGH",
-                    "FTP pode expor credenciais/dados se não estiver protegido.",
-                    "Desabilitar FTP ou migrar para SFTP/FTPS e restringir acesso por firewall."
-            );
+    private String httpHeadEvidence(String host, int port, boolean tls) {
+        // Faz HEAD “na mão” para evitar dependências e manter simples
+        try {
+            if (!tls) {
+                try (Socket s = new Socket()) {
+                    s.connect(new InetSocketAddress(host, port), 1200);
+                    s.setSoTimeout(1200);
+
+                    OutputStream os = s.getOutputStream();
+                    os.write(("HEAD / HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+                            .getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+
+                    BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+                    String line;
+                    String server = null;
+                    String status = null;
+                    while ((line = br.readLine()) != null) {
+                        if (status == null && line.startsWith("HTTP/")) status = line;
+                        if (line.toLowerCase().startsWith("server:")) server = line;
+                        if (line.isBlank()) break;
+                    }
+                    if (status != null || server != null) {
+                        return (status != null ? trim(status, 80) : "") +
+                                (server != null ? " | " + trim(server, 120) : "");
+                    }
+                }
+                return null;
+            }
+
+            // TLS: abre SSLSocket e faz HEAD
+            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            try (SSLSocket ssl = (SSLSocket) factory.createSocket()) {
+                ssl.connect(new InetSocketAddress(host, port), 1500);
+                ssl.setSoTimeout(1500);
+                ssl.startHandshake();
+
+                OutputStream os = ssl.getOutputStream();
+                os.write(("HEAD / HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                os.flush();
+
+                BufferedReader br = new BufferedReader(new InputStreamReader(ssl.getInputStream(), StandardCharsets.UTF_8));
+                String line;
+                String server = null;
+                String status = null;
+                while ((line = br.readLine()) != null) {
+                    if (status == null && line.startsWith("HTTP/")) status = line;
+                    if (line.toLowerCase().startsWith("server:")) server = line;
+                    if (line.isBlank()) break;
+                }
+                if (status != null || server != null) {
+                    return (status != null ? trim(status, 80) : "") +
+                            (server != null ? " | " + trim(server, 120) : "");
+                }
+            }
+            return null;
+
+        } catch (Exception e) {
+            return null;
         }
+    }
 
-        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379) {
-            return new PortFinding(port, service, true, "HIGH",
-                    "Serviço de banco/daemon exposto publicamente aumenta risco de ataque e vazamento.",
-                    "Restringir a rede (firewall/VPC), expor apenas internamente e exigir autenticação forte."
-            );
-        }
+    private String guessService(int port) {
+        return switch (port) {
+            case 21 -> "FTP";
+            case 22 -> "SSH";
+            case 23 -> "TELNET";
+            case 25 -> "SMTP";
+            case 53 -> "DNS";
+            case 80 -> "HTTP";
+            case 110 -> "POP3";
+            case 143 -> "IMAP";
+            case 443 -> "HTTPS";
+            case 465 -> "SMTPS";
+            case 587 -> "SMTP (Submission)";
+            case 993 -> "IMAPS";
+            case 995 -> "POP3S";
+            case 1433 -> "MS SQL Server";
+            case 1521 -> "Oracle";
+            case 3306 -> "MySQL";
+            case 5432 -> "PostgreSQL";
+            case 6379 -> "Redis";
+            case 8080 -> "HTTP Alt";
+            case 8443 -> "HTTPS Alt";
+            case 9200 -> "Elasticsearch";
+            default -> "Unknown";
+        };
+    }
 
-        if (port == 22) {
-            return new PortFinding(port, service, true, "MEDIUM",
-                    "SSH exposto pode ser alvo de brute force se não estiver protegido.",
-                    "Restringir por IP, desabilitar login por senha, usar chaves e MFA quando possível."
-            );
-        }
+    private String classifySeverity(int port, String service) {
+        // Ajuste ao seu gosto. Aqui vai uma base bem aceitável pra relatório:
+        if (port == 21 || port == 23) return "HIGH"; // FTP/Telnet
+        if (port == 1433 || port == 1521 || port == 3306 || port == 5432 || port == 6379 || port == 9200) return "HIGH"; // DB/Redis/ES exposto
+        if (port == 22) return "MEDIUM"; // SSH exposto pode ser ok, mas é sensível
+        if (port == 80 || port == 8080) return "LOW"; // pode ser normal
+        if (port == 443 || port == 8443) return "INFO";
+        return "LOW";
+    }
 
-        if (port == 80 || port == 8080) {
-            return new PortFinding(port, service, true, "LOW",
-                    "HTTP exposto pode permitir acesso sem criptografia dependendo da configuração.",
-                    "Forçar HTTPS com redirect 301 e habilitar HSTS."
-            );
-        }
+    private int connectTimeoutFor(int port) {
+        // (5) timeouts dinâmicos: DB costuma ser mais lento/filtrado
+        if (port == 1433 || port == 1521 || port == 3306 || port == 5432 || port == 6379 || port == 9200) return 1800;
+        if (port == 443 || port == 8443) return 1600;
+        return 1200;
+    }
 
-        if (port == 443) {
-            return new PortFinding(port, service, true, "INFO",
-                    "HTTPS aberto (esperado).",
-                    "Manter TLS atualizado e certificado válido."
-            );
-        }
+    private int readTimeoutFor(int port) {
+        if (port == 80 || port == 8080 || port == 443 || port == 8443) return 1500;
+        return 1200;
+    }
 
-        return new PortFinding(port, service, true, "LOW",
-                "Porta aberta detectada.",
-                "Verificar se o serviço é necessário; se não, fechar/restringir."
-        );
+    private String trim(String s, int max) {
+        if (s == null) return null;
+        s = s.trim();
+        return s.length() <= max ? s : s.substring(0, max);
     }
 }
-
-

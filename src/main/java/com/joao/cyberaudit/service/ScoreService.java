@@ -27,8 +27,6 @@ public class ScoreService {
         List<SecurityIssue> issues = new ArrayList<>();
 
         // ===== SSL (HTTPS suportado?) =====
-        // A ideia é que sslInfo venha do teste em HTTPS (ex: https://site.com),
-        // então "não suporta HTTPS" deve ser verdadeiro só quando HTTPS realmente falhar.
         if (!sslInfo.isHttps()) {
             score -= 40;
             notes.add("HTTPS não suportado: -40");
@@ -89,7 +87,6 @@ public class ScoreService {
         }
 
         // ===== HTTPS forçado a partir de HTTP? =====
-        // Mesmo suportando HTTPS, se não redirecionar HTTP->HTTPS, o usuário pode cair em HTTP.
         if (sslInfo.isHttps() && sslInfo.isValid() && !redirectsToHttps) {
             score -= 10;
             notes.add("Não força HTTPS a partir de HTTP: -10");
@@ -104,13 +101,11 @@ public class ScoreService {
         }
 
         // ===== PASSIVO: superfície de entrada =====
-        // Não penaliza, apenas informa (bom pra relatório).
         if (inputSurfaceDetected) {
             notes.add("Superfície de entrada detectada (parâmetros na URL): INFO");
         }
 
         // ===== ATIVO (opt-in): DB error leakage =====
-        // Penaliza somente se activeMode=true.
         if (activeMode && dbErrorLeakageSuspected) {
             score -= 15;
             notes.add("Possível exposição de erro de banco/SQL (modo ativo): -15");
@@ -124,6 +119,7 @@ public class ScoreService {
             ));
         }
 
+        // ===== ATIVO (opt-in): XSS probe =====
         if (activeMode && xssProbePerformed && reflectedXssSuspected) {
             score -= 25;
             notes.add("Suspeita de Reflected XSS (marcador refletido no HTML): -25");
@@ -150,7 +146,6 @@ public class ScoreService {
                 continue;
             }
 
-            // --- HSTS ---
             if (header.equalsIgnoreCase("Strict-Transport-Security")) {
                 if (status.startsWith("MISSING")) {
                     score -= 10;
@@ -174,13 +169,9 @@ public class ScoreService {
                             "Configuração incompleta pode reduzir a proteção contra downgrade.",
                             "Garantir max-age adequado (ex: 31536000) e considerar includeSubDomains."
                     ));
-                } else if (status.startsWith("UNKNOWN")) {
-                    score -= 3;
-                    notes.add("HSTS valor incomum: -3");
                 }
             }
 
-            // --- X-Content-Type-Options ---
             if (header.equalsIgnoreCase("X-Content-Type-Options")) {
                 if (status.startsWith("MISSING")) {
                     score -= 10;
@@ -196,21 +187,9 @@ public class ScoreService {
                 } else if (status.startsWith("WEAK")) {
                     score -= 5;
                     notes.add("X-Content-Type-Options fraco: -5");
-
-                    issues.add(new SecurityIssue(
-                            "CONTENT_TYPE_WEAK",
-                            "X-Content-Type-Options fraco",
-                            "LOW",
-                            "Valor não recomendado reduz a proteção contra MIME sniffing.",
-                            "Usar exatamente: X-Content-Type-Options: nosniff"
-                    ));
-                } else if (status.startsWith("UNKNOWN")) {
-                    score -= 3;
-                    notes.add("X-Content-Type-Options valor incomum: -3");
                 }
             }
 
-            // --- CSP ---
             if (header.equalsIgnoreCase("Content-Security-Policy")) {
                 if (status.startsWith("MISSING")) {
                     score -= 10;
@@ -226,21 +205,9 @@ public class ScoreService {
                 } else if (status.startsWith("WEAK")) {
                     score -= 5;
                     notes.add("Content-Security-Policy fraca: -5");
-
-                    issues.add(new SecurityIssue(
-                            "CSP_WEAK",
-                            "Content-Security-Policy fraca",
-                            "MEDIUM",
-                            "Política permissiva pode não impedir XSS/injeções.",
-                            "Revisar CSP para restringir fontes e evitar 'unsafe-inline' quando possível."
-                    ));
-                } else if (status.startsWith("UNKNOWN")) {
-                    score -= 3;
-                    notes.add("CSP valor incomum: -3");
                 }
             }
 
-            // --- X-Frame-Options ---
             if (header.equalsIgnoreCase("X-Frame-Options")) {
                 if (status.startsWith("MISSING")) {
                     score -= 10;
@@ -264,11 +231,61 @@ public class ScoreService {
                             "Página pode ser embutida em iframe em alguns contextos.",
                             "Preferir X-Frame-Options: DENY se o site não precisa ser exibido em iframe."
                     ));
-                } else if (status.startsWith("UNKNOWN")) {
-                    score -= 3;
-                    notes.add("X-Frame-Options valor incomum: -3");
+                }
+            }
+        }
+
+        // ===== PORTAS ABERTAS (modo ativo) =====
+        if (activeMode && openPorts != null && !openPorts.isEmpty()) {
+            int portPenalty = 0;
+            int maxPortPenalty = 30;   // teto de penalidade
+            int maxPortIssues = 8;     // teto de issues para não poluir
+
+            for (PortFinding p : openPorts) {
+                if (p == null) continue;
+
+                String state = (p.getState() == null) ? "OPEN" : p.getState().toUpperCase();
+                if (!"OPEN".equals(state)) continue; // ignora CLOSED/FILTERED
+
+                int port = p.getPort();
+                String service = (p.getService() == null) ? "UNKNOWN" : p.getService();
+                String sev = (p.getSeverity() == null) ? "LOW" : p.getSeverity().toUpperCase();
+
+                // portas "esperadas" (evita ruído)
+                if (port == 443) continue;
+
+                int inc;
+                switch (sev) {
+                    case "HIGH" -> inc = 8;
+                    case "MEDIUM" -> inc = 4;
+                    case "INFO" -> inc = 1;
+                    default -> inc = 2; // LOW ou desconhecido
                 }
 
+                if (portPenalty < maxPortPenalty) {
+                    portPenalty = Math.min(maxPortPenalty, portPenalty + inc);
+                }
+
+                String extra = "";
+                if (p.getLatencyMs() != null) extra += " latency=" + p.getLatencyMs() + "ms";
+                if (p.getEvidence() != null && !p.getEvidence().isBlank()) extra += " evidence=" + p.getEvidence();
+
+                notes.add("Porta aberta: " + port + " (" + service + ") [" + sev + "] -" + inc + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+
+                if (countPortIssues(issues) < maxPortIssues) {
+                    issues.add(new SecurityIssue(
+                            "OPEN_PORT_" + port,
+                            "Porta aberta detectada: " + port + " (" + service + ")",
+                            sev,
+                            impactForPort(port, service),
+                            recommendationForPort(port, service)
+                    ));
+                }
+            }
+
+            if (portPenalty > 0) {
+                score -= portPenalty;
+                notes.add("Penalidade total por portas abertas (cap " + maxPortPenalty + "): -" + portPenalty);
             }
         }
 
@@ -277,7 +294,6 @@ public class ScoreService {
         if (score > 100) score = 100;
 
         RiskLevel level = classify(score);
-
         return new ScoreResult(score, level, notes, issues);
     }
 
@@ -285,5 +301,33 @@ public class ScoreService {
         if (score >= 80) return RiskLevel.SECURE;
         if (score >= 50) return RiskLevel.WARNING;
         return RiskLevel.CRITICAL;
+    }
+
+    private int countPortIssues(List<SecurityIssue> issues) {
+        int c = 0;
+        for (SecurityIssue i : issues) {
+            if (i != null && i.getId() != null && i.getId().startsWith("OPEN_PORT_")) c++;
+        }
+        return c;
+    }
+
+    private String impactForPort(int port, String service) {
+        if (port == 21) return "FTP pode expor credenciais/dados se não estiver protegido.";
+        if (port == 23) return "Telnet transmite dados sem criptografia (credenciais podem vazar).";
+        if (port == 22) return "SSH exposto pode ser alvo de brute force se não estiver protegido.";
+        if (port == 80 || port == 8080) return "HTTP pode permitir acesso sem criptografia dependendo da configuração.";
+        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379)
+            return "Serviço de banco/daemon exposto publicamente aumenta risco de ataque e vazamento.";
+        return "Uma porta aberta pode aumentar a superfície de ataque dependendo do serviço (" + service + ").";
+    }
+
+    private String recommendationForPort(int port, String service) {
+        if (port == 21) return "Desabilitar FTP ou migrar para SFTP/FTPS e restringir acesso por firewall/VPN.";
+        if (port == 23) return "Desabilitar TELNET e usar SSH com configurações seguras.";
+        if (port == 22) return "Restringir por IP, desabilitar login por senha, usar chaves e rate-limit/MFA quando possível.";
+        if (port == 80 || port == 8080) return "Forçar HTTPS com redirect 301 e habilitar HSTS.";
+        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379)
+            return "Restringir a rede (firewall/VPC), expor apenas internamente e exigir autenticação forte.";
+        return "Verificar se o serviço (" + service + ") é necessário; se não, fechar/restringir (firewall/VPC).";
     }
 }
