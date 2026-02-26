@@ -69,21 +69,62 @@ public class PortScanService {
             String evidence = probeEvidence(host, port, socket);
             String severity = classifySeverity(port, guessedService);
 
-            return new PortFinding(port, guessedService, "OPEN", severity, latency, evidence);
+            // Novo: impact / recommendation (básico, mas útil pro relatório)
+            String impact = impactFor(port, guessedService);
+            String recommendation = recommendationFor(port, guessedService);
+
+            return new PortFinding(
+                    impact,
+                    recommendation,
+                    port,
+                    guessedService,
+                    "OPEN",
+                    severity,
+                    Long.valueOf(latency),
+                    evidence
+            );
 
         } catch (ConnectException ce) {
             long latency = System.currentTimeMillis() - start;
-            return new PortFinding(port, guessedService, "CLOSED", "INFO", latency, null);
+
+            return new PortFinding(
+                    "N/A",
+                    "N/A",
+                    port,
+                    guessedService,
+                    "CLOSED",
+                    "INFO",
+                    Long.valueOf(latency),
+                    null
+            );
 
         } catch (SocketTimeoutException te) {
             long latency = System.currentTimeMillis() - start;
-            return new PortFinding(port, guessedService, "FILTERED", "INFO", latency,
-                    "Sem resposta no timeout (pode ser firewall/CDN/edge)");
+
+            return new PortFinding(
+                    "Sem resposta no timeout (pode ser firewall/CDN/edge).",
+                    "Se for serviço esperado, liberar a porta no firewall/CDN; se não for, manter bloqueado.",
+                    port,
+                    guessedService,
+                    "FILTERED",
+                    "INFO",
+                    Long.valueOf(latency),
+                    "Sem resposta no timeout (pode ser firewall/CDN/edge)"
+            );
 
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
-            return new PortFinding(port, guessedService, "FILTERED", "INFO", latency,
-                    "Erro: " + e.getClass().getSimpleName());
+
+            return new PortFinding(
+                    "Falha ao testar a porta (erro inesperado).",
+                    "Verifique DNS, conectividade e regras de firewall/CDN; tente novamente.",
+                    port,
+                    guessedService,
+                    "FILTERED",
+                    "INFO",
+                    Long.valueOf(latency),
+                    "Erro: " + e.getClass().getSimpleName()
+            );
         }
     }
 
@@ -214,7 +255,7 @@ public class PortScanService {
     }
 
     private int connectTimeoutFor(int port) {
-        // (5) timeouts dinâmicos: DB costuma ser mais lento/filtrado
+        // timeouts dinâmicos: DB costuma ser mais lento/filtrado
         if (port == 1433 || port == 1521 || port == 3306 || port == 5432 || port == 6379 || port == 9200) return 1800;
         if (port == 443 || port == 8443) return 1600;
         return 1200;
@@ -229,5 +270,35 @@ public class PortScanService {
         if (s == null) return null;
         s = s.trim();
         return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    // ----------------------------
+    // Impact / Recommendation (básico)
+    // ----------------------------
+    private String impactFor(int port, String service) {
+        // Impacto bem direto pro relatório
+        if (port == 21) return "FTP exposto pode permitir vazamento de arquivos e credenciais (protocolo inseguro).";
+        if (port == 23) return "Telnet exposto transmite credenciais em texto plano e facilita acesso indevido.";
+        if (port == 1433 || port == 1521 || port == 3306 || port == 5432)
+            return "Banco de dados exposto pode permitir acesso não autorizado, enumeração e vazamento de dados.";
+        if (port == 6379) return "Redis exposto frequentemente permite leitura/escrita de dados e execução de comandos.";
+        if (port == 9200) return "Elasticsearch exposto pode permitir leitura/alteração de índices e vazamento de dados.";
+        if (port == 22) return "SSH exposto aumenta superfície de ataque (bruteforce/credenciais fracas).";
+        if (port == 80 || port == 8080) return "HTTP exposto é comum; risco depende de autenticação e vulnerabilidades do app.";
+        if (port == 443 || port == 8443) return "HTTPS exposto é comum; risco depende de configuração e do app.";
+        return "Serviço exposto pode aumentar a superfície de ataque dependendo da configuração.";
+    }
+
+    private String recommendationFor(int port, String service) {
+        if (port == 21) return "Evite FTP: use SFTP/FTPS; restrinja por firewall/VPN e desabilite se não for necessário.";
+        if (port == 23) return "Desabilite Telnet e use SSH; bloqueie a porta no firewall.";
+        if (port == 1433 || port == 1521 || port == 3306 || port == 5432)
+            return "Não exponha DB na internet: restrinja por firewall, permita apenas IPs internos/VPN e habilite autenticação forte.";
+        if (port == 6379) return "Restrinja Redis a rede interna, exija auth/ACL e bloqueie acesso público.";
+        if (port == 9200) return "Restrinja Elasticsearch, exija autenticação, e bloqueie acesso público; coloque atrás de VPN/rede interna.";
+        if (port == 22) return "Restrinja SSH por IP/VPN, desabilite senha (use chave), e habilite rate limit/fail2ban.";
+        if (port == 80 || port == 8080) return "Se possível redirecione para HTTPS, aplique WAF/CDN e mantenha o app atualizado.";
+        if (port == 443 || port == 8443) return "Habilite TLS forte, HSTS, e mantenha o app e dependências atualizadas.";
+        return "Feche a porta se não for necessária; caso seja, restrinja por firewall e use autenticação forte.";
     }
 }
