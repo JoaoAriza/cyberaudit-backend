@@ -254,38 +254,34 @@ public class ScoreService {
                 // portas "esperadas" (evita ruído)
                 if (port == 443) continue;
 
-                int inc;
-                switch (sev) {
-                    case "HIGH" -> inc = 8;
-                    case "MEDIUM" -> inc = 4;
-                    case "INFO" -> inc = 1;
-                    default -> inc = 2; // LOW ou desconhecido
+                // portas web comuns: não penaliza
+                if (port == 80 || port == 443 || port == 8080 || port == 8443) {
+                    notes.add("Porta web comum aberta: " + port + " (" + service + ") [OK] (latency=" + p.getLatencyMs() + "ms)");
+                    continue;
                 }
 
-                if (portPenalty < maxPortPenalty) {
-                    portPenalty = Math.min(maxPortPenalty, portPenalty + inc);
+                // penalidade por risco real (não por severity)
+                int inc = 0;
+
+                // Inseguros por padrão
+                if (port == 21 || port == 23) inc = 25;                 // FTP/Telnet
+
+                // Dados/sistemas sensíveis expostos
+                else if (port == 1433 || port == 1521 || port == 3306 || port == 5432) inc = 20; // DB
+                else if (port == 6379) inc = 20;                        // Redis
+                else if (port == 9200) inc = 20;                        // Elasticsearch
+
+                // SSH moderado
+                else if (port == 22) inc = 10;
+
+                // Outros: não penaliza (só informa)
+                else inc = 0;
+
+                if (inc == 0) {
+                    notes.add("Porta aberta (informativo): " + port + " (" + service + ")"
+                            + (p.getEvidence() != null ? " evidence=" + p.getEvidence() : ""));
+                    continue;
                 }
-
-                String extra = "";
-                if (p.getLatencyMs() != null) extra += " latency=" + p.getLatencyMs() + "ms";
-                if (p.getEvidence() != null && !p.getEvidence().isBlank()) extra += " evidence=" + p.getEvidence();
-
-                notes.add("Porta aberta: " + port + " (" + service + ") [" + sev + "] -" + inc + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-
-                if (countPortIssues(issues) < maxPortIssues) {
-                    issues.add(new SecurityIssue(
-                            "OPEN_PORT_" + port,
-                            "Porta aberta detectada: " + port + " (" + service + ")",
-                            sev,
-                            impactForPort(port, service),
-                            recommendationForPort(port, service)
-                    ));
-                }
-            }
-
-            if (portPenalty > 0) {
-                score -= portPenalty;
-                notes.add("Penalidade total por portas abertas (cap " + maxPortPenalty + "): -" + portPenalty);
             }
         }
 

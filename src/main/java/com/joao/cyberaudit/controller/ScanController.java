@@ -2,7 +2,10 @@ package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.model.*;
 import com.joao.cyberaudit.service.*;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
@@ -19,6 +22,8 @@ public class ScanController {
     private final PortScanService portScanService;
     private final XssProbeService xssProbeService;
     private final PdfReportService pdfReportService;
+    private final ScanCacheService scanCacheService;
+    private final RateLimitService rateLimitService;
 
     public ScanController(
             SSLService sslService,
@@ -29,7 +34,9 @@ public class ScanController {
             ErrorDisclosureService errorDisclosureService,
             PortScanService portScanService,
             XssProbeService xssProbeService,
-            PdfReportService pdfReportService
+            PdfReportService pdfReportService,
+            ScanCacheService scanCacheService,
+            RateLimitService rateLimitService
     ) {
         this.sslService = sslService;
         this.headerService = headerService;
@@ -40,13 +47,54 @@ public class ScanController {
         this.portScanService = portScanService;
         this.xssProbeService = xssProbeService;
         this.pdfReportService = pdfReportService;
+        this.scanCacheService = scanCacheService;
+        this.rateLimitService = rateLimitService;
     }
 
     @GetMapping
     public ScanResult scan(@RequestParam String url,
-                           @RequestParam(defaultValue = "false") boolean active) {
+                           @RequestParam(defaultValue = "false") boolean active,
+                           HttpServletRequest request) {
+        return doScan(url, active, request);
+    }
+
+    @GetMapping(value = "/report", produces = "text/plain; charset=UTF-8")
+    public String scanReport(@RequestParam String url,
+                             @RequestParam(defaultValue = "false") boolean active,
+                             HttpServletRequest request) {
+        ScanResult result = doScan(url, active, request);
+        return reportService.generateReport(result);
+    }
+
+    @GetMapping(value = "/report/pdf", produces = "application/pdf")
+    public byte[] scanReportPdf(@RequestParam String url,
+                                @RequestParam(defaultValue = "false") boolean active,
+                                HttpServletRequest request) {
+        ScanResult result = doScan(url, active, request);
+        String reportText = reportService.generateReport(result);
+        return pdfReportService.generatePdf(result, reportText);
+    }
+
+    private ScanResult doScan(String url, boolean active, HttpServletRequest request) {
+
+        // 🔒 Rate limit: 10 requisições por 60s por IP
+        if (!rateLimitService.allow(request.getRemoteAddr(), 10, 60_000)) {
+            throw new ResponseStatusException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "Muitas requisições. Tente novamente em alguns segundos."
+            );
+        }
 
         String inputUrl = normalizeUrl(url);
+
+        // 🔁 Cache (por host + active)
+        String hostForCache = extractHostSafe(inputUrl);
+        String cacheKey = "scan:" + (hostForCache != null ? hostForCache : inputUrl) + ":active=" + active;
+
+        ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
+        if (cached != null) {
+            return cached;
+        }
 
         // 1) Verifica redirect HTTP -> HTTPS
         String httpProbeUrl = inputUrl.startsWith("https://")
@@ -96,7 +144,7 @@ public class ScanController {
         // Port scan (ACTIVE)
         java.util.List<PortFinding> openPorts = java.util.List.of();
         if (active) {
-            String host = extractHost(target);
+            String host = extractHostSafe(target);
             if (host != null && !host.isBlank()) {
                 openPorts = portScanService.scanCommonPorts(host);
             }
@@ -115,7 +163,7 @@ public class ScanController {
                 openPorts
         );
 
-        return new ScanResult(
+        ScanResult result = new ScanResult(
                 inputUrl,
                 fetch.getFinalUrl(),
                 fetch.getStatusCode(),
@@ -130,21 +178,11 @@ public class ScanController {
                 score,
                 openPorts
         );
-    }
 
-    @GetMapping(value = "/report", produces = "text/plain; charset=UTF-8")
-    public String scanReport(@RequestParam String url,
-                             @RequestParam(defaultValue = "false") boolean active) {
-        ScanResult result = scan(url, active);
-        return reportService.generateReport(result);
-    }
+        // salva no cache (2 minutos)
+        scanCacheService.put(cacheKey, result, 120_000);
 
-    @GetMapping(value = "/report/pdf", produces = "application/pdf")
-    public byte[] scanReportPdf(@RequestParam String url,
-                                @RequestParam(defaultValue = "false") boolean active) {
-        ScanResult result = scan(url, false);
-        String reportText = reportService.generateReport(result);
-        return pdfReportService.generatePdf(result, reportText);
+        return result;
     }
 
     private String normalizeUrl(String url) {
@@ -161,7 +199,7 @@ public class ScanController {
         return "https://" + url;
     }
 
-    private String extractHost(String url) {
+    private String extractHostSafe(String url) {
         try {
             return java.net.URI.create(url).getHost();
         } catch (Exception e) {

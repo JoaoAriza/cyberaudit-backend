@@ -52,10 +52,24 @@ public class ReportService {
             for (PortFinding p : r.getOpenPorts()) {
                 report.append("- Port ").append(p.getPort())
                         .append(" (").append(p.getService()).append(")")
-                        .append(" [").append(p.getSeverity()).append("]\n");
+                        .append(" state=").append(p.getState())
+                        .append(" severity=").append(p.getSeverity())
+                        .append("\n");
+
+                report.append("  Latency: ").append(p.getLatencyMs()).append("ms\n");
+
+                if (p.getEvidence() != null && !p.getEvidence().isBlank()) {
+                    report.append("  Evidence: ").append(p.getEvidence()).append("\n");
+                } else {
+                    report.append("  Evidence: (none)\n");
+                }
+
                 report.append("  Impact: ").append(p.getImpact()).append("\n");
                 report.append("  Recommendation: ").append(p.getRecommendation()).append("\n\n");
             }
+
+            report.append("Note: resultados de portas podem refletir CDN/WAF/edge (ex: Cloudflare), ")
+                    .append("firewall ou balanceadores. Evidências/latência ajudam a interpretar.\n\n");
         }
 
         // ===== ISSUES SUMMARY =====

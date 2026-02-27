@@ -12,36 +12,59 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
 public class PortScanService {
 
-    // Lista “comum” — não varre 65k portas (mais seguro e mais rápido)
     private static final List<Integer> COMMON_PORTS = List.of(
             21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587,
             993, 995, 1433, 1521, 3306, 5432, 6379, 8080, 8443, 9200
     );
 
     public List<PortFinding> scanCommonPorts(String host) {
-        // limites pra não “matar” a infra e evitar timeouts no Render
-        int threads = 30; // bom equilíbrio
+        // 1) Resolve DNS 1x (fail-fast)
+        InetAddress addr;
+        try {
+            addr = InetAddress.getByName(host);
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+
+        // 2) Paralelismo controlado
+        int threads = 24;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
+
+        // limita conexões simultâneas “de verdade”
+        int maxConcurrentConnects = 12;
+        Semaphore sem = new Semaphore(maxConcurrentConnects);
+
+        // 3) Observa “saúde” do host para ajustar timeout
+        AtomicInteger timeoutCount = new AtomicInteger(0);
 
         try {
             List<CompletableFuture<PortFinding>> futures = COMMON_PORTS.stream()
-                    .map(port -> CompletableFuture.supplyAsync(() -> scanOne(host, port), pool))
+                    .map(port -> CompletableFuture.supplyAsync(
+                            () -> scanOne(addr, host, port, sem, timeoutCount),
+                            pool
+                    ))
                     .collect(Collectors.toList());
 
+            // 4) Timeout total do scan (não fica preso)
+            CompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+            try {
+                all.get(12, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+                // se estourar tempo, seguimos com o que já terminou
+            }
+
             List<PortFinding> results = futures.stream()
-                    .map(f -> {
-                        try { return f.get(8, TimeUnit.SECONDS); } // tempo total por porta
-                        catch (Exception e) { return null; }
-                    })
+                    .map(f -> f.getNow(null))
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
 
-            // normalmente você só quer mostrar OPEN (e opcionalmente FILTERED)
+            // manter seu comportamento: mostrar só OPEN
             return results.stream()
                     .filter(r -> "OPEN".equals(r.getState()))
                     .sorted(Comparator.comparingInt(PortFinding::getPort))
@@ -52,85 +75,95 @@ public class PortScanService {
         }
     }
 
-    private PortFinding scanOne(String host, int port) {
+    private PortFinding scanOne(
+            InetAddress addr,
+            String host,
+            int port,
+            Semaphore sem,
+            AtomicInteger timeoutCount
+    ) {
         String guessedService = guessService(port);
 
-        // timeouts dinâmicos (opção 5)
-        int connectTimeoutMs = connectTimeoutFor(port);
-        int readTimeoutMs = readTimeoutFor(port);
+        int baseConnectTimeout = connectTimeoutFor(port);
+        int readTimeout = readTimeoutFor(port);
+
+        // se o host está tendo muitos timeouts, dá uma folga no connect
+        int extra = timeoutCount.get() >= 4 ? 400 : 0;
+        int connectTimeout = baseConnectTimeout + extra;
 
         long start = System.currentTimeMillis();
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
-            long latency = System.currentTimeMillis() - start;
-            socket.setSoTimeout(readTimeoutMs);
 
-            // OPEN -> tentar evidência leve (opção 2)
-            String evidence = probeEvidence(host, port, socket);
-            String severity = classifySeverity(port, guessedService);
+        boolean acquired = false;
+        try {
+            // throttle real
+            acquired = sem.tryAcquire(1, TimeUnit.SECONDS);
+            if (!acquired) {
+                long latency = System.currentTimeMillis() - start;
+                return new PortFinding(
+                        "Concorrência alta durante o scan.",
+                        "Tente novamente com menos paralelismo.",
+                        port, guessedService, "FILTERED", "INFO",
+                        Long.valueOf(latency),
+                        "Throttle: sem vaga no semáforo"
+                );
+            }
 
-            // Novo: impact / recommendation (básico, mas útil pro relatório)
-            String impact = impactFor(port, guessedService);
-            String recommendation = recommendationFor(port, guessedService);
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(addr, port), connectTimeout);
+                long latency = System.currentTimeMillis() - start;
+                socket.setSoTimeout(readTimeout);
 
-            return new PortFinding(
-                    impact,
-                    recommendation,
-                    port,
-                    guessedService,
-                    "OPEN",
-                    severity,
-                    Long.valueOf(latency),
-                    evidence
-            );
+                String evidence = probeEvidence(host, port, socket);
+                String severity = classifySeverity(port, guessedService);
+
+                String impact = impactFor(port, guessedService);
+                String recommendation = recommendationFor(port, guessedService);
+
+                return new PortFinding(
+                        impact, recommendation,
+                        port, guessedService, "OPEN", severity,
+                        Long.valueOf(latency),
+                        evidence
+                );
+            }
 
         } catch (ConnectException ce) {
             long latency = System.currentTimeMillis() - start;
-
             return new PortFinding(
-                    "N/A",
-                    "N/A",
-                    port,
-                    guessedService,
-                    "CLOSED",
-                    "INFO",
+                    "N/A", "N/A",
+                    port, guessedService, "CLOSED", "INFO",
                     Long.valueOf(latency),
                     null
             );
 
         } catch (SocketTimeoutException te) {
+            timeoutCount.incrementAndGet();
             long latency = System.currentTimeMillis() - start;
-
             return new PortFinding(
                     "Sem resposta no timeout (pode ser firewall/CDN/edge).",
-                    "Se for serviço esperado, liberar a porta no firewall/CDN; se não for, manter bloqueado.",
-                    port,
-                    guessedService,
-                    "FILTERED",
-                    "INFO",
+                    "Se for serviço esperado, liberar/ajustar regras; se não, manter bloqueado.",
+                    port, guessedService, "FILTERED", "INFO",
                     Long.valueOf(latency),
                     "Sem resposta no timeout (pode ser firewall/CDN/edge)"
             );
 
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
-
             return new PortFinding(
                     "Falha ao testar a porta (erro inesperado).",
-                    "Verifique DNS, conectividade e regras de firewall/CDN; tente novamente.",
-                    port,
-                    guessedService,
-                    "FILTERED",
-                    "INFO",
+                    "Verifique DNS/conectividade e tente novamente.",
+                    port, guessedService, "FILTERED", "INFO",
                     Long.valueOf(latency),
                     "Erro: " + e.getClass().getSimpleName()
             );
+
+        } finally {
+            if (acquired) sem.release();
         }
     }
 
     private String probeEvidence(String host, int port, Socket socket) {
         try {
-            // HTTP: HEAD request (bem leve)
             if (port == 80 || port == 8080 || port == 8000) {
                 return httpHeadEvidence(host, port, false);
             }
@@ -138,24 +171,19 @@ public class PortScanService {
                 return httpHeadEvidence(host, port, true);
             }
 
-            // FTP / SMTP / POP3 / IMAP: lê banner (1 linha, curto)
             if (port == 21 || port == 25 || port == 110 || port == 143 || port == 587) {
                 BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
                 String line = br.readLine();
                 if (line != null && !line.isBlank()) return "Banner: " + trim(line, 140);
             }
 
-            // Redis às vezes manda banner/erro em texto, mas nem sempre.
-            // MySQL/SQLServer/Oracle geralmente protocolo binário -> não force.
             return null;
-
         } catch (Exception ignored) {
             return null;
         }
     }
 
     private String httpHeadEvidence(String host, int port, boolean tls) {
-        // Faz HEAD “na mão” para evitar dependências e manter simples
         try {
             if (!tls) {
                 try (Socket s = new Socket()) {
@@ -184,7 +212,6 @@ public class PortScanService {
                 return null;
             }
 
-            // TLS: abre SSLSocket e faz HEAD
             SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
             try (SSLSocket ssl = (SSLSocket) factory.createSocket()) {
                 ssl.connect(new InetSocketAddress(host, port), 1500);
@@ -245,17 +272,15 @@ public class PortScanService {
     }
 
     private String classifySeverity(int port, String service) {
-        // Ajuste ao seu gosto. Aqui vai uma base bem aceitável pra relatório:
-        if (port == 21 || port == 23) return "HIGH"; // FTP/Telnet
-        if (port == 1433 || port == 1521 || port == 3306 || port == 5432 || port == 6379 || port == 9200) return "HIGH"; // DB/Redis/ES exposto
-        if (port == 22) return "MEDIUM"; // SSH exposto pode ser ok, mas é sensível
-        if (port == 80 || port == 8080) return "LOW"; // pode ser normal
+        if (port == 21 || port == 23) return "HIGH";
+        if (port == 1433 || port == 1521 || port == 3306 || port == 5432 || port == 6379 || port == 9200) return "HIGH";
+        if (port == 22) return "MEDIUM";
+        if (port == 80 || port == 8080) return "LOW";
         if (port == 443 || port == 8443) return "INFO";
         return "LOW";
     }
 
     private int connectTimeoutFor(int port) {
-        // timeouts dinâmicos: DB costuma ser mais lento/filtrado
         if (port == 1433 || port == 1521 || port == 3306 || port == 5432 || port == 6379 || port == 9200) return 1800;
         if (port == 443 || port == 8443) return 1600;
         return 1200;
@@ -272,11 +297,8 @@ public class PortScanService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
-    // ----------------------------
-    // Impact / Recommendation (básico)
-    // ----------------------------
+    // Impact/Recommendation (iguais às que você já estava usando)
     private String impactFor(int port, String service) {
-        // Impacto bem direto pro relatório
         if (port == 21) return "FTP exposto pode permitir vazamento de arquivos e credenciais (protocolo inseguro).";
         if (port == 23) return "Telnet exposto transmite credenciais em texto plano e facilita acesso indevido.";
         if (port == 1433 || port == 1521 || port == 3306 || port == 5432)
