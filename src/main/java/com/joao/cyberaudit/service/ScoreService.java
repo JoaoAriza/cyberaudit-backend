@@ -237,64 +237,151 @@ public class ScoreService {
 
         // ===== PORTAS ABERTAS (modo ativo) =====
         if (activeMode && openPorts != null && !openPorts.isEmpty()) {
-            int portPenalty = 0;
-            int maxPortPenalty = 30;   // teto de penalidade
-            int maxPortIssues = 8;     // teto de issues para não poluir
+
+            // Penalidades com caps (para não zerar injustamente)
+            int dbPenalty = 0;          // DB/Redis/ES
+            int insecurePenalty = 0;    // FTP/TELNET
+            int mailPlainPenalty = 0;   // POP3/IMAP plaintext
+            int sshPenalty = 0;         // SSH exposto
+
+            boolean looksLikeEdge = false;
+
+            int maxPortIssues = 8; // teto de issues para não poluir
 
             for (PortFinding p : openPorts) {
                 if (p == null) continue;
 
                 String state = (p.getState() == null) ? "OPEN" : p.getState().toUpperCase();
-                if (!"OPEN".equals(state)) continue; // ignora CLOSED/FILTERED
+                if (!"OPEN".equals(state)) continue;
 
                 int port = p.getPort();
                 String service = (p.getService() == null) ? "UNKNOWN" : p.getService();
-                String sev = (p.getSeverity() == null) ? "LOW" : p.getSeverity().toUpperCase();
 
-                // portas "esperadas" (evita ruído)
-                if (port == 443) continue;
+                String evidence = p.getEvidence();
+                if (evidence != null) {
+                    String ev = evidence.toLowerCase();
+                    if (ev.contains("cloudflare") || ev.contains("akamai") || ev.contains("fastly")
+                            || ev.contains("incapsula") || ev.contains("cloudfront")
+                            || ev.contains("edgesuite") || ev.contains("f5")) {
+                        looksLikeEdge = true;
+                    }
+                }
 
-                // portas web comuns: não penaliza
+                String extra = "";
+                if (p.getLatencyMs() != null) extra += " latency=" + p.getLatencyMs() + "ms";
+                if (p.getEvidence() != null && !p.getEvidence().isBlank()) extra += " evidence=" + p.getEvidence();
+
+                // Web comuns: OK (não penaliza)
                 if (port == 80 || port == 443 || port == 8080 || port == 8443) {
-                    notes.add("Porta web comum aberta: " + port + " (" + service + ") [OK] (latency=" + p.getLatencyMs() + "ms)");
+                    notes.add("Porta web comum aberta: " + port + " (" + service + ") [OK]" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
                     continue;
                 }
 
-                // penalidade por risco real (não por severity)
-                int inc = 0;
-
-                // Inseguros por padrão
-                if (port == 21 || port == 23) inc = 25;                 // FTP/Telnet
-
-                // Dados/sistemas sensíveis expostos
-                else if (port == 1433 || port == 1521 || port == 3306 || port == 5432) inc = 20; // DB
-                else if (port == 6379) inc = 20;                        // Redis
-                else if (port == 9200) inc = 20;                        // Elasticsearch
-
-                // SSH moderado
-                else if (port == 22) inc = 10;
-
-                // Outros: não penaliza (só informa)
-                else inc = 0;
-
-                String impact = impactForPort(port, service);
-                String recommendation = recommendationForPort(port, service);
-
-                if (inc == 0) {
-                    notes.add("Porta aberta (informativo): " + port + " (" + service + ")"
-                            + (p.getLatencyMs() != null ? " (latency=" + p.getLatencyMs() + "ms)" : "")
-                            + (p.getEvidence() != null ? " | evidence=" + p.getEvidence() : ""));
-                    notes.add("↳ Impacto: " + impact);
-                    notes.add("↳ Recomendação: " + recommendation);
+                // DNS: normalmente infraestrutura (informativo)
+                if (port == 53) {
+                    notes.add("Porta aberta (informativo): 53 (DNS) — comum em infraestrutura DNS." + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+                    notes.add("↳ Impacto: " + impactForPort(port, service));
+                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
                     continue;
                 }
 
-                score -= inc;
-                notes.add("Porta crítica aberta: " + port + " (" + service + ") => -" + inc
-                        + (p.getLatencyMs() != null ? " (latency=" + p.getLatencyMs() + "ms)" : "")
-                        + (p.getEvidence() != null ? " | evidence=" + p.getEvidence() : ""));
-                notes.add("↳ Impacto: " + impact);
-                notes.add("↳ Recomendação: " + recommendation);
+                // Email: diferenciar plaintext vs TLS
+                if (port == 110 || port == 143) { // POP3/IMAP plaintext
+                    mailPlainPenalty += 5;
+                    notes.add("Email plaintext exposto: " + port + " (" + service + ") => -5 (leve)" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+                    notes.add("↳ Impacto: " + impactForPort(port, service));
+                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
+                    continue;
+                }
+
+                if (port == 993 || port == 995 || port == 25 || port == 587 || port == 465) {
+                    notes.add("Porta de e-mail aberta (informativo): " + port + " (" + service + ") — comum em infra de e-mail." + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+                    notes.add("↳ Impacto: " + impactForPort(port, service));
+                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
+                    continue;
+                }
+
+                // Inseguros por padrão (forte)
+                if (port == 21 || port == 23) {
+                    insecurePenalty += 25;
+                    notes.add("Serviço inseguro exposto: " + port + " (" + service + ") => -25" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+
+                    if (countPortIssues(issues) < maxPortIssues) {
+                        issues.add(new SecurityIssue(
+                                "OPEN_PORT_" + port,
+                                "Serviço inseguro exposto: " + port + " (" + service + ")",
+                                "HIGH",
+                                impactForPort(port, service),
+                                recommendationForPort(port, service)
+                        ));
+                    }
+                    continue;
+                }
+
+                // DB/Cache/Search sensíveis (forte)
+                if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379 || port == 9200) {
+                    dbPenalty += 20;
+                    notes.add("Serviço sensível exposto: " + port + " (" + service + ") => -20" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+
+                    if (countPortIssues(issues) < maxPortIssues) {
+                        issues.add(new SecurityIssue(
+                                "OPEN_PORT_" + port,
+                                "Serviço sensível exposto: " + port + " (" + service + ")",
+                                "HIGH",
+                                impactForPort(port, service),
+                                recommendationForPort(port, service)
+                        ));
+                    }
+                    continue;
+                }
+
+                // SSH: moderado
+                if (port == 22) {
+                    sshPenalty += 10;
+                    notes.add("SSH exposto: 22 (SSH) => -10 (moderado)" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+                    notes.add("↳ Impacto: " + impactForPort(port, service));
+                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
+
+                    if (countPortIssues(issues) < maxPortIssues) {
+                        issues.add(new SecurityIssue(
+                                "OPEN_PORT_22",
+                                "SSH exposto: 22 (SSH)",
+                                "MEDIUM",
+                                impactForPort(port, service),
+                                recommendationForPort(port, service)
+                        ));
+                    }
+                    continue;
+                }
+
+                // Outros: informativo
+                notes.add("Porta aberta (informativo): " + port + " (" + service + ")" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
+                notes.add("↳ Impacto: " + impactForPort(port, service));
+                notes.add("↳ Recomendação: " + recommendationForPort(port, service));
+            }
+
+            // Caps por categoria (pra não derrubar score injustamente)
+            dbPenalty = Math.min(dbPenalty, 40);
+            insecurePenalty = Math.min(insecurePenalty, 30);
+            mailPlainPenalty = Math.min(mailPlainPenalty, 15);
+            sshPenalty = Math.min(sshPenalty, 20);
+
+            int portPenaltyTotal = dbPenalty + insecurePenalty + mailPlainPenalty + sshPenalty;
+
+            // Redução se parecer edge/CDN/WAF
+            if (looksLikeEdge && portPenaltyTotal > 0) {
+                int reduced = (int) Math.round(portPenaltyTotal * 0.6);
+                notes.add("Observação: evidência sugere edge/CDN/WAF; reduzindo penalidade de portas de "
+                        + portPenaltyTotal + " para " + reduced + ".");
+                portPenaltyTotal = reduced;
+            }
+
+            // Cap absoluto final para penalidade por portas
+            portPenaltyTotal = Math.min(portPenaltyTotal, 60);
+
+            if (portPenaltyTotal > 0) {
+                score -= portPenaltyTotal;
+                notes.add("Penalidade total por exposição de serviços: -" + portPenaltyTotal);
             }
         }
 
@@ -324,19 +411,44 @@ public class ScoreService {
         if (port == 21) return "FTP pode expor credenciais/dados se não estiver protegido.";
         if (port == 23) return "Telnet transmite dados sem criptografia (credenciais podem vazar).";
         if (port == 22) return "SSH exposto pode ser alvo de brute force se não estiver protegido.";
-        if (port == 80 || port == 8080) return "HTTP pode permitir acesso sem criptografia dependendo da configuração.";
-        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379)
-            return "Serviço de banco/daemon exposto publicamente aumenta risco de ataque e vazamento.";
+
+        // Web comum: não é “erro”, depende do contexto
+        if (port == 80 || port == 8080) return "HTTP pode ser normal, mas sem HTTPS pode haver tráfego sem criptografia dependendo do setup.";
+        if (port == 443 || port == 8443) return "HTTPS é comum; risco depende da configuração TLS e do aplicativo.";
+
+        // Infra comum
+        if (port == 53) return "DNS pode ser parte da infraestrutura do domínio (autoritativo/recursivo) e nem sempre indica risco.";
+        if (port == 25 || port == 465 || port == 587 || port == 993 || port == 995) return "Portas de e-mail podem ser normais em domínios que operam serviço de e-mail.";
+
+        // Sensíveis
+        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379 || port == 9200)
+            return "Serviço sensível exposto publicamente aumenta risco de ataque e vazamento de dados.";
+
+        if (port == 110 || port == 143) return "POP3/IMAP sem TLS podem expor credenciais em texto plano (dependendo da config).";
+
         return "Uma porta aberta pode aumentar a superfície de ataque dependendo do serviço (" + service + ").";
     }
 
     private String recommendationForPort(int port, String service) {
         if (port == 21) return "Desabilitar FTP ou migrar para SFTP/FTPS e restringir acesso por firewall/VPN.";
         if (port == 23) return "Desabilitar TELNET e usar SSH com configurações seguras.";
-        if (port == 22) return "Restringir por IP, desabilitar login por senha, usar chaves e rate-limit/MFA quando possível.";
-        if (port == 80 || port == 8080) return "Forçar HTTPS com redirect 301 e habilitar HSTS.";
-        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379)
+        if (port == 22) return "Restringir por IP/VPN, desabilitar login por senha, usar chaves e rate-limit/MFA quando possível.";
+
+        // Web comum
+        if (port == 80 || port == 8080) return "Se aplicável, redirecionar para HTTPS (301) e habilitar HSTS; se não for necessário, restringir.";
+        if (port == 443 || port == 8443) return "Manter TLS bem configurado, habilitar HSTS, e atualizar dependências/servidor.";
+
+        // Infra comum
+        if (port == 53) return "Se o domínio não deveria operar DNS publicamente, restringir/fechar; caso opere, manter hardening e limitar recursão.";
+        if (port == 25 || port == 465 || port == 587) return "Se operar e-mail, manter autenticação e hardening; se não, fechar/restringir.";
+        if (port == 993 || port == 995) return "Preferir sempre TLS (IMAPS/POP3S).";
+
+        // Sensíveis
+        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379 || port == 9200)
             return "Restringir a rede (firewall/VPC), expor apenas internamente e exigir autenticação forte.";
+
+        if (port == 110 || port == 143) return "Preferir versões TLS (995/993) e desabilitar plaintext quando possível.";
+
         return "Verificar se o serviço (" + service + ") é necessário; se não, fechar/restringir (firewall/VPC).";
     }
 }
