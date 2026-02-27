@@ -277,11 +277,24 @@ public class ScoreService {
                 // Outros: não penaliza (só informa)
                 else inc = 0;
 
+                String impact = impactForPort(port, service);
+                String recommendation = recommendationForPort(port, service);
+
                 if (inc == 0) {
                     notes.add("Porta aberta (informativo): " + port + " (" + service + ")"
-                            + (p.getEvidence() != null ? " evidence=" + p.getEvidence() : ""));
+                            + (p.getLatencyMs() != null ? " (latency=" + p.getLatencyMs() + "ms)" : "")
+                            + (p.getEvidence() != null ? " | evidence=" + p.getEvidence() : ""));
+                    notes.add("↳ Impacto: " + impact);
+                    notes.add("↳ Recomendação: " + recommendation);
                     continue;
                 }
+
+                score -= inc;
+                notes.add("Porta crítica aberta: " + port + " (" + service + ") => -" + inc
+                        + (p.getLatencyMs() != null ? " (latency=" + p.getLatencyMs() + "ms)" : "")
+                        + (p.getEvidence() != null ? " | evidence=" + p.getEvidence() : ""));
+                notes.add("↳ Impacto: " + impact);
+                notes.add("↳ Recomendação: " + recommendation);
             }
         }
 
