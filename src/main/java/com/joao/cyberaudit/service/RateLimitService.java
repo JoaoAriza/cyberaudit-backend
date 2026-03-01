@@ -20,7 +20,6 @@ public class RateLimitService {
 
     private final Map<String, Window> buckets = new ConcurrentHashMap<>();
 
-    // Ex: 10 requests por 60s por chave
     public boolean allow(String key, int maxRequests, long windowMs) {
         long now = System.currentTimeMillis();
         Window w = buckets.compute(key, (k, cur) -> {

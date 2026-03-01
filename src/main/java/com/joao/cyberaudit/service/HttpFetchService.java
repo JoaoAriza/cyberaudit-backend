@@ -25,14 +25,12 @@ public class HttpFetchService {
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
-    // Usa redirects automáticos (bom para pegar finalUrl + headers finais)
     public HttpFetchResult fetchHeaders(String url) {
         try {
             URI uri = URI.create(url);
 
             HttpResponse<Void> headResp = sendHeadFollow(uri);
 
-            // fallback se HEAD não for suportado
             if (headResp.statusCode() == 405 || headResp.statusCode() == 501) {
                 HttpResponse<Void> getResp = sendGetFollow(uri);
                 return buildResult(getResp);
@@ -45,7 +43,6 @@ public class HttpFetchService {
         }
     }
 
-    // NOVO: segue manualmente redirects (sem auto-follow) e detecta se em algum passo vira HTTPS
     public boolean traceRedirectToHttps(String httpUrl) {
         try {
             URI current = URI.create(httpUrl);
@@ -62,7 +59,6 @@ public class HttpFetchService {
                 HttpResponse<Void> resp = clientNoRedirect.send(req, HttpResponse.BodyHandlers.discarding());
                 int status = resp.statusCode();
 
-                // se não é redirect, acabou
                 if (status < 300 || status >= 400) {
                     break;
                 }
@@ -88,10 +84,6 @@ public class HttpFetchService {
     }
 
     private URI resolveRedirect(URI base, String location) {
-        // location pode ser:
-        // - absoluta: https://...
-        // - relativa: /path
-        // - scheme-relative: //example.com/path
         if (location.startsWith("//")) {
             return URI.create(base.getScheme() + ":" + location);
         }

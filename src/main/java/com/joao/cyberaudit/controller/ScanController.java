@@ -77,7 +77,7 @@ public class ScanController {
 
     private ScanResult doScan(String url, boolean active, HttpServletRequest request) {
 
-        // 🔒 Rate limit: 10 requisições por 60s por IP
+        // Rate limit: 10 requisições por 60s por IP
         if (!rateLimitService.allow(request.getRemoteAddr(), 10, 60_000)) {
             throw new ResponseStatusException(
                     HttpStatus.TOO_MANY_REQUESTS,
@@ -87,7 +87,7 @@ public class ScanController {
 
         String inputUrl = normalizeUrl(url);
 
-        // 🔁 Cache (por host + active)
+        // Cache (por host + active)
         String hostForCache = extractHostSafe(inputUrl);
         String cacheKey = "scan:" + (hostForCache != null ? hostForCache : inputUrl) + ":active=" + active;
 

@@ -45,7 +45,7 @@ public class ErrorDisclosureService {
             return containsDbErrorPatterns(body);
 
         } catch (Exception e) {
-            return false; // no scanner, erro não deve “quebrar” a análise
+            return false;
         }
     }
 
@@ -62,7 +62,7 @@ public class ErrorDisclosureService {
         String key = kv[0];
         String value = kv.length > 1 ? kv[1] : "";
 
-        // decodifica -> adiciona 1 caractere -> codifica de novo
+
         String decoded = URLDecoder.decode(value, StandardCharsets.UTF_8);
         String newValue = decoded + "'";
         String encoded = URLEncoder.encode(newValue, StandardCharsets.UTF_8);

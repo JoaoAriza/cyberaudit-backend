@@ -24,7 +24,6 @@ public class PortScanService {
     );
 
     public List<PortFinding> scanCommonPorts(String host) {
-        // 1) Resolve DNS 1x (fail-fast)
         InetAddress addr;
         try {
             addr = InetAddress.getByName(host);
@@ -32,15 +31,12 @@ public class PortScanService {
             return Collections.emptyList();
         }
 
-        // 2) Paralelismo controlado
         int threads = 24;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
 
-        // limita conexões simultâneas “de verdade”
         int maxConcurrentConnects = 12;
         Semaphore sem = new Semaphore(maxConcurrentConnects);
 
-        // 3) Observa “saúde” do host para ajustar timeout
         AtomicInteger timeoutCount = new AtomicInteger(0);
 
         try {
@@ -51,12 +47,10 @@ public class PortScanService {
                     ))
                     .collect(Collectors.toList());
 
-            // 4) Timeout total do scan (não fica preso)
             CompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
             try {
                 all.get(12, TimeUnit.SECONDS);
             } catch (Exception ignored) {
-                // se estourar tempo, seguimos com o que já terminou
             }
 
             List<PortFinding> results = futures.stream()
@@ -64,7 +58,6 @@ public class PortScanService {
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
 
-            // manter seu comportamento: mostrar só OPEN
             return results.stream()
                     .filter(r -> "OPEN".equals(r.getState()))
                     .sorted(Comparator.comparingInt(PortFinding::getPort))
@@ -87,7 +80,6 @@ public class PortScanService {
         int baseConnectTimeout = connectTimeoutFor(port);
         int readTimeout = readTimeoutFor(port);
 
-        // se o host está tendo muitos timeouts, dá uma folga no connect
         int extra = timeoutCount.get() >= 4 ? 400 : 0;
         int connectTimeout = baseConnectTimeout + extra;
 
@@ -95,7 +87,6 @@ public class PortScanService {
 
         boolean acquired = false;
         try {
-            // throttle real
             acquired = sem.tryAcquire(1, TimeUnit.SECONDS);
             if (!acquired) {
                 long latency = System.currentTimeMillis() - start;
@@ -297,7 +288,6 @@ public class PortScanService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
-    // Impact/Recommendation (iguais às que você já estava usando)
     private String impactFor(int port, String service) {
         if (port == 21) return "FTP exposto pode permitir vazamento de arquivos e credenciais (protocolo inseguro).";
         if (port == 23) return "Telnet exposto transmite credenciais em texto plano e facilita acesso indevido.";

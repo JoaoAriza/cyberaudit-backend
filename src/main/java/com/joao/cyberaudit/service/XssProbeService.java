@@ -20,7 +20,6 @@ public class XssProbeService {
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
-    // Retorna true se o marcador voltar "cru" na resposta (suspeita de reflexão sem escape)
     public boolean reflectedMarkerAppears(String urlWithParams) {
         try {
             if (urlWithParams == null || !urlWithParams.contains("?")) return false;
@@ -40,10 +39,7 @@ public class XssProbeService {
                     client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             String body = resp.body() == null ? "" : resp.body();
 
-            // Sinal forte: marcador aparece exatamente (sem encoding)
             if (body.contains(marker)) {
-                // Se também aparecer encoded, pode ser que esteja escapando em algum contexto.
-                // Mas a presença do marker cru já é um indicador forte.
                 return true;
             }
 
