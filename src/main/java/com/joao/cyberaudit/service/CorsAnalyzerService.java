@@ -25,7 +25,7 @@ public class CorsAnalyzerService {
             boolean wildcard    = acao.equals("*");
             boolean reflects    = acao.equalsIgnoreCase(PROBE_ORIGIN);
             boolean credentials = acac.equalsIgnoreCase("true");
-            
+
             Map<String, String> nullHeaders = httpFetchService.fetchWithOrigin(url, "null");
             boolean nullAccepted = nullHeaders
                     .getOrDefault("access-control-allow-origin", "")
