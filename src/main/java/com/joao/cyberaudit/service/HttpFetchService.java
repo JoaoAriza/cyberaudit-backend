@@ -8,7 +8,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -25,23 +27,45 @@ public class HttpFetchService {
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
+
     public HttpFetchResult fetchHeaders(String url) {
         try {
             URI uri = URI.create(url);
-
-            HttpResponse<Void> headResp = sendHeadFollow(uri);
+            HttpResponse<Void> headResp = sendHead(uri);
 
             if (headResp.statusCode() == 405 || headResp.statusCode() == 501) {
-                HttpResponse<Void> getResp = sendGetFollow(uri);
-                return buildResult(getResp);
+                return buildResult(sendGet(uri));
             }
-
             return buildResult(headResp);
 
         } catch (Exception e) {
-            return new HttpFetchResult(0, url, Map.of(), "Erro ao conectar: " + e.getMessage());
+            return new HttpFetchResult(0, url, Map.of(), List.of(),
+                    "Erro ao conectar: " + e.getMessage());
         }
     }
+
+    public Map<String, String> fetchWithOrigin(String url, String origin) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .GET()
+                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("Origin", origin)
+                    .build();
+
+            HttpResponse<Void> resp = clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
+            Map<String, String> normalized = new LinkedHashMap<>();
+            resp.headers().map().forEach((k, v) -> {
+                if (k != null && v != null && !v.isEmpty())
+                    normalized.put(k.toLowerCase(Locale.ROOT), v.get(0));
+            });
+            return normalized;
+
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
 
     public boolean traceRedirectToHttps(String httpUrl) {
         try {
@@ -50,32 +74,25 @@ public class HttpFetchService {
 
             for (int i = 0; i < 10; i++) {
                 HttpRequest req = HttpRequest.newBuilder(current)
-                        .GET() // GET para evitar comportamento diferente em HEAD
+                        .GET()
                         .timeout(Duration.ofSeconds(12))
                         .header("User-Agent", "CyberAuditScanner/1.0")
-                        .header("Accept", "/")
+                        .header("Accept", "*/*")
                         .build();
 
-                HttpResponse<Void> resp = clientNoRedirect.send(req, HttpResponse.BodyHandlers.discarding());
+                HttpResponse<Void> resp = clientNoRedirect.send(
+                        req, HttpResponse.BodyHandlers.discarding());
                 int status = resp.statusCode();
 
-                if (status < 300 || status >= 400) {
-                    break;
-                }
+                if (status < 300 || status >= 400) break;
 
                 String location = resp.headers().firstValue("location").orElse(null);
-                if (location == null || location.isBlank()) {
-                    break;
-                }
+                if (location == null || location.isBlank()) break;
 
                 URI next = resolveRedirect(current, location);
-                if (next.toString().startsWith("https://")) {
-                    sawHttps = true;
-                }
-
+                if (next.toString().startsWith("https://")) sawHttps = true;
                 current = next;
             }
-
             return sawHttps;
 
         } catch (Exception e) {
@@ -83,31 +100,23 @@ public class HttpFetchService {
         }
     }
 
-    private URI resolveRedirect(URI base, String location) {
-        if (location.startsWith("//")) {
-            return URI.create(base.getScheme() + ":" + location);
-        }
-        return base.resolve(location);
-    }
 
-    private HttpResponse<Void> sendHeadFollow(URI uri) throws Exception {
+    private HttpResponse<Void> sendHead(URI uri) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .method("HEAD", HttpRequest.BodyPublishers.noBody())
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", "CyberAuditScanner/1.0")
                 .build();
-
         return clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
     }
 
-    private HttpResponse<Void> sendGetFollow(URI uri) throws Exception {
+    private HttpResponse<Void> sendGet(URI uri) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .GET()
                 .timeout(Duration.ofSeconds(12))
                 .header("User-Agent", "CyberAuditScanner/1.0")
-                .header("Accept", "/")
+                .header("Accept", "*/*")
                 .build();
-
         return clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
     }
 
@@ -117,11 +126,19 @@ public class HttpFetchService {
 
         Map<String, String> normalized = new LinkedHashMap<>();
         resp.headers().map().forEach((k, v) -> {
-            if (k == null) return;
-            if (v == null || v.isEmpty()) return;
+            if (k == null || v == null || v.isEmpty()) return;
             normalized.put(k.toLowerCase(Locale.ROOT), v.get(0));
         });
 
-        return new HttpFetchResult(status, finalUrl, normalized, null);
+        List<String> rawSetCookies = resp.headers().allValues("set-cookie");
+        if (rawSetCookies == null) rawSetCookies = Collections.emptyList();
+
+        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null);
+    }
+
+    private URI resolveRedirect(URI base, String location) {
+        if (location.startsWith("//"))
+            return URI.create(base.getScheme() + ":" + location);
+        return base.resolve(location);
     }
 }
