@@ -1,40 +1,30 @@
 package com.joao.cyberaudit.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class ScanCacheService {
 
-    private static class Entry<T> {
-        final T value;
-        final long expiresAt;
-
-        Entry(T value, long expiresAt) {
-            this.value = value;
-            this.expiresAt = expiresAt;
-        }
-    }
-
-    private final Map<String, Entry<Object>> cache = new ConcurrentHashMap<>();
+    private final Cache<String, Object> cache = Caffeine.newBuilder()
+            .expireAfterWrite(2, TimeUnit.MINUTES)
+            .maximumSize(500)   // LRU: descarta os menos usados quando chega no limite
+            .build();
 
     public <T> T get(String key, Class<T> type) {
-        Entry<Object> e = cache.get(key);
-        if (e == null) return null;
-        if (System.currentTimeMillis() > e.expiresAt) {
-            cache.remove(key);
-            return null;
-        }
-        return type.cast(e.value);
+        Object value = cache.getIfPresent(key);
+        if (value == null) return null;
+        return type.isInstance(value) ? type.cast(value) : null;
     }
-
-    public void put(String key, Object value, long ttlMs) {
-        cache.put(key, new Entry<>(value, System.currentTimeMillis() + ttlMs));
+    
+    public void put(String key, Object value) {
+        cache.put(key, value);
     }
 
     public void invalidate(String key) {
-        cache.remove(key);
+        cache.invalidate(key);
     }
 }
