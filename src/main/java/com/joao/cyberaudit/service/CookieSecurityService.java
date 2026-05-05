@@ -65,7 +65,7 @@ public class CookieSecurityService {
         if (lower.contains("samesite"))        return "UNKNOWN";
         return "MISSING";
     }
-    
+
     private boolean isSessionCookie(String name) {
         if (name == null) return false;
         String l = name.toLowerCase(Locale.ROOT);
