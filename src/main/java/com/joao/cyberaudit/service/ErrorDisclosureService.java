@@ -72,21 +72,21 @@ public class ErrorDisclosureService {
 
     private boolean containsDbErrorPatterns(String body) {
         List<String> patterns = List.of(
-                "sql syntax",
                 "you have an error in your sql syntax",
-                "unclosed quotation mark",
+                "unclosed quotation mark after the character string",
                 "syntax error at or near",
-                "sqlstate",
-                "jdbc",
-                "mysql",
-                "mysqli",
-                "postgresql",
-                "psql",
-                "sqlite",
-                "ora-",
-                "odbc",
-                "exception",
-                "stack trace"
+                "sqlstate[",
+                "jdbc exception",
+                "java.sql.sqlexception",
+                "mysqli_fetch",
+                "pg_query()",
+                "sqlite3.operationalerror",
+                "ora-00907",
+                "ora-00933",
+                "ora-00942",
+                "odbc driver",
+                "warning: mysql_",
+                "supplied argument is not a valid mysql"
         );
 
         for (String p : patterns) {

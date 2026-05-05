@@ -24,7 +24,7 @@ public class HeaderService {
         analyzePermissionsPolicy(h, result);
         return result;
     }
-    
+
     public boolean detectsServerVersionExposure(Map<String, String> h) {
         String server  = h.getOrDefault("server", "");
         String xPowered = h.getOrDefault("x-powered-by", "");
