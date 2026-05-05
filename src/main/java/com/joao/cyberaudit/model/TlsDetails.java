@@ -7,8 +7,10 @@ import lombok.Data;
 @AllArgsConstructor
 
 public class TlsDetails {
+
     private String negotiatedProtocol;
     private String cipherSuite;
     private boolean weakProtocol;
     private String message;
+
 }
