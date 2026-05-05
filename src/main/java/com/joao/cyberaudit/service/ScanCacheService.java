@@ -19,7 +19,7 @@ public class ScanCacheService {
         if (value == null) return null;
         return type.isInstance(value) ? type.cast(value) : null;
     }
-    
+
     public void put(String key, Object value) {
         cache.put(key, value);
     }

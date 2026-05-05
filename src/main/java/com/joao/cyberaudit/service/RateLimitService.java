@@ -1,34 +1,28 @@
 package com.joao.cyberaudit.service;
 
+import io.github.bucket4j.Bandwidth;
+import io.github.bucket4j.Bucket;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Service
 public class RateLimitService {
 
-    private static class Window {
-        long windowStart;
-        int count;
+    private final ConcurrentMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
-        Window(long windowStart, int count) {
-            this.windowStart = windowStart;
-            this.count = count;
-        }
+    public boolean allow(String ip, int maxRequests, long windowMs) {
+        Bucket bucket = buckets.computeIfAbsent(ip, k -> buildBucket(maxRequests, windowMs));
+        return bucket.tryConsume(1);
     }
 
-    private final Map<String, Window> buckets = new ConcurrentHashMap<>();
-
-    public boolean allow(String key, int maxRequests, long windowMs) {
-        long now = System.currentTimeMillis();
-        Window w = buckets.compute(key, (k, cur) -> {
-            if (cur == null || now - cur.windowStart > windowMs) {
-                return new Window(now, 1);
-            }
-            cur.count++;
-            return cur;
-        });
-        return w.count <= maxRequests;
+    private Bucket buildBucket(int maxRequests, long windowMs) {
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(maxRequests)
+                .refillGreedy(maxRequests, Duration.ofMillis(windowMs))
+                .build();
+        return Bucket.builder().addLimit(limit).build();
     }
 }
