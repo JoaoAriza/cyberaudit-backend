@@ -75,7 +75,7 @@ public class HttpFetchService {
                     .header("User-Agent", "CyberAuditScanner/1.0")
                     .header("Accept", "*/*")
                     .build();
-            
+
             HttpResponse<Void> resp = clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
             return resp.uri().toString().startsWith("https://");
 
