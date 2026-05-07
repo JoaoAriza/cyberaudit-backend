@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: cyberaudit
       POSTGRES_PASSWORD: cyberaudit123
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - cyberaudit_data:/var/lib/postgresql/data
 

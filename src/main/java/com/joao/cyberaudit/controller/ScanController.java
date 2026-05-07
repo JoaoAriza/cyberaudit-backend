@@ -30,6 +30,7 @@ public class ScanController {
     private final CorsAnalyzerService    corsAnalyzerService;
     private final CookieSecurityService  cookieSecurityService;
     private final RobotsTxtService       robotsTxtService;
+    private final ScanHistoryService     scanHistoryService;
 
     public ScanController(
             SSLService sslService,
@@ -46,7 +47,8 @@ public class ScanController {
             RateLimitService rateLimitService,
             CorsAnalyzerService corsAnalyzerService,
             CookieSecurityService cookieSecurityService,
-            RobotsTxtService robotsTxtService
+            RobotsTxtService robotsTxtService,
+            ScanHistoryService scanHistoryService
     ) {
         this.sslService             = sslService;
         this.tlsVersionService      = tlsVersionService;
@@ -63,9 +65,9 @@ public class ScanController {
         this.corsAnalyzerService    = corsAnalyzerService;
         this.cookieSecurityService  = cookieSecurityService;
         this.robotsTxtService       = robotsTxtService;
+        this.scanHistoryService     = scanHistoryService;
     }
 
-    // ── Endpoints ─────────────────────────────────────────
 
     @GetMapping
     public ScanResult scan(@RequestParam String url,
@@ -89,11 +91,9 @@ public class ScanController {
         return pdfReportService.generatePdf(result, reportService.generateReport(result));
     }
 
-    // ── Core ──────────────────────────────────────────────
 
     private ScanResult doScan(String url, boolean active, HttpServletRequest request) {
 
-        // Rate limit: 10 req / 60s por IP
         if (!rateLimitService.allow(request.getRemoteAddr(), 10, 60_000)) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "Muitas requisições. Tente novamente em alguns segundos.");
@@ -105,21 +105,17 @@ public class ScanController {
         ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
         if (cached != null) return cached;
 
-        // ── 1. SSL ──────────────────────────────────────────
         String  httpsUrl      = toHttps(inputUrl);
         SSLInfo sslInfo       = sslService.checkSSL(httpsUrl);
         boolean supportsHttps = sslInfo.isHttps() && sslInfo.isValid();
 
-        // ── 2. TLS version ──────────────────────────────────
         String     host       = extractHostSafe(httpsUrl);
         TlsDetails tlsDetails = (supportsHttps && host != null)
                 ? tlsVersionService.inspect(host, 443)
                 : new TlsDetails("N/A", "N/A", false, "HTTPS não disponível");
 
-        // ── 3. HTTP → HTTPS redirect ────────────────────────
         boolean redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
 
-        // ── 4. Headers + cookies ────────────────────────────
         String          analysisUrl = supportsHttps ? httpsUrl : inputUrl;
         HttpFetchResult fetch       = httpFetchService.fetchHeaders(analysisUrl);
 
@@ -135,19 +131,14 @@ public class ScanController {
 
         String target = fetch.getFinalUrl() != null ? fetch.getFinalUrl() : analysisUrl;
 
-        // ── 5. CORS ─────────────────────────────────────────
         CorsResult corsResult = corsAnalyzerService.analyze(target);
 
-        // ── 6. Cookies ──────────────────────────────────────
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
 
-        // ── 7. robots.txt ───────────────────────────────────
         List<String> sensitiveRobotsPaths = robotsTxtService.findSensitivePaths(target);
 
-        // ── 8. Superficie de entrada (passivo) ───────────────
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
 
-        // ── 9. Checks ativos ─────────────────────────────────
         boolean xssProbePerformed     = false;
         boolean reflectedXssSuspected = false;
         boolean dbErrorLeakage        = false;
@@ -164,7 +155,6 @@ public class ScanController {
             }
         }
 
-        // ── 10. Score ────────────────────────────────────────
         ScoreResult score = scoreService.calculate(
                 sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
                 active, inputSurfaceDetected, dbErrorLeakage,
@@ -194,10 +184,11 @@ public class ScanController {
                 .build();
 
         scanCacheService.put(cacheKey, result);
+
+        scanHistoryService.save(result);
+
         return result;
     }
-
-    // ── Utilitários ───────────────────────────────────────
 
     private String normalizeUrl(String url) {
         String u = url.trim();

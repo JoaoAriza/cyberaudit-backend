@@ -1,13 +1,17 @@
 package com.joao.cyberaudit.model;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.Map;
 import java.util.List;
 
 @Data
 @Builder
+@AllArgsConstructor
+@NoArgsConstructor
 public class ScanResult {
 
     private String url;
@@ -16,10 +20,10 @@ public class ScanResult {
 
     private boolean redirectsToHttps;
     private SSLInfo sslInfo;
-    private TlsDetails tlsDetails;          // NOVO
+    private TlsDetails tlsDetails;
 
     private Map<String, String> headers;
-    private boolean serverVersionExposed;   // NOVO
+    private boolean serverVersionExposed;
 
     private boolean activeMode;
     private boolean inputSurfaceDetected;
@@ -28,11 +32,9 @@ public class ScanResult {
     private boolean reflectedXssSuspected;
     private List<PortFinding> openPorts;
 
-    private CorsResult corsResult;          // NOVO
-
-    private List<CookieFinding> cookieIssues; // NOVO
-
-    private List<String> sensitiveRobotsPaths; // NOVO
+    private CorsResult corsResult;
+    private List<CookieFinding> cookieIssues;
+    private List<String> sensitiveRobotsPaths;
 
     private ScoreResult score;
 
