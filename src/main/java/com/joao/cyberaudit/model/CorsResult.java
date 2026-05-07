@@ -11,7 +11,7 @@ public class CorsResult {
     private String allowOriginValue;
     private boolean wildcardOrigin;
     private boolean reflectsOrigin;
-    private boolean credentialIsAllowed;
+    private boolean isCredentialsAllowed;
     private boolean nullOriginAccepted;
     private String message;
 

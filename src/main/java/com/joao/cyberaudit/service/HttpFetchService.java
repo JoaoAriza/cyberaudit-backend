@@ -69,32 +69,18 @@ public class HttpFetchService {
 
     public boolean traceRedirectToHttps(String httpUrl) {
         try {
-            URI current = URI.create(httpUrl);
-            boolean sawHttps = current.toString().startsWith("https://");
+            HttpRequest req = HttpRequest.newBuilder(URI.create(httpUrl))
+                    .GET()
+                    .timeout(Duration.ofSeconds(8))
+                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("Accept", "*/*")
+                    .build();
+            
+            HttpResponse<Void> resp = clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
+            return resp.uri().toString().startsWith("https://");
 
-            for (int i = 0; i < 10; i++) {
-                HttpRequest req = HttpRequest.newBuilder(current)
-                        .GET()
-                        .timeout(Duration.ofSeconds(12))
-                        .header("User-Agent", "CyberAuditScanner/1.0")
-                        .header("Accept", "*/*")
-                        .build();
-
-                HttpResponse<Void> resp = clientNoRedirect.send(
-                        req, HttpResponse.BodyHandlers.discarding());
-                int status = resp.statusCode();
-
-                if (status < 300 || status >= 400) break;
-
-                String location = resp.headers().firstValue("location").orElse(null);
-                if (location == null || location.isBlank()) break;
-
-                URI next = resolveRedirect(current, location);
-                if (next.toString().startsWith("https://")) sawHttps = true;
-                current = next;
-            }
-            return sawHttps;
-
+        } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
+            return true;
         } catch (Exception e) {
             return false;
         }

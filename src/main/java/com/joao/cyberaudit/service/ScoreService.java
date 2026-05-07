@@ -12,6 +12,7 @@ public class ScoreService {
 
     public ScoreResult calculate(
             SSLInfo sslInfo,
+            TlsDetails tlsDetails,
             Map<String, String> headers,
             boolean redirectsToHttps,
             boolean activeMode,
@@ -19,66 +20,51 @@ public class ScoreService {
             boolean dbErrorLeakageSuspected,
             boolean xssProbePerformed,
             boolean reflectedXssSuspected,
-            List<PortFinding> openPorts
+            List<PortFinding> openPorts,
+            CorsResult corsResult,
+            List<CookieFinding> cookieIssues,
+            List<String> sensitiveRobotsPaths,
+            boolean serverVersionExposed
     ) {
-
         int score = 100;
-        List<String> notes = new ArrayList<>();
+        List<String> notes  = new ArrayList<>();
         List<SecurityIssue> issues = new ArrayList<>();
 
-        // ===== SSL (HTTPS suportado?) =====
+        // ═══════════════════════════════════════════
+        // 1. SSL / HTTPS
+        // ═══════════════════════════════════════════
         if (!sslInfo.isHttps()) {
             score -= 40;
             notes.add("HTTPS não suportado: -40");
-
-            issues.add(new SecurityIssue(
-                    "NO_HTTPS_SUPPORT",
-                    "HTTPS não suportado",
-                    "HIGH",
-                    "Dados podem ser interceptados por terceiros ao trafegar via HTTP.",
-                    "Habilitar HTTPS com certificado válido (ex: Let's Encrypt) e servir o site em HTTPS."
-            ));
+            issues.add(new SecurityIssue("NO_HTTPS_SUPPORT", "HTTPS não suportado", "HIGH",
+                    "Dados trafegam em plaintext — interceptação trivial.",
+                    "Habilitar HTTPS com certificado válido (ex: Let's Encrypt)."));
 
         } else if (!sslInfo.isValid()) {
             score -= 35;
-            notes.add("Certificado inválido/expirado/erro: -35");
-
-            issues.add(new SecurityIssue(
-                    "SSL_INVALID",
-                    "Certificado SSL inválido",
-                    "HIGH",
-                    "Usuários podem receber alerta de segurança e a comunicação pode ficar insegura.",
-                    "Renovar/configurar corretamente o certificado SSL e cadeia intermediária."
-            ));
+            notes.add("Certificado SSL inválido/erro: -35");
+            issues.add(new SecurityIssue("SSL_INVALID", "Certificado SSL inválido", "HIGH",
+                    "Usuários recebem alerta de segurança; comunicação pode ser insegura.",
+                    "Renovar e configurar corretamente o certificado e a cadeia intermediária."));
 
         } else {
             notes.add("HTTPS e certificado válido: OK");
-
             long days = sslInfo.getDaysRemaining();
 
             if (days <= 0) {
                 score -= 35;
                 notes.add("Certificado expirado: -35");
-
-                issues.add(new SecurityIssue(
-                        "SSL_EXPIRED",
-                        "Certificado SSL expirado",
-                        "HIGH",
-                        "Navegadores podem bloquear o acesso ou alertar o usuário.",
-                        "Renovar o certificado imediatamente."
-                ));
+                issues.add(new SecurityIssue("SSL_EXPIRED", "Certificado SSL expirado", "HIGH",
+                        "Browsers bloqueiam ou alertam o usuário.",
+                        "Renovar o certificado imediatamente."));
 
             } else if (days <= 30) {
                 score -= 20;
                 notes.add("Certificado expira em até 30 dias: -20");
-
-                issues.add(new SecurityIssue(
-                        "SSL_EXPIRING_SOON",
-                        "Certificado próximo da expiração",
-                        "MEDIUM",
-                        "Pode causar indisponibilidade/alertas se expirar.",
-                        "Renovar certificado antes da expiração."
-                ));
+                issues.add(new SecurityIssue("SSL_EXPIRING_SOON",
+                        "Certificado próximo da expiração", "MEDIUM",
+                        "Risco de indisponibilidade se não renovado.",
+                        "Renovar antes da expiração."));
 
             } else if (days <= 90) {
                 score -= 10;
@@ -86,56 +72,34 @@ public class ScoreService {
             }
         }
 
-        // ===== HTTPS forçado a partir de HTTP? =====
+        // ═══════════════════════════════════════════
+        // 2. Protocolo TLS
+        // ═══════════════════════════════════════════
+        if (tlsDetails != null && tlsDetails.isWeakProtocol()) {
+            score -= 20;
+            notes.add("Protocolo TLS deprecated (" + tlsDetails.getNegotiatedProtocol() + "): -20");
+            issues.add(new SecurityIssue("WEAK_TLS_PROTOCOL",
+                    "Protocolo TLS deprecated: " + tlsDetails.getNegotiatedProtocol(), "HIGH",
+                    "TLS 1.0/1.1 são deprecated pelo RFC 8996 — vulneráveis a POODLE e BEAST.",
+                    "Desabilitar TLS 1.0 e 1.1 no servidor. Exigir mínimo TLS 1.2."));
+        }
+
+        // ═══════════════════════════════════════════
+        // 3. Redirect HTTP → HTTPS
+        // ═══════════════════════════════════════════
         if (sslInfo.isHttps() && sslInfo.isValid() && !redirectsToHttps) {
             score -= 10;
             notes.add("Não força HTTPS a partir de HTTP: -10");
-
-            issues.add(new SecurityIssue(
-                    "HTTP_NOT_REDIRECTING",
-                    "HTTP não redireciona para HTTPS",
-                    "MEDIUM",
-                    "Usuários podem acessar o site sem criptografia se digitarem http://.",
-                    "Configurar redirect 301 de HTTP para HTTPS e habilitar HSTS."
-            ));
+            issues.add(new SecurityIssue("HTTP_NOT_REDIRECTING",
+                    "HTTP não redireciona para HTTPS", "MEDIUM",
+                    "Usuários que digitam http:// acessam sem criptografia.",
+                    "Configurar redirect 301 de HTTP para HTTPS e habilitar HSTS."));
         }
 
-        // ===== PASSIVO: superfície de entrada =====
-        if (inputSurfaceDetected) {
-            notes.add("Superfície de entrada detectada (parâmetros na URL): INFO");
-        }
-
-        // ===== ATIVO (opt-in): DB error leakage =====
-        if (activeMode && dbErrorLeakageSuspected) {
-            score -= 15;
-            notes.add("Possível exposição de erro de banco/SQL (modo ativo): -15");
-
-            issues.add(new SecurityIssue(
-                    "DB_ERROR_LEAKAGE_SUSPECTED",
-                    "Possível exposição de erro de banco (DB error leakage)",
-                    "HIGH",
-                    "Mensagens detalhadas de erro podem revelar estrutura do banco e facilitar ataques. Isso não confirma SQLi, mas indica falha de tratamento de erros.",
-                    "Ocultar erros detalhados em produção, retornar mensagens genéricas, registrar erros apenas no servidor e usar queries parametrizadas."
-            ));
-        }
-
-        // ===== ATIVO (opt-in): XSS probe =====
-        if (activeMode && xssProbePerformed && reflectedXssSuspected) {
-            score -= 25;
-            notes.add("Suspeita de Reflected XSS (marcador refletido no HTML): -25");
-
-            issues.add(new SecurityIssue(
-                    "REFLECTED_XSS_SUSPECTED",
-                    "Suspeita de Reflected XSS (marcador refletido)",
-                    "HIGH",
-                    "O conteúdo de entrada parece ser refletido na página sem escape adequado. Isso pode permitir execução de scripts dependendo do contexto.",
-                    "Aplicar output encoding (escape) adequado, validar/normalizar inputs e implementar CSP restritiva."
-            ));
-        }
-
-        // ===== HEADERS =====
+        // ═══════════════════════════════════════════
+        // 4. Security Headers
+        // ═══════════════════════════════════════════
         for (Map.Entry<String, String> entry : headers.entrySet()) {
-
             String header = entry.getKey();
             String status = entry.getValue();
             if (status == null) continue;
@@ -146,309 +110,236 @@ public class ScoreService {
                 continue;
             }
 
-            if (header.equalsIgnoreCase("Strict-Transport-Security")) {
-                if (status.startsWith("MISSING")) {
-                    score -= 10;
-                    notes.add("HSTS ausente: -10");
+            score = scoreHeader(header, status, score, notes, issues);
+        }
 
-                    issues.add(new SecurityIssue(
-                            "HSTS_MISSING",
-                            "Strict-Transport-Security ausente",
-                            "HIGH",
-                            "Ataques downgrade para HTTP podem ocorrer mesmo com HTTPS disponível.",
-                            "Adicionar header: Strict-Transport-Security: max-age=31536000; includeSubDomains"
-                    ));
-                } else if (status.startsWith("WEAK")) {
-                    score -= 5;
-                    notes.add("HSTS fraco: -5");
+        if (serverVersionExposed) {
+            score -= 5;
+            notes.add("Versão de software exposta (Server/X-Powered-By): -5");
+            issues.add(new SecurityIssue("SERVER_VERSION_EXPOSED",
+                    "Versão de software exposta em Server ou X-Powered-By", "LOW",
+                    "Facilita fingerprinting e busca por CVEs conhecidos.",
+                    "Remover ou obscurecer os headers Server e X-Powered-By."));
+        }
 
-                    issues.add(new SecurityIssue(
-                            "HSTS_WEAK",
-                            "Strict-Transport-Security fraco",
-                            "MEDIUM",
-                            "Configuração incompleta pode reduzir a proteção contra downgrade.",
-                            "Garantir max-age adequado (ex: 31536000) e considerar includeSubDomains."
-                    ));
-                }
-            }
+        // ═══════════════════════════════════════════
+        // 5. CORS
+        // ═══════════════════════════════════════════
+        if (corsResult != null && corsResult.isTested()) {
 
-            if (header.equalsIgnoreCase("X-Content-Type-Options")) {
-                if (status.startsWith("MISSING")) {
-                    score -= 10;
-                    notes.add("X-Content-Type-Options ausente: -10");
+            if (corsResult.isReflectsOrigin() && corsResult.isCredentialsAllowed()) {
+                score -= 30;
+                notes.add("CORS reflection + credentials: -30");
+                issues.add(new SecurityIssue("CORS_REFLECTION_WITH_CREDENTIALS",
+                        "CORS reflete origin com credentials habilitado", "CRITICAL",
+                        "Qualquer site faz requests autenticadas cross-origin em nome do usuário.",
+                        "Allowlist estrita de origens. Nunca combinar reflection com ACAC: true."));
 
-                    issues.add(new SecurityIssue(
-                            "CONTENT_TYPE_MISSING",
-                            "X-Content-Type-Options ausente",
-                            "MEDIUM",
-                            "Pode permitir MIME sniffing e execução indevida em alguns cenários.",
-                            "Adicionar header: X-Content-Type-Options: nosniff"
-                    ));
-                } else if (status.startsWith("WEAK")) {
-                    score -= 5;
-                    notes.add("X-Content-Type-Options fraco: -5");
-                }
-            }
+            } else if (corsResult.isReflectsOrigin()) {
+                score -= 20;
+                notes.add("CORS reflete a origem do request: -20");
+                issues.add(new SecurityIssue("CORS_ORIGIN_REFLECTION",
+                        "CORS reflete a Origin do request", "HIGH",
+                        "Qualquer site acessa recursos como origem autorizada.",
+                        "Usar allowlist estrita em vez de espelhar o header Origin."));
 
-            if (header.equalsIgnoreCase("Content-Security-Policy")) {
-                if (status.startsWith("MISSING")) {
-                    score -= 10;
-                    notes.add("Content-Security-Policy ausente: -10");
+            } else if (corsResult.isWildcardOrigin() && corsResult.isCredentialsAllowed()) {
+                score -= 15;
+                notes.add("CORS wildcard + credentials (config inválida): -15");
+                issues.add(new SecurityIssue("CORS_WILDCARD_CREDENTIALS",
+                        "ACAO: * com ACAC: true — configuração inválida", "HIGH",
+                        "Browsers rejeitam, mas indica CORS sem controle.",
+                        "Usar origens explícitas. Nunca wildcard com credentials."));
 
-                    issues.add(new SecurityIssue(
-                            "CSP_MISSING",
-                            "Content-Security-Policy ausente",
-                            "HIGH",
-                            "Aumenta o risco de XSS e injeção de conteúdo.",
-                            "Adicionar header CSP (início simples): Content-Security-Policy: default-src 'self'"
-                    ));
-                } else if (status.startsWith("WEAK")) {
-                    score -= 5;
-                    notes.add("Content-Security-Policy fraca: -5");
-                }
-            }
-
-            if (header.equalsIgnoreCase("X-Frame-Options")) {
-                if (status.startsWith("MISSING")) {
-                    score -= 10;
-                    notes.add("X-Frame-Options ausente: -10");
-
-                    issues.add(new SecurityIssue(
-                            "XFO_MISSING",
-                            "X-Frame-Options ausente",
-                            "MEDIUM",
-                            "Aumenta risco de clickjacking em browsers que ainda dependem desse header.",
-                            "Adicionar X-Frame-Options: DENY (ou SAMEORIGIN se precisar de iframe)."
-                    ));
-                } else if (status.startsWith("WEAK")) {
-                    score -= 5;
-                    notes.add("X-Frame-Options fraco: -5");
-
-                    issues.add(new SecurityIssue(
-                            "CLICKJACKING_RISK",
-                            "Proteção contra clickjacking fraca",
-                            "MEDIUM",
-                            "Página pode ser embutida em iframe em alguns contextos.",
-                            "Preferir X-Frame-Options: DENY se o site não precisa ser exibido em iframe."
-                    ));
-                }
+            } else if (corsResult.isNullOriginAccepted()) {
+                score -= 10;
+                notes.add("CORS aceita null origin: -10");
+                issues.add(new SecurityIssue("CORS_NULL_ORIGIN",
+                        "Aceita null origin", "MEDIUM",
+                        "Acesso via iframe sandboxado ou file:// — vetor de exfiltração.",
+                        "Não incluir 'null' na allowlist de origens."));
             }
         }
 
-        // ===== PORTAS ABERTAS (modo ativo) =====
-        if (activeMode && openPorts != null && !openPorts.isEmpty()) {
+        // ═══════════════════════════════════════════
+        // 6. Cookies
+        // ═══════════════════════════════════════════
+        if (cookieIssues != null && !cookieIssues.isEmpty()) {
+            int penalty = 0;
+            for (CookieFinding c : cookieIssues) {
+                if ("HIGH".equals(c.getRisk()))   penalty = Math.max(penalty, 10);
+                if ("MEDIUM".equals(c.getRisk())) penalty = Math.max(penalty, 5);
+            }
+            if (penalty > 0) {
+                score -= penalty;
+                notes.add("Cookies com flags de segurança ausentes: -" + penalty);
+                issues.add(new SecurityIssue("INSECURE_COOKIES",
+                        cookieIssues.size() + " cookie(s) com problemas de segurança", "MEDIUM",
+                        "Sem Secure/HttpOnly/SameSite: facilita roubo de sessão via XSS ou redes inseguras.",
+                        "Adicionar Secure, HttpOnly e SameSite=Lax em todos os cookies de sessão."));
+            }
+        }
 
-            // Penalidades com caps (para não zerar injustamente)
-            int dbPenalty = 0;          // DB/Redis/ES
-            int insecurePenalty = 0;    // FTP/TELNET
-            int mailPlainPenalty = 0;   // POP3/IMAP plaintext
-            int sshPenalty = 0;         // SSH exposto
+        // ═══════════════════════════════════════════
+        // 7. Checks ativos
+        // ═══════════════════════════════════════════
+        if (inputSurfaceDetected) {
+            notes.add("Superfície de entrada detectada (parâmetros na URL): INFO");
+        }
 
-            boolean looksLikeEdge = false;
+        if (activeMode && dbErrorLeakageSuspected) {
+            score -= 15;
+            notes.add("Possível exposição de erro de banco (modo ativo): -15");
+            issues.add(new SecurityIssue("DB_ERROR_LEAKAGE_SUSPECTED",
+                    "Possível exposição de erro de banco", "HIGH",
+                    "Mensagens de erro revelam estrutura do banco.",
+                    "Retornar mensagens genéricas em produção. Logar erros só no servidor."));
+        }
 
-            int maxPortIssues = 8; // teto de issues para não poluir
+        if (activeMode && xssProbePerformed && reflectedXssSuspected) {
+            score -= 25;
+            notes.add("Suspeita de Reflected XSS (marcador refletido): -25");
+            issues.add(new SecurityIssue("REFLECTED_XSS_SUSPECTED",
+                    "Suspeita de Reflected XSS", "HIGH",
+                    "Input parece refletido na página sem escape.",
+                    "Output encoding, validação de inputs e CSP restritiva."));
+        }
 
+        // ═══════════════════════════════════════════
+        // 8. Port scan (ativo)
+        // ═══════════════════════════════════════════
+        if (activeMode && openPorts != null) {
             for (PortFinding p : openPorts) {
-                if (p == null) continue;
-
-                String state = (p.getState() == null) ? "OPEN" : p.getState().toUpperCase();
-                if (!"OPEN".equals(state)) continue;
-
-                int port = p.getPort();
-                String service = (p.getService() == null) ? "UNKNOWN" : p.getService();
-
-                String evidence = p.getEvidence();
-                if (evidence != null) {
-                    String ev = evidence.toLowerCase();
-                    if (ev.contains("cloudflare") || ev.contains("akamai") || ev.contains("fastly")
-                            || ev.contains("incapsula") || ev.contains("cloudfront")
-                            || ev.contains("edgesuite") || ev.contains("f5")) {
-                        looksLikeEdge = true;
-                    }
+                if ("HIGH".equals(p.getSeverity())) {
+                    score -= 10;
+                    notes.add("Porta de risco aberta (" + p.getPort() + "/" + p.getService() + "): -10");
+                } else if ("MEDIUM".equals(p.getSeverity())) {
+                    score -= 5;
+                    notes.add("Porta aberta exposta (" + p.getPort() + "/" + p.getService() + "): -5");
                 }
-
-                String extra = "";
-                if (p.getLatencyMs() != null) extra += " latency=" + p.getLatencyMs() + "ms";
-                if (p.getEvidence() != null && !p.getEvidence().isBlank()) extra += " evidence=" + p.getEvidence();
-
-                // Web comuns: OK (não penaliza)
-                if (port == 80 || port == 443 || port == 8080 || port == 8443) {
-                    notes.add("Porta web comum aberta: " + port + " (" + service + ") [OK]" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-                    continue;
-                }
-
-                // DNS: normalmente infraestrutura (informativo)
-                if (port == 53) {
-                    notes.add("Porta aberta (informativo): 53 (DNS) — comum em infraestrutura DNS." + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-                    notes.add("↳ Impacto: " + impactForPort(port, service));
-                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
-                    continue;
-                }
-
-                // Email: diferenciar plaintext vs TLS
-                if (port == 110 || port == 143) { // POP3/IMAP plaintext
-                    mailPlainPenalty += 5;
-                    notes.add("Email plaintext exposto: " + port + " (" + service + ") => -5 (leve)" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-                    notes.add("↳ Impacto: " + impactForPort(port, service));
-                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
-                    continue;
-                }
-
-                if (port == 993 || port == 995 || port == 25 || port == 587 || port == 465) {
-                    notes.add("Porta de e-mail aberta (informativo): " + port + " (" + service + ") — comum em infra de e-mail." + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-                    notes.add("↳ Impacto: " + impactForPort(port, service));
-                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
-                    continue;
-                }
-
-                // Inseguros por padrão (forte)
-                if (port == 21 || port == 23) {
-                    insecurePenalty += 25;
-                    notes.add("Serviço inseguro exposto: " + port + " (" + service + ") => -25" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-
-                    if (countPortIssues(issues) < maxPortIssues) {
-                        issues.add(new SecurityIssue(
-                                "OPEN_PORT_" + port,
-                                "Serviço inseguro exposto: " + port + " (" + service + ")",
-                                "HIGH",
-                                impactForPort(port, service),
-                                recommendationForPort(port, service)
-                        ));
-                    }
-                    continue;
-                }
-
-                // DB/Cache/Search sensíveis (forte)
-                if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379 || port == 9200) {
-                    dbPenalty += 20;
-                    notes.add("Serviço sensível exposto: " + port + " (" + service + ") => -20" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-
-                    if (countPortIssues(issues) < maxPortIssues) {
-                        issues.add(new SecurityIssue(
-                                "OPEN_PORT_" + port,
-                                "Serviço sensível exposto: " + port + " (" + service + ")",
-                                "HIGH",
-                                impactForPort(port, service),
-                                recommendationForPort(port, service)
-                        ));
-                    }
-                    continue;
-                }
-
-                // SSH: moderado
-                if (port == 22) {
-                    sshPenalty += 10;
-                    notes.add("SSH exposto: 22 (SSH) => -10 (moderado)" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-                    notes.add("↳ Impacto: " + impactForPort(port, service));
-                    notes.add("↳ Recomendação: " + recommendationForPort(port, service));
-
-                    if (countPortIssues(issues) < maxPortIssues) {
-                        issues.add(new SecurityIssue(
-                                "OPEN_PORT_22",
-                                "SSH exposto: 22 (SSH)",
-                                "MEDIUM",
-                                impactForPort(port, service),
-                                recommendationForPort(port, service)
-                        ));
-                    }
-                    continue;
-                }
-
-                // Outros: informativo
-                notes.add("Porta aberta (informativo): " + port + " (" + service + ")" + (extra.isBlank() ? "" : " (" + extra.trim() + ")"));
-                notes.add("↳ Impacto: " + impactForPort(port, service));
-                notes.add("↳ Recomendação: " + recommendationForPort(port, service));
-            }
-
-            // Caps por categoria (pra não derrubar score injustamente)
-            dbPenalty = Math.min(dbPenalty, 40);
-            insecurePenalty = Math.min(insecurePenalty, 30);
-            mailPlainPenalty = Math.min(mailPlainPenalty, 15);
-            sshPenalty = Math.min(sshPenalty, 20);
-
-            int portPenaltyTotal = dbPenalty + insecurePenalty + mailPlainPenalty + sshPenalty;
-
-            // Redução se parecer edge/CDN/WAF
-            if (looksLikeEdge && portPenaltyTotal > 0) {
-                int reduced = (int) Math.round(portPenaltyTotal * 0.6);
-                notes.add("Observação: evidência sugere edge/CDN/WAF; reduzindo penalidade de portas de "
-                        + portPenaltyTotal + " para " + reduced + ".");
-                portPenaltyTotal = reduced;
-            }
-
-            // Cap absoluto final para penalidade por portas
-            portPenaltyTotal = Math.min(portPenaltyTotal, 60);
-
-            if (portPenaltyTotal > 0) {
-                score -= portPenaltyTotal;
-                notes.add("Penalidade total por exposição de serviços: -" + portPenaltyTotal);
             }
         }
 
-        // ===== LIMITAR SCORE =====
-        if (score < 0) score = 0;
-        if (score > 100) score = 100;
-
-        RiskLevel level = classify(score);
-        return new ScoreResult(score, level, notes, issues);
-    }
-
-    private RiskLevel classify(int score) {
-        if (score >= 80) return RiskLevel.SECURE;
-        if (score >= 50) return RiskLevel.WARNING;
-        return RiskLevel.CRITICAL;
-    }
-
-    private int countPortIssues(List<SecurityIssue> issues) {
-        int c = 0;
-        for (SecurityIssue i : issues) {
-            if (i != null && i.getId() != null && i.getId().startsWith("OPEN_PORT_")) c++;
+        // ═══════════════════════════════════════════
+        // 9. robots.txt
+        // ═══════════════════════════════════════════
+        if (sensitiveRobotsPaths != null && !sensitiveRobotsPaths.isEmpty()) {
+            score -= 5;
+            notes.add("Paths sensíveis em robots.txt: -5");
+            issues.add(new SecurityIssue("SENSITIVE_ROBOTS_PATHS",
+                    sensitiveRobotsPaths.size() + " path(s) sensível(is) em robots.txt", "LOW",
+                    "robots.txt funciona como mapa da estrutura interna para atacantes.",
+                    "Não usar robots.txt para esconder paths. Use autenticação adequada."));
         }
-        return c;
+
+        score = Math.max(0, score);
+        RiskLevel risk = score >= 80 ? RiskLevel.SECURE
+                : score >= 50 ? RiskLevel.WARNING
+                : RiskLevel.CRITICAL;
+
+        return new ScoreResult(score, risk, notes, issues);
     }
 
-    private String impactForPort(int port, String service) {
-        if (port == 21) return "FTP pode expor credenciais/dados se não estiver protegido.";
-        if (port == 23) return "Telnet transmite dados sem criptografia (credenciais podem vazar).";
-        if (port == 22) return "SSH exposto pode ser alvo de brute force se não estiver protegido.";
+    // ── Header scoring ────────────────────────────────────
 
-        // Web comum: não é “erro”, depende do contexto
-        if (port == 80 || port == 8080) return "HTTP pode ser normal, mas sem HTTPS pode haver tráfego sem criptografia dependendo do setup.";
-        if (port == 443 || port == 8443) return "HTTPS é comum; risco depende da configuração TLS e do aplicativo.";
+    private int scoreHeader(String header, String status, int score,
+                            List<String> notes, List<SecurityIssue> issues) {
+        return switch (header) {
 
-        // Infra comum
-        if (port == 53) return "DNS pode ser parte da infraestrutura do domínio (autoritativo/recursivo) e nem sempre indica risco.";
-        if (port == 25 || port == 465 || port == 587 || port == 993 || port == 995) return "Portas de e-mail podem ser normais em domínios que operam serviço de e-mail.";
+            case "Strict-Transport-Security" -> {
+                if (status.startsWith("MISSING")) {
+                    notes.add("HSTS ausente: -10");
+                    issues.add(new SecurityIssue("HSTS_MISSING",
+                            "Strict-Transport-Security ausente", "HIGH",
+                            "Ataques downgrade para HTTP são possíveis.",
+                            "Adicionar: Strict-Transport-Security: max-age=31536000; includeSubDomains"));
+                    yield score - 10;
+                } else if (status.startsWith("WEAK")) {
+                    notes.add("HSTS fraco: -5");
+                    issues.add(new SecurityIssue("HSTS_WEAK",
+                            "Strict-Transport-Security fraco", "MEDIUM",
+                            "Configuração incompleta reduz a proteção.",
+                            "Garantir max-age >= 2592000 e considerar includeSubDomains."));
+                    yield score - 5;
+                }
+                yield score;
+            }
 
-        // Sensíveis
-        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379 || port == 9200)
-            return "Serviço sensível exposto publicamente aumenta risco de ataque e vazamento de dados.";
+            case "X-Content-Type-Options" -> {
+                if (status.startsWith("MISSING")) {
+                    notes.add("X-Content-Type-Options ausente: -5");
+                    issues.add(new SecurityIssue("CONTENT_TYPE_MISSING",
+                            "X-Content-Type-Options ausente", "MEDIUM",
+                            "Pode permitir MIME sniffing.",
+                            "Adicionar: X-Content-Type-Options: nosniff"));
+                    yield score - 5;
+                }
+                yield score;
+            }
 
-        if (port == 110 || port == 143) return "POP3/IMAP sem TLS podem expor credenciais em texto plano (dependendo da config).";
+            case "Content-Security-Policy" -> {
+                if (status.startsWith("MISSING")) {
+                    notes.add("CSP ausente: -10");
+                    issues.add(new SecurityIssue("CSP_MISSING",
+                            "Content-Security-Policy ausente", "HIGH",
+                            "Sem barreira contra injeção de scripts externos.",
+                            "Implementar CSP com default-src 'self' como base."));
+                    yield score - 10;
+                } else if (status.startsWith("WEAK")) {
+                    notes.add("CSP fraca (unsafe-inline/eval): -5");
+                    issues.add(new SecurityIssue("CSP_WEAK",
+                            "Content-Security-Policy fraca", "MEDIUM",
+                            "unsafe-inline ou unsafe-eval anulam a proteção contra XSS.",
+                            "Remover 'unsafe-inline' e 'unsafe-eval'. Usar nonces ou hashes."));
+                    yield score - 5;
+                }
+                yield score;
+            }
 
-        return "Uma porta aberta pode aumentar a superfície de ataque dependendo do serviço (" + service + ").";
-    }
+            case "X-Frame-Options" -> {
+                if (status.startsWith("MISSING")) {
+                    notes.add("X-Frame-Options ausente: -5");
+                    issues.add(new SecurityIssue("XFRAME_MISSING",
+                            "X-Frame-Options ausente", "MEDIUM",
+                            "Site pode ser embutido em iframes — risco de clickjacking.",
+                            "Adicionar X-Frame-Options: DENY ou usar frame-ancestors no CSP."));
+                    yield score - 5;
+                }
+                yield score;
+            }
 
-    private String recommendationForPort(int port, String service) {
-        if (port == 21) return "Desabilitar FTP ou migrar para SFTP/FTPS e restringir acesso por firewall/VPN.";
-        if (port == 23) return "Desabilitar TELNET e usar SSH com configurações seguras.";
-        if (port == 22) return "Restringir por IP/VPN, desabilitar login por senha, usar chaves e rate-limit/MFA quando possível.";
+            case "Referrer-Policy" -> {
+                if (status.startsWith("MISSING")) {
+                    notes.add("Referrer-Policy ausente: -5");
+                    issues.add(new SecurityIssue("REFERRER_POLICY_MISSING",
+                            "Referrer-Policy ausente", "LOW",
+                            "URLs internas podem vazar para sites externos via header Referer.",
+                            "Adicionar: Referrer-Policy: strict-origin-when-cross-origin"));
+                    yield score - 5;
+                } else if (status.startsWith("WEAK")) {
+                    notes.add("Referrer-Policy insegura: -5");
+                    issues.add(new SecurityIssue("REFERRER_POLICY_WEAK",
+                            "Referrer-Policy insegura", "MEDIUM",
+                            "unsafe-url vaza URLs completas incluindo query strings.",
+                            "Usar strict-origin-when-cross-origin ou no-referrer."));
+                    yield score - 5;
+                }
+                yield score;
+            }
 
-        // Web comum
-        if (port == 80 || port == 8080) return "Se aplicável, redirecionar para HTTPS (301) e habilitar HSTS; se não for necessário, restringir.";
-        if (port == 443 || port == 8443) return "Manter TLS bem configurado, habilitar HSTS, e atualizar dependências/servidor.";
+            case "Permissions-Policy" -> {
+                if (status.startsWith("MISSING")) {
+                    notes.add("Permissions-Policy ausente: -3");
+                    issues.add(new SecurityIssue("PERMISSIONS_POLICY_MISSING",
+                            "Permissions-Policy ausente", "LOW",
+                            "Sem restrição de APIs de browser (câmera, microfone, geolocalização).",
+                            "Adicionar Permissions-Policy restringindo features não usadas."));
+                    yield score - 3;
+                }
+                yield score;
+            }
 
-        // Infra comum
-        if (port == 53) return "Se o domínio não deveria operar DNS publicamente, restringir/fechar; caso opere, manter hardening e limitar recursão.";
-        if (port == 25 || port == 465 || port == 587) return "Se operar e-mail, manter autenticação e hardening; se não, fechar/restringir.";
-        if (port == 993 || port == 995) return "Preferir sempre TLS (IMAPS/POP3S).";
-
-        // Sensíveis
-        if (port == 3306 || port == 5432 || port == 1433 || port == 1521 || port == 27017 || port == 6379 || port == 9200)
-            return "Restringir a rede (firewall/VPC), expor apenas internamente e exigir autenticação forte.";
-
-        if (port == 110 || port == 143) return "Preferir versões TLS (995/993) e desabilitar plaintext quando possível.";
-
-        return "Verificar se o serviço (" + service + ") é necessário; se não, fechar/restringir (firewall/VPC).";
+            default -> score;
+        };
     }
 }
