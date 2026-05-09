@@ -24,7 +24,10 @@ public class ScoreService {
             CorsResult corsResult,
             List<CookieFinding> cookieIssues,
             List<String> sensitiveRobotsPaths,
-            boolean serverVersionExposed
+            boolean serverVersionExposed,
+            List<SensitiveFileFinding> sensitiveFiles,
+            List<HttpMethodFinding> dangerousHttpMethods,
+            boolean securityTxtPresent
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -232,12 +235,75 @@ public class ScoreService {
                     "Não usar robots.txt para esconder paths. Use autenticação adequada."));
         }
 
+        // ═══════════════════════════════════════════════════════
+        // 10. Arquivos sensíveis expostos
+        // ═══════════════════════════════════════════════════════
+        if (sensitiveFiles != null) {
+            for (SensitiveFileFinding f : sensitiveFiles) {
+                if ("EXPOSED".equals(f.getExposure())) {
+                    int penalty = switch (f.getSeverity()) {
+                        case "CRITICAL" -> 30;
+                        case "HIGH"     -> 20;
+                        default         -> 10;
+                    };
+                    score -= penalty;
+                    notes.add("Arquivo sensível exposto (" + f.getPath() + "): -" + penalty);
+                    issues.add(new SecurityIssue(
+                            "SENSITIVE_FILE_EXPOSED",
+                            "Arquivo sensível acessível: " + f.getPath(),
+                            f.getSeverity(),
+                            "Exposição direta de configuração ou credenciais.",
+                            "Remover acesso público imediatamente. Verificar se credenciais foram comprometidas."
+                    ));
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // 11. HTTP Methods perigosos
+        // ═══════════════════════════════════════════════════════
+        if (dangerousHttpMethods != null) {
+            for (HttpMethodFinding m : dangerousHttpMethods) {
+                int penalty = switch (m.getSeverity()) {
+                    case "CRITICAL" -> 20;
+                    case "HIGH"     -> 15;
+                    case "MEDIUM"   -> 8;
+                    default         -> 3;
+                };
+                score -= penalty;
+                notes.add("Método HTTP perigoso habilitado (" + m.getMethod() + "): -" + penalty);
+                issues.add(new SecurityIssue(
+                        "DANGEROUS_HTTP_METHOD",
+                        "Método HTTP perigoso habilitado: " + m.getMethod(),
+                        m.getSeverity(),
+                        m.getRisk(),
+                        "Desabilitar métodos HTTP não necessários no servidor web."
+                ));
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // 12. security.txt
+        // ═══════════════════════════════════════════════════════
+        if (!securityTxtPresent) {
+            score -= 3;
+            notes.add("security.txt ausente: -3");
+            issues.add(new SecurityIssue(
+                    "SECURITY_TXT_MISSING",
+                    "security.txt ausente (RFC 9116)",
+                    "LOW",
+                    "Dificulta reporte responsável de vulnerabilidades.",
+                    "Criar /.well-known/security.txt com campo Contact."
+            ));
+        }
+
         score = Math.max(0, score);
         RiskLevel risk = score >= 80 ? RiskLevel.SECURE
                 : score >= 50 ? RiskLevel.WARNING
                 : RiskLevel.CRITICAL;
 
         return new ScoreResult(score, risk, notes, issues);
+
     }
 
     // ── Header scoring ────────────────────────────────────

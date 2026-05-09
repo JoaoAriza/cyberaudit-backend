@@ -25,6 +25,9 @@ public class ScanOrchestrator {
     private final RobotsTxtService       robotsTxtService;
     private final ScanHistoryService     scanHistoryService;
     private final DomainProtectionService domainProtectionService;
+    private final SensitiveFileService   sensitiveFileService;
+    private final HttpMethodService      httpMethodService;
+    private final SecurityTxtService     securityTxtService;
 
     public ScanOrchestrator(
             SSLService sslService,
@@ -40,7 +43,10 @@ public class ScanOrchestrator {
             CookieSecurityService cookieSecurityService,
             RobotsTxtService robotsTxtService,
             ScanHistoryService scanHistoryService,
-            DomainProtectionService domainProtectionService
+            DomainProtectionService domainProtectionService,
+            SensitiveFileService sensitiveFileService,
+            HttpMethodService httpMethodService,
+            SecurityTxtService securityTxtService
     ) {
         this.sslService             = sslService;
         this.tlsVersionService      = tlsVersionService;
@@ -56,6 +62,9 @@ public class ScanOrchestrator {
         this.robotsTxtService       = robotsTxtService;
         this.scanHistoryService     = scanHistoryService;
         this.domainProtectionService = domainProtectionService;
+        this.sensitiveFileService = sensitiveFileService;
+        this.httpMethodService    = httpMethodService;
+        this.securityTxtService   = securityTxtService;
     }
 
     public ScanResult execute(String url, boolean active) {
@@ -108,6 +117,16 @@ public class ScanOrchestrator {
         // ── 8. Superfície de entrada (passivo) ───────────────
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
 
+        // ── 8b. Novos checks passivos ────────────────────────
+        List<SensitiveFileFinding> sensitiveFiles =
+                sensitiveFileService.scan(target);
+
+        List<HttpMethodFinding> dangerousHttpMethods =
+                httpMethodService.scan(target);
+
+        SecurityTxtService.SecurityTxtResult securityTxt =
+                securityTxtService.check(target);
+
         // ── 9. Score passivo parcial ─────────────────────────
         // Calculamos o score passivo antes de decidir se o ativo roda.
         // Isso permite que requiresOwnershipForActiveScan analise o resultado.
@@ -115,7 +134,8 @@ public class ScanOrchestrator {
                 sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
                 false, inputSurfaceDetected, false,
                 false, false, List.of(),
-                corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed
+                corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
+                sensitiveFiles, dangerousHttpMethods, securityTxt.found()
         );
 
         ScanResult passiveResult = ScanResult.builder()
@@ -137,6 +157,10 @@ public class ScanOrchestrator {
                 .cookieIssues(cookieIssues)
                 .sensitiveRobotsPaths(sensitiveRobotsPaths)
                 .score(passiveScore)
+                .sensitiveFiles(sensitiveFiles)
+                .dangerousHttpMethods(dangerousHttpMethods)
+                .securityTxtPresent(securityTxt.found())
+                .securityTxtContact(securityTxt.contact())
                 .build();
 
         if (active) {
@@ -173,7 +197,8 @@ public class ScanOrchestrator {
                 sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
                 active, inputSurfaceDetected, dbErrorLeakage,
                 xssProbePerformed, reflectedXssSuspected, openPorts,
-                corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed
+                corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
+                sensitiveFiles, dangerousHttpMethods, securityTxt.found()
         );
 
         ScanResult result = ScanResult.builder()
@@ -195,6 +220,10 @@ public class ScanOrchestrator {
                 .cookieIssues(cookieIssues)
                 .sensitiveRobotsPaths(sensitiveRobotsPaths)
                 .score(score)
+                .sensitiveFiles(sensitiveFiles)
+                .dangerousHttpMethods(dangerousHttpMethods)
+                .securityTxtPresent(securityTxt.found())
+                .securityTxtContact(securityTxt.contact())
                 .build();
 
         scanCacheService.put(cacheKey, result);

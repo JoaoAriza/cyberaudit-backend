@@ -36,6 +36,11 @@ public class ScanResult {
     private List<CookieFinding> cookieIssues;
     private List<String> sensitiveRobotsPaths;
 
+    private List<SensitiveFileFinding> sensitiveFiles;
+    private List<HttpMethodFinding> dangerousHttpMethods;
+    private boolean securityTxtPresent;
+    private String securityTxtContact;
+
     private ScoreResult score;
 
 }
