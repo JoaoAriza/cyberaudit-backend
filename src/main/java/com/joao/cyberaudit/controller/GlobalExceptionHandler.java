@@ -26,10 +26,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleOwnership(
             OwnershipNotVerifiedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
-                "error",         "OWNERSHIP_REQUIRED",
-                "message",       ex.getMessage(),
-                "passiveResult", ex.getPassiveResult(),
-                "timestamp",     LocalDateTime.now().toString()
+                "error",     "OWNERSHIP_REQUIRED",
+                "message",   ex.getMessage(),
+                "timestamp", LocalDateTime.now().toString()
         ));
     }
 }

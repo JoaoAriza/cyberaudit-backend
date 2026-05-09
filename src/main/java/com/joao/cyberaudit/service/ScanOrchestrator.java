@@ -146,11 +146,9 @@ public class ScanOrchestrator {
             if (needsOwnership && !domainProtectionService.isOwnershipVerified(host)) {
                 throw new OwnershipNotVerifiedException(
                         passiveResult,
-                        "O scan passivo detectou superfície de ataque real. " +
-                                "Para executar o scan ativo, prove que você é o dono do domínio. " +
-                                "Coloque o seguinte conteúdo em https://" + host +
-                                "/.well-known/cyberaudit.txt : " +
-                                domainProtectionService.generateVerificationToken(host)
+                        "Scan ativo não autorizado para este domínio. " +
+                                "Apenas o proprietário verificado pode executar scans ativos. " +
+                                "Acesse /scan/verify-token?host=" + host + " para obter as instruções de verificação."
                 );
             }
         }
