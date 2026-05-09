@@ -20,19 +20,22 @@ public class ScanController {
     private final ReportService     reportService;
     private final PdfReportService  pdfReportService;
     private final RateLimitService  rateLimitService;
+    private final DomainProtectionService domainProtectionService;
 
     public ScanController(
             ScanOrchestrator scanOrchestrator,
             AsyncScanService asyncScanService,
             ReportService reportService,
             PdfReportService pdfReportService,
-            RateLimitService rateLimitService
+            RateLimitService rateLimitService,
+            DomainProtectionService domainProtectionService
     ) {
         this.scanOrchestrator = scanOrchestrator;
         this.asyncScanService = asyncScanService;
         this.reportService    = reportService;
         this.pdfReportService = pdfReportService;
         this.rateLimitService = rateLimitService;
+        this.domainProtectionService = domainProtectionService;
     }
 
     @GetMapping
@@ -87,5 +90,28 @@ public class ScanController {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "Muitas requisições. Tente novamente em alguns segundos.");
         }
+    }
+
+    @GetMapping("/verify-token")
+    public ResponseEntity<Map<String, String>> verifyToken(@RequestParam String host) {
+        String token = domainProtectionService.generateVerificationToken(host);
+        return ResponseEntity.ok(Map.of(
+                "host",         host,
+                "token",        token,
+                "instructions", "Crie o arquivo /.well-known/cyberaudit.txt com o conteúdo acima",
+                "verifyUrl",    "https://" + host + "/.well-known/cyberaudit.txt"
+        ));
+    }
+
+    @GetMapping("/verify-check")
+    public ResponseEntity<Map<String, Object>> verifyCheck(@RequestParam String host) {
+        boolean verified = domainProtectionService.isOwnershipVerified(host);
+        return ResponseEntity.ok(Map.of(
+                "host",     host,
+                "verified", verified,
+                "message",  verified
+                        ? "Verificação OK. Scan ativo liberado."
+                        : "Arquivo não encontrado ou token inválido."
+        ));
     }
 }

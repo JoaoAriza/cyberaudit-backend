@@ -1,17 +1,13 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.*;
+import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Contém toda a lógica de execução de um scan.
- * Extraído do ScanController para poder ser chamado tanto
- * pelo endpoint síncrono quanto pelo assíncrono.
- */
 @Service
 public class ScanOrchestrator {
 
@@ -28,6 +24,7 @@ public class ScanOrchestrator {
     private final CookieSecurityService  cookieSecurityService;
     private final RobotsTxtService       robotsTxtService;
     private final ScanHistoryService     scanHistoryService;
+    private final DomainProtectionService domainProtectionService;
 
     public ScanOrchestrator(
             SSLService sslService,
@@ -42,7 +39,8 @@ public class ScanOrchestrator {
             CorsAnalyzerService corsAnalyzerService,
             CookieSecurityService cookieSecurityService,
             RobotsTxtService robotsTxtService,
-            ScanHistoryService scanHistoryService
+            ScanHistoryService scanHistoryService,
+            DomainProtectionService domainProtectionService
     ) {
         this.sslService             = sslService;
         this.tlsVersionService      = tlsVersionService;
@@ -57,26 +55,31 @@ public class ScanOrchestrator {
         this.cookieSecurityService  = cookieSecurityService;
         this.robotsTxtService       = robotsTxtService;
         this.scanHistoryService     = scanHistoryService;
+        this.domainProtectionService = domainProtectionService;
     }
 
     public ScanResult execute(String url, boolean active) {
-        String inputUrl = normalizeUrl(url);
-        String cacheKey = buildCacheKey(inputUrl, active);
+        String inputUrl  = normalizeUrl(url);
+        String cacheKey  = buildCacheKey(inputUrl, active);
 
         ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
         if (cached != null) return cached;
 
+        // ── 1. SSL ──────────────────────────────────────────
         String  httpsUrl      = toHttps(inputUrl);
         SSLInfo sslInfo       = sslService.checkSSL(httpsUrl);
         boolean supportsHttps = sslInfo.isHttps() && sslInfo.isValid();
 
+        // ── 2. TLS version ──────────────────────────────────
         String     host       = extractHostSafe(httpsUrl);
         TlsDetails tlsDetails = (supportsHttps && host != null)
                 ? tlsVersionService.inspect(host, 443)
                 : new TlsDetails("N/A", "N/A", false, "HTTPS não disponível");
 
+        // ── 3. HTTP → HTTPS redirect ────────────────────────
         boolean redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
 
+        // ── 4. Headers + cookies ────────────────────────────
         String          analysisUrl = supportsHttps ? httpsUrl : inputUrl;
         HttpFetchResult fetch       = httpFetchService.fetchHeaders(analysisUrl);
 
@@ -92,13 +95,65 @@ public class ScanOrchestrator {
 
         String target = fetch.getFinalUrl() != null ? fetch.getFinalUrl() : analysisUrl;
 
+        // ── 5. CORS ─────────────────────────────────────────
         CorsResult corsResult = corsAnalyzerService.analyze(target);
 
-        List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
+        // ── 6. Cookies ──────────────────────────────────────
+        List<CookieFinding> cookieIssues = cookieSecurityService.analyze(
+                fetch.getRawSetCookies());
 
+        // ── 7. robots.txt ───────────────────────────────────
         List<String> sensitiveRobotsPaths = robotsTxtService.findSensitivePaths(target);
 
+        // ── 8. Superfície de entrada (passivo) ───────────────
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
+
+        // ── 9. Score passivo parcial ─────────────────────────
+        // Calculamos o score passivo antes de decidir se o ativo roda.
+        // Isso permite que requiresOwnershipForActiveScan analise o resultado.
+        ScoreResult passiveScore = scoreService.calculate(
+                sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
+                false, inputSurfaceDetected, false,
+                false, false, List.of(),
+                corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed
+        );
+
+        ScanResult passiveResult = ScanResult.builder()
+                .url(inputUrl)
+                .finalUrl(fetch.getFinalUrl())
+                .httpStatus(fetch.getStatusCode())
+                .redirectsToHttps(redirectsToHttps)
+                .sslInfo(sslInfo)
+                .tlsDetails(tlsDetails)
+                .headers(analyzedHeaders)
+                .serverVersionExposed(serverVersionExposed)
+                .activeMode(false)
+                .inputSurfaceDetected(inputSurfaceDetected)
+                .dbErrorLeakageSuspected(false)
+                .xssProbePerformed(false)
+                .reflectedXssSuspected(false)
+                .openPorts(List.of())
+                .corsResult(corsResult)
+                .cookieIssues(cookieIssues)
+                .sensitiveRobotsPaths(sensitiveRobotsPaths)
+                .score(passiveScore)
+                .build();
+
+        if (active) {
+            boolean needsOwnership = domainProtectionService
+                    .requiresOwnershipForActiveScan(passiveResult);
+
+            if (needsOwnership && !domainProtectionService.isOwnershipVerified(host)) {
+                throw new OwnershipNotVerifiedException(
+                        passiveResult,
+                        "O scan passivo detectou superfície de ataque real. " +
+                                "Para executar o scan ativo, prove que você é o dono do domínio. " +
+                                "Coloque o seguinte conteúdo em https://" + host +
+                                "/.well-known/cyberaudit.txt : " +
+                                domainProtectionService.generateVerificationToken(host)
+                );
+            }
+        }
 
         boolean xssProbePerformed     = false;
         boolean reflectedXssSuspected = false;
@@ -148,7 +203,7 @@ public class ScanOrchestrator {
         scanHistoryService.save(result);
         return result;
     }
-    
+
 
     private String normalizeUrl(String url) {
         String u = url.trim();
