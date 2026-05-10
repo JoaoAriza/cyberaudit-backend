@@ -27,7 +27,9 @@ public class ScoreService {
             boolean serverVersionExposed,
             List<SensitiveFileFinding> sensitiveFiles,
             List<HttpMethodFinding> dangerousHttpMethods,
-            boolean securityTxtPresent
+            boolean securityTxtPresent,
+            List<OpenRedirectFinding> openRedirectFindings,
+            List<DirectoryListingFinding> directoryListingFindings
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -297,13 +299,56 @@ public class ScoreService {
             ));
         }
 
+        // ═══════════════════════════════════════════════════════
+        // 13. Open Redirect
+        // ═══════════════════════════════════════════════════════
+        if (openRedirectFindings != null) {
+            long vulnerable = openRedirectFindings.stream()
+                    .filter(OpenRedirectFinding::isVulnerable)
+                    .count();
+            if (vulnerable > 0) {
+                score -= 20;
+                notes.add("Open redirect detectado (" + vulnerable + " parâmetro(s)): -20");
+                issues.add(new SecurityIssue(
+                        "OPEN_REDIRECT",
+                        "Open Redirect detectado",
+                        "HIGH",
+                        "Atacantes podem usar seu domínio como intermediário em ataques de phishing.",
+                        "Validar e sanitizar todos os parâmetros de redirect. Usar allowlist de destinos."
+                ));
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // 14. Directory Listing
+        // ═══════════════════════════════════════════════════════
+        if (directoryListingFindings != null) {
+            for (DirectoryListingFinding d : directoryListingFindings) {
+                if (d.isListingEnabled()) {
+                    int penalty = switch (d.getSeverity()) {
+                        case "CRITICAL" -> 25;
+                        case "HIGH"     -> 15;
+                        default         -> 8;
+                    };
+                    score -= penalty;
+                    notes.add("Directory listing em " + d.getPath() + ": -" + penalty);
+                    issues.add(new SecurityIssue(
+                            "DIRECTORY_LISTING",
+                            "Directory listing habilitado: " + d.getPath(),
+                            d.getSeverity(),
+                            "Exposição da estrutura de arquivos facilita reconhecimento e acesso a arquivos sensíveis.",
+                            "Desabilitar directory listing no servidor web (Options -Indexes no Apache, autoindex off no Nginx)."
+                    ));
+                }
+            }
+        }
+
         score = Math.max(0, score);
         RiskLevel risk = score >= 80 ? RiskLevel.SECURE
                 : score >= 50 ? RiskLevel.WARNING
                 : RiskLevel.CRITICAL;
 
         return new ScoreResult(score, risk, notes, issues);
-
     }
 
     // ── Header scoring ────────────────────────────────────

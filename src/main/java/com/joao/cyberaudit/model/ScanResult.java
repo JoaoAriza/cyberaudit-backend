@@ -41,6 +41,9 @@ public class ScanResult {
     private boolean securityTxtPresent;
     private String securityTxtContact;
 
+    private List<OpenRedirectFinding> openRedirectFindings;
+    private List<DirectoryListingFinding> directoryListingFindings;
+
     private ScoreResult score;
 
 }

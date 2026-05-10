@@ -28,6 +28,8 @@ public class ScanOrchestrator {
     private final SensitiveFileService   sensitiveFileService;
     private final HttpMethodService      httpMethodService;
     private final SecurityTxtService     securityTxtService;
+    private final OpenRedirectService    openRedirectService;
+    private final DirectoryListingService directoryListingService;
 
     public ScanOrchestrator(
             SSLService sslService,
@@ -46,7 +48,9 @@ public class ScanOrchestrator {
             DomainProtectionService domainProtectionService,
             SensitiveFileService sensitiveFileService,
             HttpMethodService httpMethodService,
-            SecurityTxtService securityTxtService
+            SecurityTxtService securityTxtService,
+            OpenRedirectService openRedirectService,
+            DirectoryListingService directoryListingService
     ) {
         this.sslService             = sslService;
         this.tlsVersionService      = tlsVersionService;
@@ -65,6 +69,8 @@ public class ScanOrchestrator {
         this.sensitiveFileService = sensitiveFileService;
         this.httpMethodService    = httpMethodService;
         this.securityTxtService   = securityTxtService;
+        this.openRedirectService      = openRedirectService;
+        this.directoryListingService  = directoryListingService;
     }
 
     public ScanResult execute(String url, boolean active) {
@@ -127,6 +133,12 @@ public class ScanOrchestrator {
         SecurityTxtService.SecurityTxtResult securityTxt =
                 securityTxtService.check(target);
 
+        List<OpenRedirectFinding> openRedirectFindings =
+                openRedirectService.scan(target, false); // passivo por padrão
+
+        List<DirectoryListingFinding> directoryListingFindings =
+                directoryListingService.scan(target);
+
         // ── 9. Score passivo parcial ─────────────────────────
         // Calculamos o score passivo antes de decidir se o ativo roda.
         // Isso permite que requiresOwnershipForActiveScan analise o resultado.
@@ -135,7 +147,8 @@ public class ScanOrchestrator {
                 false, inputSurfaceDetected, false,
                 false, false, List.of(),
                 corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
-                sensitiveFiles, dangerousHttpMethods, securityTxt.found()
+                sensitiveFiles, dangerousHttpMethods, securityTxt.found(), openRedirectFindings,
+                directoryListingFindings
         );
 
         ScanResult passiveResult = ScanResult.builder()
@@ -161,6 +174,8 @@ public class ScanOrchestrator {
                 .dangerousHttpMethods(dangerousHttpMethods)
                 .securityTxtPresent(securityTxt.found())
                 .securityTxtContact(securityTxt.contact())
+                .openRedirectFindings(openRedirectFindings)
+                .directoryListingFindings(directoryListingFindings)
                 .build();
 
         if (active) {
@@ -187,6 +202,7 @@ public class ScanOrchestrator {
                 xssProbePerformed     = true;
                 reflectedXssSuspected = xssProbeService.reflectedMarkerAppears(target);
                 dbErrorLeakage        = errorDisclosureService.detectsDbErrorLeakage(target);
+                openRedirectFindings  = openRedirectService.scan(target, true);
             }
             if (host != null && !host.isBlank()) {
                 openPorts = portScanService.scanCommonPorts(host);
@@ -198,7 +214,8 @@ public class ScanOrchestrator {
                 active, inputSurfaceDetected, dbErrorLeakage,
                 xssProbePerformed, reflectedXssSuspected, openPorts,
                 corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
-                sensitiveFiles, dangerousHttpMethods, securityTxt.found()
+                sensitiveFiles, dangerousHttpMethods, securityTxt.found(), openRedirectFindings,
+                directoryListingFindings
         );
 
         ScanResult result = ScanResult.builder()
@@ -224,6 +241,8 @@ public class ScanOrchestrator {
                 .dangerousHttpMethods(dangerousHttpMethods)
                 .securityTxtPresent(securityTxt.found())
                 .securityTxtContact(securityTxt.contact())
+                .openRedirectFindings(openRedirectFindings)
+                .directoryListingFindings(directoryListingFindings)
                 .build();
 
         scanCacheService.put(cacheKey, result);
