@@ -17,6 +17,10 @@ public class UserDto {
     private String country;
     private AccountDto account;
 
+    private Integer remainingScans;
+
+    private Integer dailyLimit;
+
     public static UserDto from(AppUser u) {
         UserDto dto = new UserDto();
         dto.setId(u.getId());

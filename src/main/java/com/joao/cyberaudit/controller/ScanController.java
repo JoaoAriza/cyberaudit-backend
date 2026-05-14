@@ -47,9 +47,9 @@ public class ScanController {
     public ScanResult scan(@RequestParam String url,
                            @RequestParam(defaultValue = "false") boolean active,
                            HttpServletRequest request) {
-        checkRateLimit(request);
 
         AppUser currentUser = getCurrentUser();
+        checkRateLimit(request, currentUser);  // ← passa o usuário
 
         if (active && currentUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
@@ -67,8 +67,8 @@ public class ScanController {
     public String scanReport(@RequestParam String url,
                              @RequestParam(defaultValue = "false") boolean active,
                              HttpServletRequest request) {
-        checkRateLimit(request);
         AppUser currentUser = getCurrentUser();
+        checkRateLimit(request, currentUser);
         return reportService.generateReport(scanOrchestrator.execute(url, active, currentUser));
     }
 
@@ -76,8 +76,8 @@ public class ScanController {
     public byte[] scanReportPdf(@RequestParam String url,
                                 @RequestParam(defaultValue = "false") boolean active,
                                 HttpServletRequest request) {
-        checkRateLimit(request);
         AppUser currentUser = getCurrentUser();
+        checkRateLimit(request, currentUser);
         ScanResult result = scanOrchestrator.execute(url, active, currentUser);
         return pdfReportService.generatePdf(result, reportService.generateReport(result));
     }
@@ -88,9 +88,9 @@ public class ScanController {
             @RequestParam(defaultValue = "false") boolean active,
             HttpServletRequest request) {
 
-        checkRateLimit(request);
-
         AppUser currentUser = getCurrentUser();
+        checkRateLimit(request, currentUser);
+
         if (active && currentUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Scan ativo requer autenticação.");
@@ -133,10 +133,14 @@ public class ScanController {
         ));
     }
 
-    private void checkRateLimit(HttpServletRequest request) {
-        if (!rateLimitService.allow(request.getRemoteAddr(), 10, 60_000)) {
+    private void checkRateLimit(HttpServletRequest request, AppUser currentUser) {
+        if (!rateLimitService.allow(request.getRemoteAddr(), currentUser)) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Muitas requisições. Tente novamente em alguns segundos.");
+                    "Muitas requisições. " +
+                            (currentUser == null
+                                    ? "Limite de " + RateLimitService.GUEST_RPM + " requests/min para visitantes."
+                                    : "Tente novamente em alguns segundos.")
+            );
         }
     }
 

@@ -13,9 +13,9 @@ import java.util.concurrent.ConcurrentMap;
 @Service
 public class RateLimitService {
 
-    private static final int GUEST_RPM    = 5;
-    private static final int EMPLOYEE_RPM = 60;
-    private static final int ADMIN_RPM    = 120;
+    public static final int GUEST_RPM    = 5;
+    public static final int EMPLOYEE_RPM = 60;
+    public static final int ADMIN_RPM    = 120;
 
     private final ConcurrentMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
@@ -54,7 +54,7 @@ public class RateLimitService {
             default            -> GUEST_RPM;
         };
     }
-    
+
     private String buildKey(String ip, AppUser user) {
         if (user != null) return "user:" + user.getId().toString();
         return "ip:" + ip;

@@ -1,12 +1,13 @@
 package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.exception.DomainBlockedException;
-import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import com.joao.cyberaudit.exception.GuestDailyLimitException;
+import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -41,6 +42,15 @@ public class GlobalExceptionHandler {
                 "remainingScans", 0,
                 "resetsAt",       ex.getResetsAt().toString(),
                 "upgrade",        "Para acesso ilimitado, solicite um convite ao administrador."
+        ));
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(
+            ResponseStatusException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
+                "error",   ex.getStatusCode().toString(),
+                "message", ex.getReason() != null ? ex.getReason() : "Erro interno"
         ));
     }
 }
