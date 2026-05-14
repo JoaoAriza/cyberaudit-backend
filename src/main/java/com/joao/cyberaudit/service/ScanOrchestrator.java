@@ -73,7 +73,7 @@ public class ScanOrchestrator {
         this.directoryListingService  = directoryListingService;
     }
 
-    public ScanResult execute(String url, boolean active) {
+    public ScanResult execute(String url, boolean active, AppUser currentUser) {
         String inputUrl  = normalizeUrl(url);
         String cacheKey  = buildCacheKey(inputUrl, active);
 

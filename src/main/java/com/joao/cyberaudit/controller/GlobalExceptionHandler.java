@@ -2,6 +2,7 @@ package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.exception.DomainBlockedException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
+import com.joao.cyberaudit.exception.GuestDailyLimitException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -29,6 +30,17 @@ public class GlobalExceptionHandler {
                 "error",     "OWNERSHIP_REQUIRED",
                 "message",   ex.getMessage(),
                 "timestamp", LocalDateTime.now().toString()
+        ));
+    }
+
+    @ExceptionHandler(GuestDailyLimitException.class)
+    public ResponseEntity<Map<String, Object>> handleGuestLimit(GuestDailyLimitException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
+                "error",          "DAILY_LIMIT_REACHED",
+                "message",        "Limite de " + ex.getDailyLimit() + " scans diários atingido.",
+                "remainingScans", 0,
+                "resetsAt",       ex.getResetsAt().toString(),
+                "upgrade",        "Para acesso ilimitado, solicite um convite ao administrador."
         ));
     }
 }

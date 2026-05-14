@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.AsyncScanStatus;
 import com.joao.cyberaudit.model.AsyncScanStatus.State;
 import com.joao.cyberaudit.model.ScanResult;
@@ -11,21 +12,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AsyncScanService {
-    
-    private final ConcurrentHashMap<String, AsyncScanStatus> statusMap = new ConcurrentHashMap<>();
 
+    private final ConcurrentHashMap<String, AsyncScanStatus> statusMap = new ConcurrentHashMap<>();
     private final ScanOrchestrator scanOrchestrator;
 
     public AsyncScanService(ScanOrchestrator scanOrchestrator) {
         this.scanOrchestrator = scanOrchestrator;
     }
 
-    public String submit(String url, boolean active) {
+    public String submit(String url, boolean active, AppUser currentUser) {
         String scanId = UUID.randomUUID().toString();
-
         statusMap.put(scanId, new AsyncScanStatus(scanId, State.PENDING, null, null));
-        executeAsync(scanId, url, active);
-
+        executeAsync(scanId, url, active, currentUser);
         return scanId;
     }
 
@@ -34,10 +32,10 @@ public class AsyncScanService {
     }
 
     @Async
-    public void executeAsync(String scanId, String url, boolean active) {
+    public void executeAsync(String scanId, String url, boolean active, AppUser currentUser) {
         statusMap.put(scanId, new AsyncScanStatus(scanId, State.RUNNING, null, null));
         try {
-            ScanResult result = scanOrchestrator.execute(url, active);
+            ScanResult result = scanOrchestrator.execute(url, active, currentUser);
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.DONE, result, null));
         } catch (Exception e) {
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.ERROR, null, e.getMessage()));
