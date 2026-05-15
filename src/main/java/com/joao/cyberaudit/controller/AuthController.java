@@ -65,7 +65,7 @@ public class AuthController {
                 "authenticated", false
         ));
     }
-    
+
     @PostMapping("/accept-invite/{token}")
     public ResponseEntity<Map<String, String>> acceptInvite(
             @PathVariable String token,
