@@ -2,28 +2,32 @@ package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.dto.*;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.Invite;
 import com.joao.cyberaudit.service.AuthService;
 import com.joao.cyberaudit.service.GuestRateLimitService;
+import com.joao.cyberaudit.service.InviteService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
 
+    private final InviteService inviteService;
     private final AuthService          authService;
     private final GuestRateLimitService guestRateLimitService;
 
     public AuthController(AuthService authService,
-                          GuestRateLimitService guestRateLimitService) {
+                          GuestRateLimitService guestRateLimitService,
+                          InviteService inviteService) {
         this.authService          = authService;
         this.guestRateLimitService = guestRateLimitService;
+        this.inviteService = inviteService;
     }
 
     @PostMapping("/setup")
@@ -59,6 +63,17 @@ public class AuthController {
                 "resetsAt",      LocalDate.now().plusDays(1)
                         .atStartOfDay().toString(),
                 "authenticated", false
+        ));
+    }
+    
+    @PostMapping("/accept-invite/{token}")
+    public ResponseEntity<Map<String, String>> acceptInvite(
+            @PathVariable String token,
+            @RequestBody InviteAcceptRequest req) {
+        inviteService.accept(token, req);
+        return ResponseEntity.ok(Map.of(
+                "message", "Conta criada com sucesso. Faça login para continuar.",
+                "loginUrl", "/auth/login"
         ));
     }
 }
