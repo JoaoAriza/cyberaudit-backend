@@ -124,7 +124,12 @@ public class InviteService {
     public List<InviteDto> findPending() {
         return inviteRepository.findPending(LocalDateTime.now())
                 .stream()
-                .map(InviteDto::from)
+                .map(invite -> {
+                    InviteDto dto = InviteDto.from(invite);
+                    // Inclui o link na listagem — só OWNER acessa esse endpoint
+                    dto.setAcceptLink("/auth/accept-invite/" + invite.getToken());
+                    return dto;
+                })
                 .toList();
     }
 
