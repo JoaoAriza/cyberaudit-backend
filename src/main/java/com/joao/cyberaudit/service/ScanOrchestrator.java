@@ -19,6 +19,7 @@ public class ScanOrchestrator {
     private final ErrorDisclosureService errorDisclosureService;
     private final PortScanService        portScanService;
     private final XssProbeService        xssProbeService;
+    private final DnsSecurityService      dnsSecurityService;
     private final ScanCacheService       scanCacheService;
     private final CorsAnalyzerService    corsAnalyzerService;
     private final CookieSecurityService  cookieSecurityService;
@@ -40,6 +41,7 @@ public class ScanOrchestrator {
             ErrorDisclosureService errorDisclosureService,
             PortScanService portScanService,
             XssProbeService xssProbeService,
+            DnsSecurityService dnsSecurityService,
             ScanCacheService scanCacheService,
             CorsAnalyzerService corsAnalyzerService,
             CookieSecurityService cookieSecurityService,
@@ -60,6 +62,7 @@ public class ScanOrchestrator {
         this.errorDisclosureService = errorDisclosureService;
         this.portScanService        = portScanService;
         this.xssProbeService        = xssProbeService;
+        this.dnsSecurityService     = dnsSecurityService;
         this.scanCacheService       = scanCacheService;
         this.corsAnalyzerService    = corsAnalyzerService;
         this.cookieSecurityService  = cookieSecurityService;
@@ -139,7 +142,9 @@ public class ScanOrchestrator {
         List<DirectoryListingFinding> directoryListingFindings =
                 directoryListingService.scan(target);
 
-        // ── 9. Score passivo parcial ─────────────────────────
+        DnsSecurityResult dnsSecurityResult = dnsSecurityService.scan(host);
+
+        //Score passivo parcial ─────────────────────────
         // Calculamos o score passivo antes de decidir se o ativo roda.
         // Isso permite que requiresOwnershipForActiveScan analise o resultado.
         ScoreResult passiveScore = scoreService.calculate(
@@ -148,7 +153,7 @@ public class ScanOrchestrator {
                 false, false, List.of(),
                 corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                 sensitiveFiles, dangerousHttpMethods, securityTxt.found(), openRedirectFindings,
-                directoryListingFindings
+                directoryListingFindings, dnsSecurityResult
         );
 
         ScanResult passiveResult = ScanResult.builder()
@@ -176,6 +181,7 @@ public class ScanOrchestrator {
                 .securityTxtContact(securityTxt.contact())
                 .openRedirectFindings(openRedirectFindings)
                 .directoryListingFindings(directoryListingFindings)
+                .dnsSecurityResult(dnsSecurityResult)
                 .build();
 
         if (active) {
@@ -215,7 +221,7 @@ public class ScanOrchestrator {
                 xssProbePerformed, reflectedXssSuspected, openPorts,
                 corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                 sensitiveFiles, dangerousHttpMethods, securityTxt.found(), openRedirectFindings,
-                directoryListingFindings
+                directoryListingFindings, dnsSecurityResult
         );
 
         ScanResult result = ScanResult.builder()
@@ -243,6 +249,7 @@ public class ScanOrchestrator {
                 .securityTxtContact(securityTxt.contact())
                 .openRedirectFindings(openRedirectFindings)
                 .directoryListingFindings(directoryListingFindings)
+                .dnsSecurityResult(dnsSecurityResult)
                 .build();
 
         scanCacheService.put(cacheKey, result);

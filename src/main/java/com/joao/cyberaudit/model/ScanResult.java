@@ -31,6 +31,7 @@ public class ScanResult {
     private boolean xssProbePerformed;
     private boolean reflectedXssSuspected;
     private List<PortFinding> openPorts;
+    private DnsSecurityResult dnsSecurityResult;
 
     private CorsResult corsResult;
     private List<CookieFinding> cookieIssues;

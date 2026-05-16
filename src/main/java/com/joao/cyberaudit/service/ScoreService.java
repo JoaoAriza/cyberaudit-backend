@@ -29,7 +29,8 @@ public class ScoreService {
             List<HttpMethodFinding> dangerousHttpMethods,
             boolean securityTxtPresent,
             List<OpenRedirectFinding> openRedirectFindings,
-            List<DirectoryListingFinding> directoryListingFindings
+            List<DirectoryListingFinding> directoryListingFindings,
+            DnsSecurityResult dnsSecurityResult
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -340,6 +341,30 @@ public class ScoreService {
                             "Desabilitar directory listing no servidor web (Options -Indexes no Apache, autoindex off no Nginx)."
                     ));
                 }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // 15. DNS Security
+        // ═══════════════════════════════════════════════════════
+        if (dnsSecurityResult != null) {
+            int penalty = switch (dnsSecurityResult.getEmailSpoofingRisk()) {
+                case "CRITICAL" -> 20;
+                case "HIGH"     -> 12;
+                case "MEDIUM"   ->  6;
+                default         ->  0;
+            };
+            if (penalty > 0) {
+                score -= penalty;
+                notes.add("DNS Security (email spoofing risk "
+                        + dnsSecurityResult.getEmailSpoofingRisk() + "): -" + penalty);
+                issues.add(new SecurityIssue(
+                        "DNS_EMAIL_SPOOFING",
+                        "Risco de email spoofing: " + dnsSecurityResult.getEmailSpoofingRisk(),
+                        penalty >= 15 ? "HIGH" : "MEDIUM",
+                        dnsSecurityResult.getSummary(),
+                        "Configure SPF com -all, DMARC com p=reject e DKIM em todos os seletores ativos."
+                ));
             }
         }
 
