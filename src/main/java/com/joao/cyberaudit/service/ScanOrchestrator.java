@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.*;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
+import org.checkerframework.common.returnsreceiver.qual.This;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -19,11 +20,12 @@ public class ScanOrchestrator {
     private final ErrorDisclosureService errorDisclosureService;
     private final PortScanService        portScanService;
     private final XssProbeService        xssProbeService;
-    private final DnsSecurityService      dnsSecurityService;
+    private final WafDetectionService     wafDetectionService;
     private final ScanCacheService       scanCacheService;
     private final CorsAnalyzerService    corsAnalyzerService;
     private final CookieSecurityService  cookieSecurityService;
     private final RobotsTxtService       robotsTxtService;
+    private final DnsSecurityService      dnsSecurityService;
     private final ScanHistoryService     scanHistoryService;
     private final DomainProtectionService domainProtectionService;
     private final SensitiveFileService   sensitiveFileService;
@@ -41,11 +43,12 @@ public class ScanOrchestrator {
             ErrorDisclosureService errorDisclosureService,
             PortScanService portScanService,
             XssProbeService xssProbeService,
-            DnsSecurityService dnsSecurityService,
+            WafDetectionService wafDetectionService,
             ScanCacheService scanCacheService,
             CorsAnalyzerService corsAnalyzerService,
             CookieSecurityService cookieSecurityService,
             RobotsTxtService robotsTxtService,
+            DnsSecurityService dnsSecurityService,
             ScanHistoryService scanHistoryService,
             DomainProtectionService domainProtectionService,
             SensitiveFileService sensitiveFileService,
@@ -62,11 +65,12 @@ public class ScanOrchestrator {
         this.errorDisclosureService = errorDisclosureService;
         this.portScanService        = portScanService;
         this.xssProbeService        = xssProbeService;
-        this.dnsSecurityService     = dnsSecurityService;
+        this.wafDetectionService    = wafDetectionService;
         this.scanCacheService       = scanCacheService;
         this.corsAnalyzerService    = corsAnalyzerService;
         this.cookieSecurityService  = cookieSecurityService;
         this.robotsTxtService       = robotsTxtService;
+        this.dnsSecurityService     = dnsSecurityService;
         this.scanHistoryService     = scanHistoryService;
         this.domainProtectionService = domainProtectionService;
         this.sensitiveFileService = sensitiveFileService;
@@ -144,6 +148,8 @@ public class ScanOrchestrator {
 
         DnsSecurityResult dnsSecurityResult = dnsSecurityService.scan(host);
 
+        WafDetectionResult wafDetectionResult = wafDetectionService.scan(target);
+
         //Score passivo parcial ─────────────────────────
         // Calculamos o score passivo antes de decidir se o ativo roda.
         // Isso permite que requiresOwnershipForActiveScan analise o resultado.
@@ -153,7 +159,7 @@ public class ScanOrchestrator {
                 false, false, List.of(),
                 corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                 sensitiveFiles, dangerousHttpMethods, securityTxt.found(), openRedirectFindings,
-                directoryListingFindings, dnsSecurityResult
+                directoryListingFindings, dnsSecurityResult, wafDetectionResult
         );
 
         ScanResult passiveResult = ScanResult.builder()
@@ -182,6 +188,7 @@ public class ScanOrchestrator {
                 .openRedirectFindings(openRedirectFindings)
                 .directoryListingFindings(directoryListingFindings)
                 .dnsSecurityResult(dnsSecurityResult)
+                .wafDetectionResult(wafDetectionResult)
                 .build();
 
         if (active) {
@@ -221,7 +228,7 @@ public class ScanOrchestrator {
                 xssProbePerformed, reflectedXssSuspected, openPorts,
                 corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                 sensitiveFiles, dangerousHttpMethods, securityTxt.found(), openRedirectFindings,
-                directoryListingFindings, dnsSecurityResult
+                directoryListingFindings, dnsSecurityResult, wafDetectionResult
         );
 
         ScanResult result = ScanResult.builder()
@@ -250,6 +257,7 @@ public class ScanOrchestrator {
                 .openRedirectFindings(openRedirectFindings)
                 .directoryListingFindings(directoryListingFindings)
                 .dnsSecurityResult(dnsSecurityResult)
+                .wafDetectionResult(wafDetectionResult)
                 .build();
 
         scanCacheService.put(cacheKey, result);

@@ -31,7 +31,7 @@ public class ScanResult {
     private boolean xssProbePerformed;
     private boolean reflectedXssSuspected;
     private List<PortFinding> openPorts;
-    private DnsSecurityResult dnsSecurityResult;
+    private WafDetectionResult wafDetectionResult;
 
     private CorsResult corsResult;
     private List<CookieFinding> cookieIssues;
@@ -41,6 +41,7 @@ public class ScanResult {
     private List<HttpMethodFinding> dangerousHttpMethods;
     private boolean securityTxtPresent;
     private String securityTxtContact;
+    private DnsSecurityResult dnsSecurityResult;
 
     private List<OpenRedirectFinding> openRedirectFindings;
     private List<DirectoryListingFinding> directoryListingFindings;

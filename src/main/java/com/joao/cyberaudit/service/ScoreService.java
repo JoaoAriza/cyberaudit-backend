@@ -30,7 +30,8 @@ public class ScoreService {
             boolean securityTxtPresent,
             List<OpenRedirectFinding> openRedirectFindings,
             List<DirectoryListingFinding> directoryListingFindings,
-            DnsSecurityResult dnsSecurityResult
+            DnsSecurityResult dnsSecurityResult,
+            WafDetectionResult wafDetectionResult
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -366,6 +367,21 @@ public class ScoreService {
                         "Configure SPF com -all, DMARC com p=reject e DKIM em todos os seletores ativos."
                 ));
             }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // 16. WAF Detection
+        // ═══════════════════════════════════════════════════════
+        if (wafDetectionResult != null && !wafDetectionResult.isDetected()) {
+            score -= 3;
+            notes.add("Sem WAF detectado: -3");
+            issues.add(new SecurityIssue(
+                    "NO_WAF_DETECTED",
+                    "Nenhum WAF (Web Application Firewall) detectado",
+                    "LOW",
+                    "Sem WAF, ataques como SQLi, XSS e brute-force chegam direto ao servidor de aplicação.",
+                    "Considere adicionar Cloudflare, AWS WAF ou similar como camada de proteção."
+            ));
         }
 
         score = Math.max(0, score);

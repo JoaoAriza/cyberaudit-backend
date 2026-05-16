@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
+import java.util.List;
 
 @RestController
 @RequestMapping("/scan")
@@ -131,6 +132,25 @@ public class ScanController {
                         ? "Verificação OK. Scan ativo liberado."
                         : "Arquivo não encontrado ou token inválido."
         ));
+    }
+
+    @GetMapping("/debug-headers")
+    public ResponseEntity<Map<String, List<String>>> debugHeaders(@RequestParam String url) {
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+                    .build();
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                    .GET()
+                    .timeout(java.time.Duration.ofSeconds(8))
+                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .build();
+            java.net.http.HttpResponse<Void> resp = client.send(req,
+                    java.net.http.HttpResponse.BodyHandlers.discarding());
+            return ResponseEntity.ok(resp.headers().map());
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("error", List.of(e.getMessage())));
+        }
     }
 
     private void checkRateLimit(HttpServletRequest request, AppUser currentUser) {

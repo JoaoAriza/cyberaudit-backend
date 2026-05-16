@@ -49,6 +49,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/scan/async").permitAll()
                         .requestMatchers(HttpMethod.GET, "/scan/async/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/scan/report").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/scan/debug-headers").permitAll()
 
                         // ── Verify token/check: requer autenticação
                         .requestMatchers("/scan/verify-token", "/scan/verify-check").authenticated()
