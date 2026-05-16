@@ -57,7 +57,6 @@ public class SecurityConfig {
                         .requestMatchers("/history/**").authenticated()
 
                         // ── Admin: apenas OWNER (configurado na Fase C)
-                        .requestMatchers("/admin/**").hasRole("OWNER")
                         .requestMatchers("/admin/**").hasAnyRole("OWNER", "ADMIN")
 
                         // ── Qualquer outra rota: autenticado
