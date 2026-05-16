@@ -195,12 +195,19 @@ public class ScanOrchestrator {
             boolean needsOwnership = domainProtectionService
                     .requiresOwnershipForActiveScan(passiveResult);
 
-            if (needsOwnership && !domainProtectionService.isOwnershipVerified(host)) {
+            // OWNER e ADMIN podem escanear qualquer domínio ativamente
+            boolean bypassOwnership = currentUser != null &&
+                    (currentUser.getRole() == Role.OWNER ||
+                            currentUser.getRole() == Role.ADMIN);
+
+            if (needsOwnership && !bypassOwnership &&
+                    !domainProtectionService.isOwnershipVerified(host)) {
                 throw new OwnershipNotVerifiedException(
                         passiveResult,
                         "Scan ativo não autorizado para este domínio. " +
                                 "Apenas o proprietário verificado pode executar scans ativos. " +
-                                "Acesse /scan/verify-token?host=" + host + " para obter as instruções de verificação."
+                                "Acesse /scan/verify-token?host=" + host +
+                                " para obter as instruções de verificação."
                 );
             }
         }
