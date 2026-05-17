@@ -215,16 +215,22 @@ public class ScoreService {
         // ═══════════════════════════════════════════
         // 8. Port scan (ativo)
         // ═══════════════════════════════════════════
-        if (activeMode && openPorts != null) {
+        if (openPorts != null && !openPorts.isEmpty() && activeMode) {
+            int portPenalty = 0;
             for (PortFinding p : openPorts) {
-                if ("HIGH".equals(p.getSeverity())) {
-                    score -= 10;
-                    notes.add("Porta de risco aberta (" + p.getPort() + "/" + p.getService() + "): -10");
-                } else if ("MEDIUM".equals(p.getSeverity())) {
-                    score -= 5;
-                    notes.add("Porta aberta exposta (" + p.getPort() + "/" + p.getService() + "): -5");
-                }
+                int penalty = switch (p.getSeverity()) {
+                    case "CRITICAL" -> 15;
+                    case "HIGH" -> 10;
+                    case "MEDIUM" -> 5;
+                    default -> 2;
+                };
+                portPenalty += penalty;
             }
+            portPenalty = Math.min(portPenalty, 30);
+            score -= portPenalty;
+            notes.add("Portas de risco abertas (" + openPorts.size() + "): -" + portPenalty);
+            
+            score = Math.max(0, score);
         }
 
         // ═══════════════════════════════════════════
