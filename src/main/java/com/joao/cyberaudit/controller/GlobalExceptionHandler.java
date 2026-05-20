@@ -53,4 +53,28 @@ public class GlobalExceptionHandler {
                 "message", ex.getReason() != null ? ex.getReason() : "Erro interno"
         ));
     }
+
+    @ExceptionHandler(java.net.UnknownHostException.class)
+    public ResponseEntity<Map<String, Object>> handleUnknownHost(java.net.UnknownHostException ex) {
+        return ResponseEntity.badRequest().body(Map.of(
+                "error",   "UNKNOWN_HOST",
+                "message", "Domínio não encontrado: " + ex.getMessage()
+        ));
+    }
+
+    @ExceptionHandler(java.net.ConnectException.class)
+    public ResponseEntity<Map<String, Object>> handleConnectException(java.net.ConnectException ex) {
+        return ResponseEntity.badRequest().body(Map.of(
+                "error",   "CONNECTION_FAILED",
+                "message", "Não foi possível conectar ao host: " + ex.getMessage()
+        ));
+    }
+
+    @ExceptionHandler(java.net.SocketTimeoutException.class)
+    public ResponseEntity<Map<String, Object>> handleTimeout(java.net.SocketTimeoutException ex) {
+        return ResponseEntity.badRequest().body(Map.of(
+                "error",   "CONNECTION_TIMEOUT",
+                "message", "Tempo de conexão esgotado. O host pode estar offline ou inacessível."
+        ));
+    }
 }

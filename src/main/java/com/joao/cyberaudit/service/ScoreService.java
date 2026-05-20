@@ -229,7 +229,7 @@ public class ScoreService {
             portPenalty = Math.min(portPenalty, 30);
             score -= portPenalty;
             notes.add("Portas de risco abertas (" + openPorts.size() + "): -" + portPenalty);
-            
+
             score = Math.max(0, score);
         }
 
