@@ -17,16 +17,17 @@ import java.util.Map;
 @Service
 public class HttpFetchService {
 
+    // connectTimeout: tempo máximo para estabelecer a conexão TCP
+    // Reduzido de 8s para 5s — se o servidor não responde em 5s, não vale esperar mais
     private final HttpClient clientFollow = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.ALWAYS)
-            .connectTimeout(Duration.ofSeconds(8))
+            .connectTimeout(Duration.ofSeconds(5))
             .build();
 
     private final HttpClient clientNoRedirect = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
-            .connectTimeout(Duration.ofSeconds(8))
+            .connectTimeout(Duration.ofSeconds(5))
             .build();
-
 
     public HttpFetchResult fetchHeaders(String url) {
         try {
@@ -48,7 +49,7 @@ public class HttpFetchService {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(6)) // era 10s
                     .header("User-Agent", "CyberAuditScanner/1.0")
                     .header("Origin", origin)
                     .build();
@@ -66,12 +67,11 @@ public class HttpFetchService {
         }
     }
 
-
     public boolean traceRedirectToHttps(String httpUrl) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(httpUrl))
                     .GET()
-                    .timeout(Duration.ofSeconds(8))
+                    .timeout(Duration.ofSeconds(5)) // era 8s
                     .header("User-Agent", "CyberAuditScanner/1.0")
                     .header("Accept", "*/*")
                     .build();
@@ -86,11 +86,10 @@ public class HttpFetchService {
         }
     }
 
-
     private HttpResponse<Void> sendHead(URI uri) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .method("HEAD", HttpRequest.BodyPublishers.noBody())
-                .timeout(Duration.ofSeconds(10))
+                .timeout(Duration.ofSeconds(6)) // era 10s
                 .header("User-Agent", "CyberAuditScanner/1.0")
                 .build();
         return clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
@@ -99,7 +98,7 @@ public class HttpFetchService {
     private HttpResponse<Void> sendGet(URI uri) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .GET()
-                .timeout(Duration.ofSeconds(12))
+                .timeout(Duration.ofSeconds(8)) // era 12s
                 .header("User-Agent", "CyberAuditScanner/1.0")
                 .header("Accept", "*/*")
                 .build();
