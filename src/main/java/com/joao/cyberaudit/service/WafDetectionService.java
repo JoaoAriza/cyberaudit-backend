@@ -202,7 +202,7 @@ public class WafDetectionService {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
-                    .timeout(Duration.ofSeconds(8))
+                    .timeout(Duration.ofSeconds(4)) // ← era 8
                     .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
                     .build();
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
@@ -214,7 +214,7 @@ public class WafDetectionService {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
-                    .timeout(Duration.ofSeconds(8))
+                    .timeout(Duration.ofSeconds(4)) // ← era 8
                     .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
                     .build();
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());

@@ -34,14 +34,12 @@ public class PortScanService {
             new PortConfig(993,  "IMAPS",                  "LOW",     1500, false),
             new PortConfig(995,  "POP3S",                  "LOW",     1500, false),
             // DB ports — requerem banner para confirmar abertura real
-            new PortConfig(1433, "MS SQL Server",          "HIGH",    2000, true),
-            new PortConfig(1521, "Oracle DB",              "HIGH",    2000, true),
-            new PortConfig(3306, "MySQL",                  "HIGH",    2000, true),
-            new PortConfig(5432, "PostgreSQL",             "HIGH",    2000, true),
-            new PortConfig(6379, "Redis",                  "HIGH",    2000, true),
-            new PortConfig(8080, "HTTP Alt",               "LOW",     1500, false),
-            new PortConfig(8443, "HTTPS Alt",              "INFO",    1800, false),
-            new PortConfig(9200, "Elasticsearch",          "HIGH",    2000, true)
+            new PortConfig(1433, "MS SQL Server", "HIGH", 1200, true),
+            new PortConfig(1521, "Oracle DB",     "HIGH", 1200, true),
+            new PortConfig(3306, "MySQL",         "HIGH", 1200, true),
+            new PortConfig(5432, "PostgreSQL",    "HIGH", 1200, true),
+            new PortConfig(6379, "Redis",         "HIGH", 1200, true),
+            new PortConfig(9200, "Elasticsearch", "HIGH", 1200, true)
     );
 
     /**

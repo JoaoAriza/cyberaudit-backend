@@ -9,8 +9,11 @@ import org.xbill.DNS.Type;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class DnsSecurityService {
@@ -20,22 +23,27 @@ public class DnsSecurityService {
             "k1", "s1", "s2", "email", "selector1", "selector2"
     );
 
-    // Extrai o valor de p= sem confundir com sp=
     private static final Pattern DMARC_P = Pattern.compile(
             "(?:^|;)\\s*p=([^;\\s]+)", Pattern.CASE_INSENSITIVE
     );
 
     public DnsSecurityResult scan(String host) {
         DnsSecurityResult.DnsSecurityResultBuilder b = DnsSecurityResult.builder();
-
+        ExecutorService pool = Executors.newFixedThreadPool(5);
         try {
-            analyzeSpf(host, b);
-            analyzeDmarc(host, b);
-            analyzeDkim(host, b);
-            analyzeCaa(host, b);
-            analyzeMx(host, b);
+            var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, b),   pool);
+            var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, b), pool);
+            var dkimFuture  = CompletableFuture.runAsync(() -> analyzeDkim(host, b),  pool);
+            var caaFuture   = CompletableFuture.runAsync(() -> analyzeCaa(host, b),   pool);
+            var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, b),    pool);
+
+            CompletableFuture.allOf(spfFuture, dmarcFuture, dkimFuture, caaFuture, mxFuture)
+                    .get(8, TimeUnit.SECONDS);
+
         } catch (Exception e) {
             b.summary("Erro ao consultar DNS: " + e.getMessage());
+        } finally {
+            pool.shutdownNow();
         }
 
         DnsSecurityResult result = b.build();
@@ -55,12 +63,10 @@ public class DnsSecurityService {
             for (org.xbill.DNS.Record r : records) {
                 if (!(r instanceof TXTRecord txt)) continue;
 
-                // Monta a string completa concatenando todas as partes do TXT
                 StringBuilder sb = new StringBuilder();
                 for (String part : txt.getStrings()) sb.append(part);
                 String content = sb.toString().trim();
 
-                // Verificação case-insensitive e com trim
                 if (!content.toLowerCase().startsWith("v=spf1")) continue;
 
                 b.spfPresent(true).spfRecord(content);
@@ -95,11 +101,9 @@ public class DnsSecurityService {
 
                 b.dmarcPresent(true).dmarcRecord(content);
 
-                // Extrai o valor de p= com regex para evitar confundir com sp=
                 Matcher m = DMARC_P.matcher(content);
                 if (m.find()) {
-                    String pValue = m.group(1).toLowerCase().trim();
-                    switch (pValue) {
+                    switch (m.group(1).toLowerCase().trim()) {
                         case "reject"     -> b.dmarcPolicy("STRONG");
                         case "quarantine" -> b.dmarcPolicy("MEDIUM");
                         default           -> b.dmarcPolicy("WEAK");
@@ -115,21 +119,38 @@ public class DnsSecurityService {
         }
     }
 
-    // ── DKIM ──────────────────────────────────────────────────────────────────
+    // ── DKIM — seletores testados em paralelo ─────────────────────────────────
 
     private void analyzeDkim(String host,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
-        for (String selector : DKIM_SELECTORS) {
-            try {
-                org.xbill.DNS.Record[] records =
-                        new Lookup(selector + "._domainkey." + host, Type.TXT).run();
-                if (records != null && records.length > 0) {
-                    b.dkimHintFound(true).dkimSelector(selector);
-                    return;
-                }
-            } catch (Exception ignored) {}
+        ExecutorService pool = Executors.newFixedThreadPool(DKIM_SELECTORS.size());
+        try {
+            List<CompletableFuture<String>> futures = DKIM_SELECTORS.stream()
+                    .map(selector -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            org.xbill.DNS.Record[] records =
+                                    new Lookup(selector + "._domainkey." + host, Type.TXT).run();
+                            return (records != null && records.length > 0) ? selector : null;
+                        } catch (Exception e) { return null; }
+                    }, pool))
+                    .toList();
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(5, TimeUnit.SECONDS);
+
+            futures.stream()
+                    .map(f -> f.getNow(null))
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .ifPresentOrElse(
+                            sel -> b.dkimHintFound(true).dkimSelector(sel),
+                            ()  -> b.dkimHintFound(false).dkimSelector(null)
+                    );
+        } catch (Exception e) {
+            b.dkimHintFound(false).dkimSelector(null);
+        } finally {
+            pool.shutdownNow();
         }
-        b.dkimHintFound(false).dkimSelector(null);
     }
 
     // ── CAA ───────────────────────────────────────────────────────────────────
@@ -169,14 +190,9 @@ public class DnsSecurityService {
     // ── Risk + Summary ────────────────────────────────────────────────────────
 
     private String calculateRisk(DnsSecurityResult r) {
-        boolean spfStrong   = "STRONG".equals(r.getSpfPolicy());
-        boolean spfPresent  = r.isSpfPresent();
-        boolean dmarcStrong = "STRONG".equals(r.getDmarcPolicy());
-        boolean dmarcPresent= r.isDmarcPresent();
-
-        if (!spfPresent && !dmarcPresent)  return "CRITICAL";
-        if (!spfPresent || !dmarcPresent)  return "HIGH";
-        if (spfStrong && dmarcStrong)      return "LOW";
+        if (!r.isSpfPresent() && !r.isDmarcPresent()) return "CRITICAL";
+        if (!r.isSpfPresent() || !r.isDmarcPresent()) return "HIGH";
+        if ("STRONG".equals(r.getSpfPolicy()) && "STRONG".equals(r.getDmarcPolicy())) return "LOW";
         return "MEDIUM";
     }
 
