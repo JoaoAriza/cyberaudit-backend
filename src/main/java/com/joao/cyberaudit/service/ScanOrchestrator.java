@@ -106,34 +106,53 @@ public class ScanOrchestrator {
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
 
         // ── Fase 2: checks passivos independentes — PARALELOS ─────────────────
-        // Antes eram sequenciais: em site lento somavam 4+ minutos.
-        // Agora rodam ao mesmo tempo: tempo total = o do check mais lento.
         ExecutorService pool = Executors.newFixedThreadPool(9);
         try {
             var corsFuture     = CompletableFuture.supplyAsync(
-                    () -> corsAnalyzerService.analyze(target), pool);
-            var robotsFuture   = CompletableFuture.supplyAsync(
-                    () -> robotsTxtService.findSensitivePaths(target), pool);
-            var filesFuture    = CompletableFuture.supplyAsync(
-                    () -> sensitiveFileService.scan(target), pool);
-            var methodsFuture  = CompletableFuture.supplyAsync(
-                    () -> httpMethodService.scan(target), pool);
-            var secTxtFuture   = CompletableFuture.supplyAsync(
-                    () -> securityTxtService.check(target), pool);
-            var redirectFuture = CompletableFuture.supplyAsync(
-                    () -> openRedirectService.scan(target, false), pool);
-            var dirListFuture  = CompletableFuture.supplyAsync(
-                    () -> directoryListingService.scan(target), pool);
-            var dnsFuture      = CompletableFuture.supplyAsync(
-                    () -> dnsSecurityService.scan(host), pool);
-            var wafFuture      = CompletableFuture.supplyAsync(
-                    () -> wafDetectionService.scan(target), pool);
+                            () -> corsAnalyzerService.analyze(target), pool)
+                    .exceptionally(e -> null);
 
-            // Aguarda todos — timeout de 60s para não ficar preso indefinidamente
-            CompletableFuture.allOf(
-                    corsFuture, robotsFuture, filesFuture, methodsFuture,
-                    secTxtFuture, redirectFuture, dirListFuture, dnsFuture, wafFuture
-            ).get(60, TimeUnit.SECONDS);
+            var robotsFuture   = CompletableFuture.supplyAsync(
+                            () -> robotsTxtService.findSensitivePaths(target), pool)
+                    .exceptionally(e -> List.of());
+
+            var filesFuture    = CompletableFuture.supplyAsync(
+                            () -> sensitiveFileService.scan(target), pool)
+                    .exceptionally(e -> List.of());
+
+            var methodsFuture  = CompletableFuture.supplyAsync(
+                            () -> httpMethodService.scan(target), pool)
+                    .exceptionally(e -> List.of());
+
+            var secTxtFuture   = CompletableFuture.supplyAsync(
+                            () -> securityTxtService.check(target), pool)
+                    .exceptionally(e -> null);
+
+            var redirectFuture = CompletableFuture.supplyAsync(
+                            () -> openRedirectService.scan(target, false), pool)
+                    .exceptionally(e -> List.of());
+
+            var dirListFuture  = CompletableFuture.supplyAsync(
+                            () -> directoryListingService.scan(target), pool)
+                    .exceptionally(e -> List.of());
+
+            var dnsFuture      = CompletableFuture.supplyAsync(
+                            () -> dnsSecurityService.scan(host), pool)
+                    .exceptionally(e -> null);
+
+            var wafFuture      = CompletableFuture.supplyAsync(
+                            () -> wafDetectionService.scan(target), pool)
+                    .exceptionally(e -> null);
+
+            try {
+                CompletableFuture.allOf(
+                        corsFuture, robotsFuture, filesFuture, methodsFuture,
+                        secTxtFuture, redirectFuture, dirListFuture, dnsFuture, wafFuture
+                ).get(120, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+                // Timeout ou erro interno — continua com resultados parciais
+                // getNow(default) retorna o default para futures não completados
+            }
 
             // Coleta resultados com fallbacks seguros caso algum timeout
             CorsResult                 corsResult               = corsFuture.getNow(null);
@@ -270,9 +289,12 @@ public class ScanOrchestrator {
             return result;
 
         } catch (OwnershipNotVerifiedException e) {
-            throw e; // repropaga sem embrulhar
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Erro ao executar scan: " + e.getMessage(), e);
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new RuntimeException(
+                    "Erro ao executar scan: " + cause.getClass().getSimpleName()
+                            + (cause.getMessage() != null ? " — " + cause.getMessage() : ""), e);
         } finally {
             pool.shutdownNow();
         }
