@@ -42,6 +42,7 @@ public class JwtUtil {
             parseClaims(token);
             return true;
         } catch (JwtException | IllegalArgumentException e) {
+            System.err.println("[JWT] token inválido: " + e.getClass().getSimpleName() + " — " + e.getMessage());
             return false;
         }
     }

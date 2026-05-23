@@ -44,13 +44,15 @@ public class ScanController {
         this.guestRateLimitService   = guestRateLimitService;
     }
 
+    // ── Scan síncrono ─────────────────────────────────────────────────────────
+
     @GetMapping
     public ScanResult scan(@RequestParam String url,
                            @RequestParam(defaultValue = "false") boolean active,
                            HttpServletRequest request) {
 
         AppUser currentUser = getCurrentUser();
-        checkRateLimit(request, currentUser);  // ← passa o usuário
+        checkRateLimit(request, currentUser);
 
         if (active && currentUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
@@ -64,6 +66,8 @@ public class ScanController {
         return scanOrchestrator.execute(url, active, currentUser);
     }
 
+    // ── Relatório texto ───────────────────────────────────────────────────────
+
     @GetMapping(value = "/report", produces = "text/plain; charset=UTF-8")
     public String scanReport(@RequestParam String url,
                              @RequestParam(defaultValue = "false") boolean active,
@@ -73,15 +77,27 @@ public class ScanController {
         return reportService.generateReport(scanOrchestrator.execute(url, active, currentUser));
     }
 
+    // ── Relatório PDF ─────────────────────────────────────────────────────────
+
     @GetMapping(value = "/report/pdf", produces = "application/pdf")
     public byte[] scanReportPdf(@RequestParam String url,
                                 @RequestParam(defaultValue = "false") boolean active,
                                 HttpServletRequest request) {
+
         AppUser currentUser = getCurrentUser();
+
+        // PDF requer autenticação — guests não podem gerar relatório
+        if (currentUser == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Geração de PDF requer autenticação. Faça login para continuar.");
+        }
+
         checkRateLimit(request, currentUser);
         ScanResult result = scanOrchestrator.execute(url, active, currentUser);
         return pdfReportService.generatePdf(result, reportService.generateReport(result));
     }
+
+    // ── Scan assíncrono ───────────────────────────────────────────────────────
 
     @PostMapping("/async")
     public ResponseEntity<Map<String, String>> submitAsync(
@@ -100,7 +116,7 @@ public class ScanController {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
         }
 
-        String scanId = asyncScanService.submit(url, active,currentUser);
+        String scanId = asyncScanService.submit(url, active, currentUser);
         return ResponseEntity.accepted().body(Map.of("scanId", scanId));
     }
 
@@ -110,6 +126,8 @@ public class ScanController {
         if (status == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(status);
     }
+
+    // ── Verificação de propriedade ────────────────────────────────────────────
 
     @GetMapping("/verify-token")
     public ResponseEntity<Map<String, String>> verifyToken(@RequestParam String host) {
@@ -134,6 +152,8 @@ public class ScanController {
         ));
     }
 
+    // ── Debug (remover em produção) ───────────────────────────────────────────
+
     @GetMapping("/debug-headers")
     public ResponseEntity<Map<String, List<String>>> debugHeaders(@RequestParam String url) {
         try {
@@ -152,6 +172,8 @@ public class ScanController {
             return ResponseEntity.ok(Map.of("error", List.of(e.getMessage())));
         }
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void checkRateLimit(HttpServletRequest request, AppUser currentUser) {
         if (!rateLimitService.allow(request.getRemoteAddr(), currentUser)) {

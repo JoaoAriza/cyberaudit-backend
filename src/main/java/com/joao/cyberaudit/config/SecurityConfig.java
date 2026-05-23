@@ -1,6 +1,8 @@
 package com.joao.cyberaudit.config;
 
 import com.joao.cyberaudit.security.JwtAuthFilter;
+import com.joao.cyberaudit.security.JwtUtil;
+import com.joao.cyberaudit.security.UserDetailsServiceImpl;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,7 +14,6 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -22,49 +23,60 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class SecurityConfig {
 
-    private final JwtAuthFilter    jwtAuthFilter;
-    private final UserDetailsService userDetailsService;
+    private final JwtUtil               jwtUtil;
+    private final UserDetailsServiceImpl userDetailsServiceImpl;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter, UserDetailsService userDetailsService) {
-        this.jwtAuthFilter    = jwtAuthFilter;
-        this.userDetailsService = userDetailsService;
+    public SecurityConfig(JwtUtil jwtUtil,
+                          UserDetailsServiceImpl userDetailsServiceImpl) {
+        this.jwtUtil               = jwtUtil;
+        this.userDetailsServiceImpl = userDetailsServiceImpl;
+    }
+
+    /**
+     * Cria o JwtAuthFilter como @Bean sem @Component no filtro.
+     * Isso evita que o Spring Boot o registre automaticamente como servlet filter,
+     * eliminando o problema de dupla execução com OncePerRequestFilter.
+     */
+    @Bean
+    public JwtAuthFilter jwtAuthFilter() {
+        return new JwtAuthFilter(jwtUtil, userDetailsServiceImpl);
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(sm -> sm
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
 
-                        // ── Públicos sem auth ──────────────────────────────────
-                        .requestMatchers("/auth/login", "/auth/setup").permitAll()
-                        .requestMatchers("/auth/accept-invite/**").permitAll()
+                        // ── Públicos sem auth ──────────────────────────────────────
+                        .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/badge/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
 
-                        // ── Scan passivo: público (limite por IP no service)
-                        // Scan ativo: checado dentro do ScanController
-                        .requestMatchers(HttpMethod.GET, "/scan").permitAll()
+                        // ── Scan passivo e async: público ──────────────────────────
+                        .requestMatchers(HttpMethod.GET,  "/scan").permitAll()
                         .requestMatchers(HttpMethod.POST, "/scan/async").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/scan/async/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/scan/report").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/scan/debug-headers").permitAll()
+                        .requestMatchers(HttpMethod.GET,  "/scan/report").permitAll()
+                        .requestMatchers(HttpMethod.GET,  "/scan/debug-headers").permitAll()
 
-                        // ── Verify token/check: requer autenticação
+                        // ── Scan autenticado ───────────────────────────────────────
+                        .requestMatchers(HttpMethod.GET, "/scan/report/pdf").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/scan/async/**").authenticated()
                         .requestMatchers("/scan/verify-token", "/scan/verify-check").authenticated()
 
-                        // ── Histórico: apenas autenticados
+                        // ── Histórico ──────────────────────────────────────────────
                         .requestMatchers("/history/**").authenticated()
 
-                        // ── Admin: apenas OWNER (configurado na Fase C)
+                        // ── Admin ──────────────────────────────────────────────────
                         .requestMatchers("/admin/**").hasAnyRole("OWNER", "ADMIN")
 
-                        // ── Qualquer outra rota: autenticado
+                        // ── Qualquer outra rota ────────────────────────────────────
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
@@ -77,13 +89,14 @@ public class SecurityConfig {
     @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userDetailsService);
+        provider.setUserDetailsService(userDetailsServiceImpl);
         provider.setPasswordEncoder(passwordEncoder());
         return provider;
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
     }
 }
