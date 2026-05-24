@@ -33,8 +33,7 @@ public class ScanController {
             PdfReportService pdfReportService,
             RateLimitService rateLimitService,
             DomainProtectionService domainProtectionService,
-            GuestRateLimitService guestRateLimitService
-    ) {
+            GuestRateLimitService guestRateLimitService) {
         this.scanOrchestrator        = scanOrchestrator;
         this.asyncScanService        = asyncScanService;
         this.reportService           = reportService;
@@ -50,20 +49,16 @@ public class ScanController {
     public ScanResult scan(@RequestParam String url,
                            @RequestParam(defaultValue = "false") boolean active,
                            HttpServletRequest request) {
-
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
-
         if (active && currentUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Scan ativo requer autenticação. Faça login ou solicite um convite.");
         }
-
         if (currentUser == null) {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
         }
-
-        return scanOrchestrator.execute(url, active, currentUser);
+        return scanOrchestrator.execute(url, active, currentUser, false);
     }
 
     // ── Relatório texto ───────────────────────────────────────────────────────
@@ -74,7 +69,8 @@ public class ScanController {
                              HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
-        return reportService.generateReport(scanOrchestrator.execute(url, active, currentUser));
+        return reportService.generateReport(
+                scanOrchestrator.execute(url, active, currentUser, false));
     }
 
     // ── Relatório PDF ─────────────────────────────────────────────────────────
@@ -83,17 +79,13 @@ public class ScanController {
     public byte[] scanReportPdf(@RequestParam String url,
                                 @RequestParam(defaultValue = "false") boolean active,
                                 HttpServletRequest request) {
-
         AppUser currentUser = getCurrentUser();
-
-        // PDF requer autenticação — guests não podem gerar relatório
         if (currentUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Geração de PDF requer autenticação. Faça login para continuar.");
         }
-
         checkRateLimit(request, currentUser);
-        ScanResult result = scanOrchestrator.execute(url, active, currentUser);
+        ScanResult result = scanOrchestrator.execute(url, active, currentUser, false);
         return pdfReportService.generatePdf(result, reportService.generateReport(result));
     }
 
@@ -103,6 +95,7 @@ public class ScanController {
     public ResponseEntity<Map<String, String>> submitAsync(
             @RequestParam String url,
             @RequestParam(defaultValue = "false") boolean active,
+            @RequestParam(defaultValue = "false") boolean refresh,
             HttpServletRequest request) {
 
         AppUser currentUser = getCurrentUser();
@@ -116,7 +109,7 @@ public class ScanController {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
         }
 
-        String scanId = asyncScanService.submit(url, active, currentUser);
+        String scanId = asyncScanService.submit(url, active, currentUser, refresh);
         return ResponseEntity.accepted().body(Map.of("scanId", scanId));
     }
 
@@ -160,7 +153,8 @@ public class ScanController {
             java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
                     .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
                     .build();
-            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(
+                            java.net.URI.create(url))
                     .GET()
                     .timeout(java.time.Duration.ofSeconds(8))
                     .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
@@ -180,7 +174,8 @@ public class ScanController {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "Muitas requisições. " +
                             (currentUser == null
-                                    ? "Limite de " + RateLimitService.GUEST_RPM + " requests/min para visitantes."
+                                    ? "Limite de " + RateLimitService.GUEST_RPM
+                                    + " requests/min para visitantes."
                                     : "Tente novamente em alguns segundos.")
             );
         }

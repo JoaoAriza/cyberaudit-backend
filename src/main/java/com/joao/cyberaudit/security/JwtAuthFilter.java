@@ -29,9 +29,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String authHeader = request.getHeader("Authorization");
-        System.out.println("[JwtFilter] " + request.getMethod() + " " + request.getRequestURI()
-                + " | header: " + (authHeader != null ? authHeader.substring(0, Math.min(30, authHeader.length())) + "..." : "null"));
-
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             chain.doFilter(request, response);
             return;
@@ -40,7 +37,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = authHeader.substring(7);
 
         boolean valid = jwtUtil.isValid(token);
-        System.out.println("[JWT] token válido: " + valid + " | path: " + request.getRequestURI());
 
         if (!valid) {
             chain.doFilter(request, response);
@@ -48,8 +44,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         String email = jwtUtil.extractEmail(token);
-        System.out.println("[JWT] email extraído: " + email); // ← ADICIONA
-
         if (SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userDetailsService.loadUserByUsername(email);
             UsernamePasswordAuthenticationToken auth =
@@ -57,7 +51,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                             userDetails, null, userDetails.getAuthorities());
             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(auth);
-            System.out.println("[JWT] autenticação setada para: " + email); // ← ADICIONA
         }
 
         chain.doFilter(request, response);

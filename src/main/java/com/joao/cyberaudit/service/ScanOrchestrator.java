@@ -69,12 +69,16 @@ public class ScanOrchestrator {
         this.directoryListingService = directoryListingService;
     }
 
-    public ScanResult execute(String url, boolean active, AppUser currentUser) {
+    public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
         String inputUrl = normalizeUrl(url);
         String cacheKey = buildCacheKey(inputUrl, active);
 
-        ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
-        if (cached != null) return cached;
+        if (!refresh) {
+            ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
+            if (cached != null) return cached;
+        } else {
+            scanCacheService.invalidate(cacheKey);
+        }
 
         // ── Fase 1: infraestrutura — sequencial ───────────────────────────────
         String  httpsUrl      = toHttps(inputUrl);
@@ -333,8 +337,10 @@ public class ScanOrchestrator {
         catch (Exception e) { return null; }
     }
 
+    private static final String CACHE_VERSION = "v2";
+
     private String buildCacheKey(String url, boolean active) {
         String h = extractHostSafe(url);
-        return "scan:" + (h != null ? h : url) + ":active=" + active;
+        return CACHE_VERSION + ":scan:" + (h != null ? h : url) + ":active=" + active;
     }
 }

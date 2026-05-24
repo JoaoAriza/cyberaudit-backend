@@ -20,10 +20,10 @@ public class AsyncScanService {
         this.scanOrchestrator = scanOrchestrator;
     }
 
-    public String submit(String url, boolean active, AppUser currentUser) {
+    public String submit(String url, boolean active, AppUser currentUser, boolean refresh) {
         String scanId = UUID.randomUUID().toString();
         statusMap.put(scanId, new AsyncScanStatus(scanId, State.PENDING, null, null));
-        executeAsync(scanId, url, active, currentUser);
+        executeAsync(scanId, url, active, currentUser, refresh);
         return scanId;
     }
 
@@ -32,10 +32,11 @@ public class AsyncScanService {
     }
 
     @Async
-    public void executeAsync(String scanId, String url, boolean active, AppUser currentUser) {
+    public void executeAsync(String scanId, String url, boolean active,
+                             AppUser currentUser, boolean refresh) {
         statusMap.put(scanId, new AsyncScanStatus(scanId, State.RUNNING, null, null));
         try {
-            ScanResult result = scanOrchestrator.execute(url, active, currentUser);
+            ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh);
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.DONE, result, null));
         } catch (Exception e) {
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.ERROR, null, e.getMessage()));
