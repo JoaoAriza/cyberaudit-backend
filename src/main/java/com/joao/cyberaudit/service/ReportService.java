@@ -20,6 +20,8 @@ public class ReportService {
         s.append("HTTP Status:  ").append(r.getHttpStatus()).append("\n");
         s.append("Score:        ").append(r.getScore().getScore())
                 .append("/100 (").append(r.getScore().getRiskLevel()).append(")\n\n");
+        s.append("Scan type:    ").append(r.isActiveMode() ? "ACTIVE" : "PASSIVE").append("\n");
+
 
         // ── Transport Security ─────────────────────────────
         s.append("== Transport Security ==\n");

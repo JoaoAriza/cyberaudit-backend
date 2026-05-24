@@ -76,7 +76,7 @@ public class ScanOrchestrator {
         ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
         if (cached != null) return cached;
 
-        // ── Fase 1: infraestrutura — sequencial pois cada etapa depende da anterior
+        // ── Fase 1: infraestrutura — sequencial ───────────────────────────────
         String  httpsUrl      = toHttps(inputUrl);
         SSLInfo sslInfo       = sslService.checkSSL(httpsUrl);
         boolean supportsHttps = sslInfo.isHttps() && sslInfo.isValid();
@@ -102,113 +102,81 @@ public class ScanOrchestrator {
         String  target               = fetch.getFinalUrl() != null ? fetch.getFinalUrl() : analysisUrl;
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
 
-        // Cookies já vieram no fetch — sem request adicional
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
 
-        // ── Fase 2: checks passivos independentes — PARALELOS ─────────────────
-        ExecutorService pool = Executors.newFixedThreadPool(9);
+        // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
+        // Apenas checks que NÃO enviam requests direcionados ao alvo com payloads
+        // ou origins forjadas. CORS e SensitiveFiles foram movidos para Fase 5 (active).
+        ExecutorService passivePool = Executors.newFixedThreadPool(5);
         try {
-            var corsFuture     = CompletableFuture.supplyAsync(
-                            () -> corsAnalyzerService.analyze(target), pool)
+            var robotsFuture = CompletableFuture.supplyAsync(
+                            () -> robotsTxtService.findSensitivePaths(target), passivePool)
+                    .exceptionally(e -> List.of());
+
+            var secTxtFuture = CompletableFuture.supplyAsync(
+                            () -> securityTxtService.check(target), passivePool)
                     .exceptionally(e -> null);
 
-            var robotsFuture   = CompletableFuture.supplyAsync(
-                            () -> robotsTxtService.findSensitivePaths(target), pool)
-                    .exceptionally(e -> List.of());
-
-            var filesFuture    = CompletableFuture.supplyAsync(
-                            () -> sensitiveFileService.scan(target), pool)
-                    .exceptionally(e -> List.of());
-
-            var methodsFuture  = CompletableFuture.supplyAsync(
-                            () -> httpMethodService.scan(target), pool)
-                    .exceptionally(e -> List.of());
-
-            var secTxtFuture   = CompletableFuture.supplyAsync(
-                            () -> securityTxtService.check(target), pool)
+            var dnsFuture = CompletableFuture.supplyAsync(
+                            () -> dnsSecurityService.scan(host), passivePool)
                     .exceptionally(e -> null);
 
-            var redirectFuture = CompletableFuture.supplyAsync(
-                            () -> openRedirectService.scan(target, false), pool)
+            var methodsFuture = CompletableFuture.supplyAsync(
+                            () -> httpMethodService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
 
-            var dirListFuture  = CompletableFuture.supplyAsync(
-                            () -> directoryListingService.scan(target), pool)
+            var dirListFuture = CompletableFuture.supplyAsync(
+                            () -> directoryListingService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
-
-            var dnsFuture      = CompletableFuture.supplyAsync(
-                            () -> dnsSecurityService.scan(host), pool)
-                    .exceptionally(e -> null);
-
-            var wafFuture      = CompletableFuture.supplyAsync(
-                            () -> wafDetectionService.scan(target), pool)
-                    .exceptionally(e -> null);
 
             try {
                 CompletableFuture.allOf(
-                        corsFuture, robotsFuture, filesFuture, methodsFuture,
-                        secTxtFuture, redirectFuture, dirListFuture, dnsFuture, wafFuture
-                ).get(120, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
-                // Timeout ou erro interno — continua com resultados parciais
-                // getNow(default) retorna o default para futures não completados
-            }
+                        robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture
+                ).get(60, TimeUnit.SECONDS);
+            } catch (Exception ignored) {}
 
-            // Coleta resultados com fallbacks seguros caso algum timeout
-            CorsResult                 corsResult               = corsFuture.getNow(null);
-            List<String>               sensitiveRobotsPaths    = robotsFuture.getNow(List.of());
-            List<SensitiveFileFinding> sensitiveFiles          = filesFuture.getNow(List.of());
-            List<HttpMethodFinding>    dangerousHttpMethods    = methodsFuture.getNow(List.of());
-            List<OpenRedirectFinding>  openRedirectFindings    = redirectFuture.getNow(List.of());
+            List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
+            List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
             List<DirectoryListingFinding> directoryListingFindings = dirListFuture.getNow(List.of());
-            DnsSecurityResult          dnsSecurityResult       = dnsFuture.getNow(null);
-            WafDetectionResult         wafDetectionResult      = wafFuture.getNow(null);
+            DnsSecurityResult             dnsSecurityResult        = dnsFuture.getNow(null);
 
-            // SecurityTxt com null-safety
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
             boolean secTxtFound   = securityTxt != null && securityTxt.found();
             String  secTxtContact = securityTxt != null ? securityTxt.contact() : null;
 
-            // ── Fase 3: score passivo ──────────────────────────────────────────
+            // ── Score passivo (sem CORS, sem SensitiveFiles, sem ports) ─────────
             ScoreResult passiveScore = scoreService.calculate(
                     sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
                     false, inputSurfaceDetected, false, false, false, List.of(),
-                    corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
-                    sensitiveFiles, dangerousHttpMethods, secTxtFound,
-                    openRedirectFindings, directoryListingFindings,
-                    dnsSecurityResult, wafDetectionResult
+                    null, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
+                    List.of(), dangerousHttpMethods, secTxtFound,
+                    List.of(), directoryListingFindings,
+                    dnsSecurityResult, null
             );
 
             ScanResult passiveResult = ScanResult.builder()
-                    .url(inputUrl)
-                    .finalUrl(fetch.getFinalUrl())
+                    .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .httpStatus(fetch.getStatusCode())
                     .redirectsToHttps(redirectsToHttps)
-                    .sslInfo(sslInfo)
-                    .tlsDetails(tlsDetails)
-                    .headers(analyzedHeaders)
-                    .serverVersionExposed(serverVersionExposed)
-                    .activeMode(false)
-                    .inputSurfaceDetected(inputSurfaceDetected)
-                    .dbErrorLeakageSuspected(false)
-                    .xssProbePerformed(false)
-                    .reflectedXssSuspected(false)
-                    .openPorts(List.of())
-                    .corsResult(corsResult)
+                    .sslInfo(sslInfo).tlsDetails(tlsDetails)
+                    .headers(analyzedHeaders).serverVersionExposed(serverVersionExposed)
+                    .activeMode(false).inputSurfaceDetected(inputSurfaceDetected)
+                    .dbErrorLeakageSuspected(false).xssProbePerformed(false)
+                    .reflectedXssSuspected(false).openPorts(List.of())
+                    .corsResult(null)               // ← active only
                     .cookieIssues(cookieIssues)
                     .sensitiveRobotsPaths(sensitiveRobotsPaths)
-                    .score(passiveScore)
-                    .sensitiveFiles(sensitiveFiles)
+                    .sensitiveFiles(List.of())      // ← active only
                     .dangerousHttpMethods(dangerousHttpMethods)
-                    .securityTxtPresent(secTxtFound)
-                    .securityTxtContact(secTxtContact)
-                    .openRedirectFindings(openRedirectFindings)
+                    .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
+                    .openRedirectFindings(List.of())
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult)
-                    .wafDetectionResult(wafDetectionResult)
+                    .wafDetectionResult(null)       // ← active only
+                    .score(passiveScore)
                     .build();
 
-            // ── Fase 4: ownership check ────────────────────────────────────────
+            // ── Fase 3: ownership check ────────────────────────────────────────
             if (active) {
                 boolean needsOwnership  = domainProtectionService.requiresOwnershipForActiveScan(passiveResult);
                 boolean bypassOwnership = currentUser != null &&
@@ -225,47 +193,88 @@ public class ScanOrchestrator {
                 }
             }
 
-            // ── Fase 5: checks ativos ──────────────────────────────────────────
-            boolean xssProbePerformed     = false;
-            boolean reflectedXssSuspected = false;
-            boolean dbErrorLeakage        = false;
-            List<PortFinding>         openPorts       = List.of();
-            List<OpenRedirectFinding> activeRedirects = openRedirectFindings;
-
-            if (active) {
-                if (inputSurfaceDetected) {
-                    xssProbePerformed     = true;
-                    reflectedXssSuspected = xssProbeService.reflectedMarkerAppears(target);
-                    dbErrorLeakage        = errorDisclosureService.detectsDbErrorLeakage(target);
-                    activeRedirects       = openRedirectService.scan(target, true);
-                }
-                if (host != null && !host.isBlank()) {
-                    openPorts = portScanService.scanCommonPorts(host);
-                }
+            if (!active) {
+                scanCacheService.put(cacheKey, passiveResult);
+                scanHistoryService.save(passiveResult);
+                return passiveResult;
             }
 
-            // ── Fase 6: score final ────────────────────────────────────────────
+            // ── Fase 4: checks ativos — PARALELOS ─────────────────────────────
+            // CORS e SensitiveFiles ficam aqui pois enviam requests direcionados
+            // com payloads/origins forjadas — requerem autorização do domínio.
+            ExecutorService activePool = Executors.newFixedThreadPool(6);
+
+            var corsFuture     = CompletableFuture.supplyAsync(
+                            () -> corsAnalyzerService.analyze(target), activePool)
+                    .exceptionally(e -> null);
+
+            var filesFuture    = CompletableFuture.supplyAsync(
+                            () -> sensitiveFileService.scan(target), activePool)
+                    .exceptionally(e -> List.of());
+
+            var wafFuture      = CompletableFuture.supplyAsync(
+                            () -> wafDetectionService.scan(target), activePool)
+                    .exceptionally(e -> null);
+
+            var redirectFuture = CompletableFuture.supplyAsync(
+                            () -> openRedirectService.scan(target, true), activePool)
+                    .exceptionally(e -> List.of());
+
+            // XSS + DB error — só se tiver parâmetros na URL
+            var xssFuture = inputSurfaceDetected
+                    ? CompletableFuture.supplyAsync(
+                            () -> xssProbeService.reflectedMarkerAppears(target), activePool)
+                    .exceptionally(e -> false)
+                    : CompletableFuture.completedFuture(false);
+
+            var dbFuture = inputSurfaceDetected
+                    ? CompletableFuture.supplyAsync(
+                            () -> errorDisclosureService.detectsDbErrorLeakage(target), activePool)
+                    .exceptionally(e -> false)
+                    : CompletableFuture.completedFuture(false);
+
+            var portFuture = (host != null && !host.isBlank())
+                    ? CompletableFuture.supplyAsync(
+                            () -> portScanService.scanCommonPorts(host), activePool)
+                    .exceptionally(e -> List.of())
+                    : CompletableFuture.completedFuture(List.<PortFinding>of());
+
+            try {
+                CompletableFuture.allOf(
+                        corsFuture, filesFuture, wafFuture, redirectFuture,
+                        xssFuture, dbFuture, portFuture
+                ).get(120, TimeUnit.SECONDS);
+            } catch (Exception ignored) {}
+
+            activePool.shutdownNow();
+
+            CorsResult                 corsResult            = corsFuture.getNow(null);
+            List<SensitiveFileFinding> sensitiveFiles        = filesFuture.getNow(List.of());
+            WafDetectionResult         wafDetectionResult    = wafFuture.getNow(null);
+            List<OpenRedirectFinding>  openRedirectFindings  = redirectFuture.getNow(List.of());
+            boolean xssProbePerformed     = inputSurfaceDetected;
+            boolean reflectedXssSuspected = xssFuture.getNow(false);
+            boolean dbErrorLeakage        = dbFuture.getNow(false);
+            List<PortFinding> openPorts   = portFuture.getNow(List.of());
+
+            // ── Fase 5: score final ────────────────────────────────────────────
             ScoreResult score = scoreService.calculate(
                     sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
-                    active, inputSurfaceDetected, dbErrorLeakage,
+                    true, inputSurfaceDetected, dbErrorLeakage,
                     xssProbePerformed, reflectedXssSuspected, openPorts,
                     corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     sensitiveFiles, dangerousHttpMethods, secTxtFound,
-                    activeRedirects, directoryListingFindings,
+                    openRedirectFindings, directoryListingFindings,
                     dnsSecurityResult, wafDetectionResult
             );
 
             ScanResult result = ScanResult.builder()
-                    .url(inputUrl)
-                    .finalUrl(fetch.getFinalUrl())
+                    .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .httpStatus(fetch.getStatusCode())
                     .redirectsToHttps(redirectsToHttps)
-                    .sslInfo(sslInfo)
-                    .tlsDetails(tlsDetails)
-                    .headers(analyzedHeaders)
-                    .serverVersionExposed(serverVersionExposed)
-                    .activeMode(active)
-                    .inputSurfaceDetected(inputSurfaceDetected)
+                    .sslInfo(sslInfo).tlsDetails(tlsDetails)
+                    .headers(analyzedHeaders).serverVersionExposed(serverVersionExposed)
+                    .activeMode(true).inputSurfaceDetected(inputSurfaceDetected)
                     .dbErrorLeakageSuspected(dbErrorLeakage)
                     .xssProbePerformed(xssProbePerformed)
                     .reflectedXssSuspected(reflectedXssSuspected)
@@ -273,15 +282,14 @@ public class ScanOrchestrator {
                     .corsResult(corsResult)
                     .cookieIssues(cookieIssues)
                     .sensitiveRobotsPaths(sensitiveRobotsPaths)
-                    .score(score)
                     .sensitiveFiles(sensitiveFiles)
                     .dangerousHttpMethods(dangerousHttpMethods)
-                    .securityTxtPresent(secTxtFound)
-                    .securityTxtContact(secTxtContact)
-                    .openRedirectFindings(activeRedirects)
+                    .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
+                    .openRedirectFindings(openRedirectFindings)
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult)
                     .wafDetectionResult(wafDetectionResult)
+                    .score(score)
                     .build();
 
             scanCacheService.put(cacheKey, result);
@@ -296,7 +304,7 @@ public class ScanOrchestrator {
                     "Erro ao executar scan: " + cause.getClass().getSimpleName()
                             + (cause.getMessage() != null ? " — " + cause.getMessage() : ""), e);
         } finally {
-            pool.shutdownNow();
+            passivePool.shutdownNow();
         }
     }
 
