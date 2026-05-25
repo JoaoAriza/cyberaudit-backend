@@ -70,14 +70,16 @@ public class HttpMethodService {
 
             HttpResponse<Void> resp = client.send(
                     builder.build(), HttpResponse.BodyHandlers.discarding());
-
             int status = resp.statusCode();
 
             // Método explicitamente rejeitado — OK
             if (status == 405 || status == 501) return null;
 
-            // Rota não encontrada — não confirma que o método está habilitado
+            // Rota não encontrada — não confirma método habilitado
             if (status == 404 || status == 410) return null;
+
+            // Bad Request — servidor rejeitou, não confirma método habilitado
+            if (status == 400) return null;
 
             // Redirect — não conclusivo
             if (status >= 300 && status < 400) return null;
@@ -85,8 +87,6 @@ public class HttpMethodService {
             // Erro de servidor — não conclusivo
             if (status >= 500) return null;
 
-            // 200, 201, 204 = aceito
-            // 401, 403 = existe mas exige auth — ainda é informação relevante
             String severity = (status == 401 || status == 403)
                     ? "LOW"
                     : risk.severity();

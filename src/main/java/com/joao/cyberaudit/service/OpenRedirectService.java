@@ -4,9 +4,12 @@ import com.joao.cyberaudit.model.OpenRedirectFinding;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,17 +17,8 @@ import java.util.List;
 @Service
 public class OpenRedirectService {
 
-    /**
-     * Domínio externo controlado usado como payload.
-     * Se o servidor redirecionar para ele, confirmamos a vulnerabilidade.
-     * Não usamos um domínio real para não causar tráfego indesejado.
-     */
     private static final String PROBE_DOMAIN = "https://open-redirect-probe.cyberaudit.io";
 
-    /**
-     * Parâmetros comuns que costumam receber URLs de redirect.
-     * Ordem importa — os mais comuns primeiro.
-     */
     private static final List<String> REDIRECT_PARAMS = List.of(
             "redirect", "redirect_to", "redirect_url",
             "url", "next", "return", "return_url",
@@ -33,14 +27,9 @@ public class OpenRedirectService {
             "forward", "location", "link"
     );
 
-    /**
-     * Dois formatos de payload para cobrir diferentes implementações:
-     * 1. URL completa
-     * 2. URL com protocolo relativo (//domain)
-     */
     private static final List<String> PAYLOADS = List.of(
             PROBE_DOMAIN,
-            "//" + "open-redirect-probe.cyberaudit.io"
+            "//open-redirect-probe.cyberaudit.io"
     );
 
     private final HttpClient client = HttpClient.newBuilder()
@@ -48,13 +37,6 @@ public class OpenRedirectService {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    /**
-     * Testa open redirect apenas se a URL já tem parâmetros (superfície detectada)
-     * OU testa parâmetros comuns na raiz do site.
-     *
-     * Modo passivo: só testa se já há query params na URL alvo.
-     * Modo ativo: testa parâmetros comuns mesmo sem superfície detectada.
-     */
     public List<OpenRedirectFinding> scan(String targetUrl, boolean activeMode) {
         List<OpenRedirectFinding> findings = new ArrayList<>();
 
@@ -82,7 +64,7 @@ public class OpenRedirectService {
     private List<OpenRedirectFinding> testExistingParams(String url) {
         List<OpenRedirectFinding> findings = new ArrayList<>();
         try {
-            URI uri   = URI.create(url);
+            URI uri = URI.create(url);
             String query = uri.getQuery();
             if (query == null) return findings;
 
@@ -113,29 +95,46 @@ public class OpenRedirectService {
                     .header("User-Agent", "CyberAuditScanner/1.0")
                     .build();
 
-            HttpResponse<Void> resp = client.send(
-                    req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
 
             int status = resp.statusCode();
-
-            // Só nos interessa redirects (3xx)
             if (status < 300 || status >= 400) return null;
 
-            String location = resp.headers()
-                    .firstValue("location").orElse("");
-
+            String location = resp.headers().firstValue("location").orElse("");
             if (location.isBlank()) return null;
 
-            boolean vulnerable = location.contains("open-redirect-probe.cyberaudit.io");
+            if (!isRedirectingToProbe(location)) return null;
 
-            if (!vulnerable) return null;
-
-            return new OpenRedirectFinding(
-                    param, testUrl, location, true, "HIGH"
-            );
+            return new OpenRedirectFinding(param, testUrl, location, true, "HIGH");
 
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * Verifica se o HOST do Location header é o probe.
+     * Evita falsos positivos onde o probe aparece como query param
+     * (ex: Google OAuth redireciona para accounts.google.com?continue=<probe>).
+     */
+    private boolean isRedirectingToProbe(String location) {
+        try {
+            String normalized = location.startsWith("//")
+                    ? "https:" + location
+                    : location;
+
+            String decoded = URLDecoder.decode(normalized, StandardCharsets.UTF_8);
+            URI redirectUri = URI.create(decoded);
+            String host = redirectUri.getHost();
+
+            return host != null && (
+                    host.equals("open-redirect-probe.cyberaudit.io") ||
+                            host.endsWith(".open-redirect-probe.cyberaudit.io")
+            );
+        } catch (Exception e) {
+            return location.startsWith("https://open-redirect-probe.cyberaudit.io") ||
+                    location.startsWith("http://open-redirect-probe.cyberaudit.io")  ||
+                    location.startsWith("//open-redirect-probe.cyberaudit.io");
         }
     }
 
@@ -152,11 +151,6 @@ public class OpenRedirectService {
     }
 
     private String encode(String value) {
-        try {
-            return java.net.URLEncoder.encode(value,
-                    java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return value;
-        }
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }
