@@ -378,16 +378,33 @@ public class ScoreService {
         // ═══════════════════════════════════════════════════════
         // 16. WAF Detection
         // ═══════════════════════════════════════════════════════
-        if (wafDetectionResult != null && !wafDetectionResult.isDetected()) {
-            score -= 3;
-            notes.add("Sem WAF detectado: -3");
-            issues.add(new SecurityIssue(
-                    "NO_WAF_DETECTED",
-                    "Nenhum WAF (Web Application Firewall) detectado",
-                    "LOW",
-                    "Sem WAF, ataques como SQLi, XSS e brute-force chegam direto ao servidor de aplicação.",
-                    "Considere adicionar Cloudflare, AWS WAF ou similar como camada de proteção."
-            ));
+        if (wafDetectionResult != null) {
+            if (!wafDetectionResult.isDetected()) {
+                score -= 3;
+                notes.add("Sem WAF detectado: -3");
+                issues.add(new SecurityIssue(
+                        "NO_WAF_DETECTED",
+                        "Nenhum WAF (Web Application Firewall) detectado",
+                        "LOW",
+                        "Sem WAF, ataques como SQLi, XSS e brute-force chegam direto ao servidor de aplicação.",
+                        "Considere adicionar Cloudflare, AWS WAF ou similar como camada de proteção."
+                ));
+            } else {
+                // WAF detectado — bônus baseado em confiança e bloqueio de probe
+                boolean probeBlocked = "BLOCKED".equals(wafDetectionResult.getProbeResponse());
+                String  confidence   = wafDetectionResult.getConfidence();
+
+                int bonus = 0;
+                if (probeBlocked && "HIGH".equals(confidence))   bonus = 8;
+                else if (probeBlocked)                           bonus = 5;
+                else if ("HIGH".equals(confidence))              bonus = 4;
+                else if ("MEDIUM".equals(confidence))            bonus = 2;
+                else                                             bonus = 1;
+
+                score += bonus;
+                notes.add("WAF/CDN detectado (" + wafDetectionResult.getProvider()
+                        + (probeBlocked ? ", probe bloqueado" : "") + "): +" + bonus);
+            }
         }
 
         score = Math.max(0, score);
