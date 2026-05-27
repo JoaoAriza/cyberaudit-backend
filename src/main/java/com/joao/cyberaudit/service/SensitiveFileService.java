@@ -15,56 +15,31 @@ import java.util.Locale;
 @Service
 public class SensitiveFileService {
 
-    /**
-     * Arquivos que nunca deveriam ser acessíveis publicamente.
-     * Cada entrada: {path, severidade}
-     *
-     * Critério de severidade:
-     * CRITICAL — exposição direta de credenciais ou configuração de banco
-     * HIGH     — configuração da aplicação ou arquivos de ambiente
-     * MEDIUM   — metadados que facilitam reconhecimento
-     */
     private static final List<FileTarget> TARGETS = List.of(
-            // Ambiente e credenciais
             new FileTarget("/.env",                    "CRITICAL"),
             new FileTarget("/.env.local",              "CRITICAL"),
             new FileTarget("/.env.production",         "CRITICAL"),
             new FileTarget("/.env.backup",             "CRITICAL"),
-
-            // WordPress
             new FileTarget("/wp-config.php",           "CRITICAL"),
             new FileTarget("/wp-config.php.bak",       "CRITICAL"),
             new FileTarget("/wp-config-sample.php",    "MEDIUM"),
-
-            // PHP genérico
             new FileTarget("/config.php",              "HIGH"),
             new FileTarget("/configuration.php",       "HIGH"),
             new FileTarget("/config/database.php",     "CRITICAL"),
             new FileTarget("/app/config/database.yml", "CRITICAL"),
-
-            // Backups
             new FileTarget("/backup.sql",              "CRITICAL"),
             new FileTarget("/backup.zip",              "HIGH"),
             new FileTarget("/db.sql",                  "CRITICAL"),
             new FileTarget("/dump.sql",                "CRITICAL"),
             new FileTarget("/database.sql",            "CRITICAL"),
-
-            // Git exposto
             new FileTarget("/.git/config",             "HIGH"),
             new FileTarget("/.git/HEAD",               "HIGH"),
-
-            // Laravel
-            new FileTarget("/.env",                    "CRITICAL"),
             new FileTarget("/storage/logs/laravel.log","HIGH"),
-
-            // Spring Boot / Java
             new FileTarget("/actuator/env",            "CRITICAL"),
             new FileTarget("/actuator/beans",          "HIGH"),
             new FileTarget("/actuator/mappings",       "MEDIUM"),
             new FileTarget("/application.properties",  "HIGH"),
             new FileTarget("/application.yml",         "HIGH"),
-
-            // Outros
             new FileTarget("/server-status",           "MEDIUM"),
             new FileTarget("/phpinfo.php",             "HIGH"),
             new FileTarget("/.htpasswd",               "CRITICAL"),
@@ -80,7 +55,6 @@ public class SensitiveFileService {
 
     public List<SensitiveFileFinding> scan(String baseUrl) {
         List<SensitiveFileFinding> findings = new ArrayList<>();
-
         String base = extractBase(baseUrl);
         if (base == null) return findings;
 
@@ -108,22 +82,21 @@ public class SensitiveFileService {
             int status = resp.statusCode();
 
             if (status == 404 || status == 410 || status >= 500) return null;
-
-            if (status == 301 || status == 302) return null;
+            if (status == 301 || status == 302)                   return null;
 
             String exposure;
             String preview = null;
 
             if (status == 200) {
-                exposure = "EXPOSED";
                 String body = resp.body() == null ? "" : resp.body().trim();
-                if (isRealContent(target.path, body)) {
-                    preview = body.length() > 150
-                            ? body.substring(0, 150) + "..."
-                            : body;
-                } else {
-                    return null;
-                }
+                String contentType = resp.headers()
+                        .firstValue("content-type").orElse("").toLowerCase();
+
+                if (!isRealContent(target.path, body, contentType)) return null;
+
+                exposure = "EXPOSED";
+                preview  = body.length() > 150 ? body.substring(0, 150) + "..." : body;
+
             } else if (status == 403) {
                 exposure = "PROTECTED";
             } else {
@@ -138,47 +111,128 @@ public class SensitiveFileService {
         }
     }
 
-    private boolean isRealContent(String path, String body) {
+    /**
+     * Verifica se o body é realmente o arquivo sensível esperado.
+     *
+     * Problema principal: SPAs (React, Vue, Next) retornam HTTP 200 com
+     * <!DOCTYPE html> para qualquer path — incluindo /actuator/env, /phpinfo.php, etc.
+     * Precisamos distinguir o conteúdo real do HTML genérico de fallback.
+     */
+    private boolean isRealContent(String path, String body, String contentType) {
         if (body.isBlank()) return false;
 
-        String lower = body.toLowerCase(Locale.ROOT);
+        String lower     = body.toLowerCase(Locale.ROOT);
         String lowerPath = path.toLowerCase(Locale.ROOT);
 
-        if (lower.contains("<!doctype html") || lower.contains("<html")) {
-            if (lowerPath.contains("phpinfo")) return true;
-            if (lowerPath.contains("actuator")) return true;
-            return false;
+        boolean isHtml = lower.contains("<!doctype html") || lower.contains("<html");
+
+        // ── Actuator (Spring Boot) ─────────────────────────────────────────────
+        // JSON real contém campos específicos como "activeProfiles", "beans", etc.
+        // HTML genérico de SPA não contém esses campos.
+        if (lowerPath.contains("actuator")) {
+            if (isHtml) return false; // SPA fallback — falso positivo
+            // Conteúdo real do actuator é JSON
+            return contentType.contains("application/json") ||
+                    lower.contains("\"activeprofiles\"") ||
+                    lower.contains("\"beans\"") ||
+                    lower.contains("\"mappings\"") ||
+                    lower.contains("\"propertysources\"") ||
+                    lower.contains("\"contexts\"");
         }
 
-        if (lowerPath.endsWith(".env") && body.contains("=")) return true;
+        // ── phpinfo.php ────────────────────────────────────────────────────────
+        // phpinfo real tem estrutura muito específica com tabelas PHP
+        if (lowerPath.contains("phpinfo")) {
+            if (!isHtml) return false;
+            // phpinfo real contém estas strings específicas
+            return lower.contains("php version") ||
+                    lower.contains("phpinfo()") ||
+                    lower.contains("php credits") ||
+                    lower.contains("configuration file") ||
+                    lower.contains("zend engine");
+        }
 
-        if (lowerPath.endsWith(".sql") &&
-                (lower.contains("insert into") || lower.contains("create table")))
-            return true;
+        // ── Qualquer outro arquivo HTML → SPA fallback, descartar ─────────────
+        if (isHtml) return false;
 
-        if (lowerPath.contains(".git") &&
-                (lower.contains("[core]") || lower.contains("ref:")))
-            return true;
+        // ── .env ──────────────────────────────────────────────────────────────
+        if (lowerPath.endsWith(".env") ||
+                lowerPath.endsWith(".env.local") ||
+                lowerPath.endsWith(".env.production") ||
+                lowerPath.endsWith(".env.backup")) {
+            // .env real tem pares KEY=VALUE, geralmente com APP_, DB_, etc.
+            return body.contains("=") &&
+                    (lower.contains("app_") || lower.contains("db_") ||
+                            lower.contains("secret") || lower.contains("key") ||
+                            lower.contains("password") || lower.contains("token") ||
+                            // Qualquer linha no formato KEY=VALUE
+                            body.matches("(?s).*[A-Z_]+=.+.*"));
+        }
 
-        if (lowerPath.endsWith(".php") && lower.contains("<?php")) return true;
+        // ── SQL dumps ─────────────────────────────────────────────────────────
+        if (lowerPath.endsWith(".sql")) {
+            return lower.contains("insert into") || lower.contains("create table") ||
+                    lower.contains("drop table")  || lower.contains("alter table");
+        }
 
-        if ((lowerPath.endsWith(".yml") || lowerPath.endsWith(".yaml") ||
-                lowerPath.endsWith(".properties")) && body.contains(":"))
-            return true;
+        // ── Git ───────────────────────────────────────────────────────────────
+        if (lowerPath.contains(".git")) {
+            return lower.contains("[core]") || lower.contains("ref:") ||
+                    lower.contains("repositoryformatversion");
+        }
 
+        // ── PHP config files ──────────────────────────────────────────────────
+        if (lowerPath.endsWith(".php")) {
+            return lower.contains("<?php") ||
+                    lower.contains("define(") ||
+                    lower.contains("$db_");
+        }
+
+        // ── YAML / Properties ─────────────────────────────────────────────────
+        if (lowerPath.endsWith(".yml") || lowerPath.endsWith(".yaml") ||
+                lowerPath.endsWith(".properties")) {
+            return body.contains(":") &&
+                    (lower.contains("datasource") || lower.contains("database") ||
+                            lower.contains("password") || lower.contains("secret") ||
+                            lower.contains("spring") || lower.contains("server.port"));
+        }
+
+        // ── crossdomain.xml / clientaccesspolicy.xml ─────────────────────────
+        if (lowerPath.endsWith(".xml")) {
+            return lower.contains("cross-domain-policy") ||
+                    lower.contains("cross-domain-access") ||
+                    lower.contains("clientaccesspolicy");
+        }
+
+        // ── .htpasswd ─────────────────────────────────────────────────────────
+        if (lowerPath.contains(".htpasswd")) {
+            // htpasswd contém user:hash (bcrypt, MD5, etc.)
+            return body.matches("(?s).*\\w+:\\$.*");
+        }
+
+        // ── .htaccess ─────────────────────────────────────────────────────────
+        if (lowerPath.contains(".htaccess")) {
+            return lower.contains("rewriterule") || lower.contains("allow from") ||
+                    lower.contains("deny from")   || lower.contains("authtype");
+        }
+
+        // ── server-status (Apache) ────────────────────────────────────────────
+        if (lowerPath.contains("server-status")) {
+            return lower.contains("apache") && lower.contains("server status");
+        }
+
+        // Fallback genérico: conteúdo não-HTML com tamanho razoável
         return body.length() > 50;
     }
 
     private String extractBase(String url) {
         try {
-            URI uri = URI.create(url);
+            URI uri    = URI.create(url);
             String scheme = uri.getScheme();
             String host   = uri.getHost();
             int    port   = uri.getPort();
-
-            if (port > 0 && port != 80 && port != 443) {
+            if (port > 0 && port != 80 && port != 443)
                 return scheme + "://" + host + ":" + port;
-            }
             return scheme + "://" + host;
         } catch (Exception e) {
             return null;
