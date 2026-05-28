@@ -91,8 +91,16 @@ public class ScanOrchestrator {
                 : new TlsDetails("N/A", "N/A", false, "HTTPS não disponível");
 
         boolean         redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
-        String          analysisUrl      = supportsHttps ? httpsUrl : inputUrl;
-        HttpFetchResult fetch            = httpFetchService.fetchHeaders(analysisUrl);
+        String analysisUrl;
+        if (supportsHttps) {
+            analysisUrl = httpsUrl;
+        } else if (sslInfo.isHttps()) {
+            analysisUrl = toHttp(inputUrl);
+        } else {
+            analysisUrl = toHttp(inputUrl);
+        }
+
+        HttpFetchResult fetch = httpFetchService.fetchHeaders(analysisUrl);
 
         Map<String, String> analyzedHeaders;
         boolean serverVersionExposed = false;
