@@ -7,8 +7,9 @@ import com.joao.cyberaudit.service.AuthService;
 import com.joao.cyberaudit.service.GuestRateLimitService;
 import com.joao.cyberaudit.service.InviteService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -18,16 +19,16 @@ import java.util.Map;
 @RequestMapping("/auth")
 public class AuthController {
 
-    private final InviteService inviteService;
-    private final AuthService          authService;
+    private final InviteService         inviteService;
+    private final AuthService           authService;
     private final GuestRateLimitService guestRateLimitService;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
                           InviteService inviteService) {
-        this.authService          = authService;
+        this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
-        this.inviteService = inviteService;
+        this.inviteService         = inviteService;
     }
 
     @PostMapping("/setup")
@@ -41,27 +42,29 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<UserDto> me(@AuthenticationPrincipal AppUser user) {
-        UserDto dto = UserDto.from(user);
-        dto.setRemainingScans(null);
-        dto.setDailyLimit(null);
-        return ResponseEntity.ok(dto);
+    public ResponseEntity<?> me() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()
+                || auth.getPrincipal() instanceof String) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Token inválido ou expirado."));
+        }
+        AppUser u = (AppUser) auth.getPrincipal();
+        return ResponseEntity.ok(UserDto.from(u));
     }
 
     @GetMapping("/guest-status")
     public ResponseEntity<Map<String, Object>> guestStatus(HttpServletRequest request) {
-        String ip           = request.getRemoteAddr();
-        int    remaining    = guestRateLimitService.getRemainingScans(ip);
-        int    dailyLimit   = GuestRateLimitService.DAILY_LIMIT;
-        int    used         = dailyLimit - remaining;
-
+        String ip         = request.getRemoteAddr();
+        int    remaining  = guestRateLimitService.getRemainingScans(ip);
+        int    dailyLimit = GuestRateLimitService.DAILY_LIMIT;
+        int    used       = dailyLimit - remaining;
         return ResponseEntity.ok(Map.of(
                 "ip",            ip,
                 "used",          used,
                 "remaining",     remaining,
                 "dailyLimit",    dailyLimit,
-                "resetsAt",      LocalDate.now().plusDays(1)
-                        .atStartOfDay().toString(),
+                "resetsAt",      LocalDate.now().plusDays(1).atStartOfDay().toString(),
                 "authenticated", false
         ));
     }
@@ -72,7 +75,7 @@ public class AuthController {
             @RequestBody InviteAcceptRequest req) {
         inviteService.accept(token, req);
         return ResponseEntity.ok(Map.of(
-                "message", "Conta criada com sucesso. Faça login para continuar.",
+                "message",  "Conta criada com sucesso. Faça login para continuar.",
                 "loginUrl", "/auth/login"
         ));
     }

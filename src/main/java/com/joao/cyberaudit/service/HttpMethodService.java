@@ -87,6 +87,12 @@ public class HttpMethodService {
             // Erro de servidor — não conclusivo
             if (status >= 500) return null;
 
+            if (status == 200) {
+                String contentType = resp.headers()
+                        .firstValue("content-type").orElse("").toLowerCase();
+                if (contentType.contains("text/html")) return null;
+            }
+
             String severity = (status == 401 || status == 403)
                     ? "LOW"
                     : risk.severity();
