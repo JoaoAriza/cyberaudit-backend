@@ -12,27 +12,28 @@ import java.util.concurrent.*;
 @Service
 public class ScanOrchestrator {
 
-    private final SSLService              sslService;
-    private final TlsVersionService       tlsVersionService;
-    private final HeaderService           headerService;
-    private final ScoreService            scoreService;
-    private final HttpFetchService        httpFetchService;
-    private final ErrorDisclosureService  errorDisclosureService;
-    private final PortScanService         portScanService;
-    private final XssProbeService         xssProbeService;
-    private final WafDetectionService     wafDetectionService;
-    private final ScanCacheService        scanCacheService;
-    private final CorsAnalyzerService     corsAnalyzerService;
-    private final CookieSecurityService   cookieSecurityService;
-    private final RobotsTxtService        robotsTxtService;
-    private final DnsSecurityService      dnsSecurityService;
-    private final ScanHistoryService      scanHistoryService;
-    private final DomainProtectionService domainProtectionService;
-    private final SensitiveFileService    sensitiveFileService;
-    private final HttpMethodService       httpMethodService;
-    private final SecurityTxtService      securityTxtService;
-    private final OpenRedirectService     openRedirectService;
-    private final DirectoryListingService directoryListingService;
+    private final SSLService               sslService;
+    private final TlsVersionService        tlsVersionService;
+    private final HeaderService            headerService;
+    private final ScoreService             scoreService;
+    private final HttpFetchService         httpFetchService;
+    private final ErrorDisclosureService   errorDisclosureService;
+    private final PortScanService          portScanService;
+    private final XssProbeService          xssProbeService;
+    private final WafDetectionService      wafDetectionService;
+    private final ScanCacheService         scanCacheService;
+    private final CorsAnalyzerService      corsAnalyzerService;
+    private final CookieSecurityService    cookieSecurityService;
+    private final RobotsTxtService         robotsTxtService;
+    private final DnsSecurityService       dnsSecurityService;
+    private final ScanHistoryService       scanHistoryService;
+    private final DomainProtectionService  domainProtectionService;
+    private final SensitiveFileService     sensitiveFileService;
+    private final HttpMethodService        httpMethodService;
+    private final SecurityTxtService       securityTxtService;
+    private final OpenRedirectService      openRedirectService;
+    private final DirectoryListingService  directoryListingService;
+    private final TechFingerprintService   techFingerprintService;   // ← novo
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -45,7 +46,8 @@ public class ScanOrchestrator {
             ScanHistoryService scanHistoryService, DomainProtectionService domainProtectionService,
             SensitiveFileService sensitiveFileService, HttpMethodService httpMethodService,
             SecurityTxtService securityTxtService, OpenRedirectService openRedirectService,
-            DirectoryListingService directoryListingService) {
+            DirectoryListingService directoryListingService,
+            TechFingerprintService techFingerprintService) {          // ← novo
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -67,6 +69,7 @@ public class ScanOrchestrator {
         this.securityTxtService      = securityTxtService;
         this.openRedirectService     = openRedirectService;
         this.directoryListingService = directoryListingService;
+        this.techFingerprintService  = techFingerprintService;        // ← novo
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -90,15 +93,12 @@ public class ScanOrchestrator {
                 ? tlsVersionService.inspect(host, 443)
                 : new TlsDetails("N/A", "N/A", false, "HTTPS não disponível");
 
-        boolean         redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
+        boolean redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
+
         String analysisUrl;
-        if (supportsHttps) {
-            analysisUrl = httpsUrl;
-        } else if (sslInfo.isHttps()) {
-            analysisUrl = toHttp(inputUrl);
-        } else {
-            analysisUrl = toHttp(inputUrl);
-        }
+        if (supportsHttps)        analysisUrl = httpsUrl;
+        else if (sslInfo.isHttps()) analysisUrl = toHttp(inputUrl);
+        else                      analysisUrl = toHttp(inputUrl);
 
         HttpFetchResult fetch = httpFetchService.fetchHeaders(analysisUrl);
 
@@ -113,12 +113,14 @@ public class ScanOrchestrator {
 
         String  target               = fetch.getFinalUrl() != null ? fetch.getFinalUrl() : analysisUrl;
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
-
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
 
+        // ── Fase 1b: fingerprint (passivo, usa headers + cookies + HTML) ──────
+        // Roda junto com a infra porque não depende de modo ativo
+        TechFingerprintResult techFingerprint = techFingerprintService.fingerprint(
+                target, analyzedHeaders, fetch.getRawSetCookies());
+
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
-        // Apenas checks que NÃO enviam requests direcionados ao alvo com payloads
-        // ou origins forjadas. CORS e SensitiveFiles foram movidos para Fase 5 (active).
         ExecutorService passivePool = Executors.newFixedThreadPool(5);
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
@@ -156,7 +158,6 @@ public class ScanOrchestrator {
             boolean secTxtFound   = securityTxt != null && securityTxt.found();
             String  secTxtContact = securityTxt != null ? securityTxt.contact() : null;
 
-            // ── Score passivo (sem CORS, sem SensitiveFiles, sem ports) ─────────
             ScoreResult passiveScore = scoreService.calculate(
                     sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
                     false, inputSurfaceDetected, false, false, false, List.of(),
@@ -175,16 +176,17 @@ public class ScanOrchestrator {
                     .activeMode(false).inputSurfaceDetected(inputSurfaceDetected)
                     .dbErrorLeakageSuspected(false).xssProbePerformed(false)
                     .reflectedXssSuspected(false).openPorts(List.of())
-                    .corsResult(null)               // ← active only
+                    .corsResult(null)
                     .cookieIssues(cookieIssues)
                     .sensitiveRobotsPaths(sensitiveRobotsPaths)
-                    .sensitiveFiles(List.of())      // ← active only
+                    .sensitiveFiles(List.of())
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
                     .openRedirectFindings(List.of())
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult)
-                    .wafDetectionResult(null)       // ← active only
+                    .wafDetectionResult(null)
+                    .techFingerprint(techFingerprint)              // ← novo
                     .score(passiveScore)
                     .build();
 
@@ -212,8 +214,6 @@ public class ScanOrchestrator {
             }
 
             // ── Fase 4: checks ativos — PARALELOS ─────────────────────────────
-            // CORS e SensitiveFiles ficam aqui pois enviam requests direcionados
-            // com payloads/origins forjadas — requerem autorização do domínio.
             ExecutorService activePool = Executors.newFixedThreadPool(6);
 
             var corsFuture     = CompletableFuture.supplyAsync(
@@ -232,7 +232,6 @@ public class ScanOrchestrator {
                             () -> openRedirectService.scan(target, true), activePool)
                     .exceptionally(e -> List.of());
 
-            // XSS + DB error — só se tiver parâmetros na URL
             var xssFuture = inputSurfaceDetected
                     ? CompletableFuture.supplyAsync(
                             () -> xssProbeService.reflectedMarkerAppears(target), activePool)
@@ -301,6 +300,7 @@ public class ScanOrchestrator {
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult)
                     .wafDetectionResult(wafDetectionResult)
+                    .techFingerprint(techFingerprint)              // ← novo
                     .score(score)
                     .build();
 

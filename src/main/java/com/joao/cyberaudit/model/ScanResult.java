@@ -46,6 +46,8 @@ public class ScanResult {
     private List<OpenRedirectFinding> openRedirectFindings;
     private List<DirectoryListingFinding> directoryListingFindings;
 
-    private ScoreResult score;
+    // ← novo
+    private TechFingerprintResult techFingerprint;
 
+    private ScoreResult score;
 }
