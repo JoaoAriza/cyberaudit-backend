@@ -34,7 +34,8 @@ public class ScanOrchestrator {
     private final OpenRedirectService     openRedirectService;
     private final DirectoryListingService directoryListingService;
     private final TechFingerprintService  techFingerprintService;
-    private final CVECorrelationService   cveCorrelationService;  // ← novo
+    private final CVECorrelationService   cveCorrelationService;
+    private final ScanChangeDetector      scanChangeDetector;    // ← novo
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -49,7 +50,8 @@ public class ScanOrchestrator {
             SecurityTxtService securityTxtService, OpenRedirectService openRedirectService,
             DirectoryListingService directoryListingService,
             TechFingerprintService techFingerprintService,
-            CVECorrelationService cveCorrelationService) {          // ← novo
+            CVECorrelationService cveCorrelationService,
+            ScanChangeDetector scanChangeDetector) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -72,7 +74,8 @@ public class ScanOrchestrator {
         this.openRedirectService     = openRedirectService;
         this.directoryListingService = directoryListingService;
         this.techFingerprintService  = techFingerprintService;
-        this.cveCorrelationService   = cveCorrelationService;      // ← novo
+        this.cveCorrelationService   = cveCorrelationService;
+        this.scanChangeDetector      = scanChangeDetector;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -118,20 +121,21 @@ public class ScanOrchestrator {
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
 
-        // ── Fase 1b: fingerprint + CVE (passivo, paralelo) ────────────────────
-        // Fingerprint usa headers+cookies já buscados + 1 GET ao HTML
-        // CVE usa resultado do fingerprint para queries na NVD API
-        // Ambos rodam em paralelo com os checks passivos da Fase 2
+        // ── Fase 1b: fingerprint + CVE (paralelo) ─────────────────────────────
         ExecutorService fingerprintPool = Executors.newFixedThreadPool(2);
 
         var fingerprintFuture = CompletableFuture.supplyAsync(
                 () -> techFingerprintService.fingerprint(target, analyzedHeaders, fetch.getRawSetCookies()),
                 fingerprintPool).exceptionally(e -> null);
 
-        // CVE só pode rodar após fingerprint — encadeia
         var cveFuture = fingerprintFuture.thenApplyAsync(
                 fp -> fp != null ? cveCorrelationService.correlate(fp) : List.<CVEFinding>of(),
                 fingerprintPool);
+
+        // ── Busca scan anterior ANTES de salvar (para change detection) ───────
+        ScanResult previousScan = (host != null)
+                ? scanHistoryService.findLastResult(host, active).orElse(null)
+                : null;
 
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
         ExecutorService passivePool = Executors.newFixedThreadPool(5);
@@ -139,24 +143,19 @@ public class ScanOrchestrator {
             var robotsFuture = CompletableFuture.supplyAsync(
                             () -> robotsTxtService.findSensitivePaths(target), passivePool)
                     .exceptionally(e -> List.of());
-
             var secTxtFuture = CompletableFuture.supplyAsync(
                             () -> securityTxtService.check(target), passivePool)
                     .exceptionally(e -> null);
-
             var dnsFuture = CompletableFuture.supplyAsync(
                             () -> dnsSecurityService.scan(host), passivePool)
                     .exceptionally(e -> null);
-
             var methodsFuture = CompletableFuture.supplyAsync(
                             () -> httpMethodService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
-
             var dirListFuture = CompletableFuture.supplyAsync(
                             () -> directoryListingService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
 
-            // Aguarda passivos + fingerprint + CVE
             try {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
@@ -182,10 +181,10 @@ public class ScanOrchestrator {
                     false, inputSurfaceDetected, false, false, false, List.of(),
                     null, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     List.of(), dangerousHttpMethods, secTxtFound,
-                    List.of(), directoryListingFindings,
-                    dnsSecurityResult, null
+                    List.of(), directoryListingFindings, dnsSecurityResult, null
             );
 
+            // ── Monta resultado passivo ────────────────────────────────────────
             ScanResult passiveResult = ScanResult.builder()
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .httpStatus(fetch.getStatusCode())
@@ -195,18 +194,19 @@ public class ScanOrchestrator {
                     .activeMode(false).inputSurfaceDetected(inputSurfaceDetected)
                     .dbErrorLeakageSuspected(false).xssProbePerformed(false)
                     .reflectedXssSuspected(false).openPorts(List.of())
-                    .corsResult(null)
-                    .cookieIssues(cookieIssues)
-                    .sensitiveRobotsPaths(sensitiveRobotsPaths)
-                    .sensitiveFiles(List.of())
+                    .corsResult(null).cookieIssues(cookieIssues)
+                    .sensitiveRobotsPaths(sensitiveRobotsPaths).sensitiveFiles(List.of())
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
                     .openRedirectFindings(List.of())
                     .directoryListingFindings(directoryListingFindings)
-                    .dnsSecurityResult(dnsSecurityResult)
-                    .wafDetectionResult(null)
-                    .techFingerprint(techFingerprint)
-                    .cveFindings(cveFindings)                       // ← novo
+                    .dnsSecurityResult(dnsSecurityResult).wafDetectionResult(null)
+                    .techFingerprint(techFingerprint).cveFindings(cveFindings)
+                    .changes(scanChangeDetector.detect(
+                            buildPartialForDiff(passiveScore, sslInfo, analyzedHeaders,
+                                    serverVersionExposed, dangerousHttpMethods, List.of(),
+                                    dnsSecurityResult, null, techFingerprint, List.of()),
+                            previousScan))                             // ← change detection
                     .score(passiveScore)
                     .build();
 
@@ -216,7 +216,6 @@ public class ScanOrchestrator {
                 boolean bypassOwnership = currentUser != null &&
                         (currentUser.getRole() == Role.OWNER ||
                                 currentUser.getRole() == Role.ADMIN);
-
                 if (needsOwnership && !bypassOwnership &&
                         !domainProtectionService.isOwnershipVerified(host)) {
                     throw new OwnershipNotVerifiedException(passiveResult,
@@ -244,7 +243,6 @@ public class ScanOrchestrator {
                     () -> wafDetectionService.scan(target), activePool).exceptionally(e -> null);
             var redirectFuture = CompletableFuture.supplyAsync(
                     () -> openRedirectService.scan(target, true), activePool).exceptionally(e -> List.of());
-
             var xssFuture = inputSurfaceDetected
                     ? CompletableFuture.supplyAsync(() -> xssProbeService.reflectedMarkerAppears(target), activePool).exceptionally(e -> false)
                     : CompletableFuture.completedFuture(false);
@@ -257,7 +255,8 @@ public class ScanOrchestrator {
 
             try {
                 CompletableFuture.allOf(
-                        corsFuture, filesFuture, wafFuture, redirectFuture, xssFuture, dbFuture, portFuture
+                        corsFuture, filesFuture, wafFuture, redirectFuture,
+                        xssFuture, dbFuture, portFuture
                 ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
@@ -272,7 +271,6 @@ public class ScanOrchestrator {
             boolean dbErrorLeakage        = dbFuture.getNow(false);
             List<PortFinding> openPorts   = portFuture.getNow(List.of());
 
-            // ── Fase 5: score final ────────────────────────────────────────────
             ScoreResult score = scoreService.calculate(
                     sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
                     true, inputSurfaceDetected, dbErrorLeakage,
@@ -293,19 +291,20 @@ public class ScanOrchestrator {
                     .dbErrorLeakageSuspected(dbErrorLeakage)
                     .xssProbePerformed(xssProbePerformed)
                     .reflectedXssSuspected(reflectedXssSuspected)
-                    .openPorts(openPorts)
-                    .corsResult(corsResult)
+                    .openPorts(openPorts).corsResult(corsResult)
                     .cookieIssues(cookieIssues)
-                    .sensitiveRobotsPaths(sensitiveRobotsPaths)
-                    .sensitiveFiles(sensitiveFiles)
+                    .sensitiveRobotsPaths(sensitiveRobotsPaths).sensitiveFiles(sensitiveFiles)
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
                     .openRedirectFindings(openRedirectFindings)
                     .directoryListingFindings(directoryListingFindings)
-                    .dnsSecurityResult(dnsSecurityResult)
-                    .wafDetectionResult(wafDetectionResult)
-                    .techFingerprint(techFingerprint)
-                    .cveFindings(cveFindings)                       // ← novo
+                    .dnsSecurityResult(dnsSecurityResult).wafDetectionResult(wafDetectionResult)
+                    .techFingerprint(techFingerprint).cveFindings(cveFindings)
+                    .changes(scanChangeDetector.detect(
+                            buildPartialForDiff(score, sslInfo, analyzedHeaders,
+                                    serverVersionExposed, dangerousHttpMethods, openPorts,
+                                    dnsSecurityResult, wafDetectionResult, techFingerprint, sensitiveFiles),
+                            previousScan))
                     .score(score)
                     .build();
 
@@ -323,6 +322,25 @@ public class ScanOrchestrator {
         } finally {
             passivePool.shutdownNow();
         }
+    }
+
+    /**
+     * Monta um ScanResult parcial só para diff — não inclui campos
+     * que não existem neste ponto (ex: corsResult no passivo).
+     */
+    private ScanResult buildPartialForDiff(
+            ScoreResult score, SSLInfo sslInfo, Map<String, String> headers,
+            boolean serverVersionExposed, List<HttpMethodFinding> methods,
+            List<PortFinding> ports, DnsSecurityResult dns,
+            WafDetectionResult waf, TechFingerprintResult tech,
+            List<SensitiveFileFinding> files) {
+        return ScanResult.builder()
+                .score(score).sslInfo(sslInfo).headers(headers)
+                .serverVersionExposed(serverVersionExposed)
+                .dangerousHttpMethods(methods).openPorts(ports)
+                .dnsSecurityResult(dns).wafDetectionResult(waf)
+                .techFingerprint(tech).sensitiveFiles(files)
+                .build();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

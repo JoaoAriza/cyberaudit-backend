@@ -16,38 +16,38 @@ public class ScanResult {
 
     private String url;
     private String finalUrl;
-    private int httpStatus;
+    private int    httpStatus;
 
-    private boolean redirectsToHttps;
-    private SSLInfo sslInfo;
-    private TlsDetails tlsDetails;
+    private boolean         redirectsToHttps;
+    private SSLInfo         sslInfo;
+    private TlsDetails      tlsDetails;
 
     private Map<String, String> headers;
-    private boolean serverVersionExposed;
+    private boolean             serverVersionExposed;
 
-    private boolean activeMode;
-    private boolean inputSurfaceDetected;
-    private boolean dbErrorLeakageSuspected;
-    private boolean xssProbePerformed;
-    private boolean reflectedXssSuspected;
+    private boolean           activeMode;
+    private boolean           inputSurfaceDetected;
+    private boolean           dbErrorLeakageSuspected;
+    private boolean           xssProbePerformed;
+    private boolean           reflectedXssSuspected;
     private List<PortFinding> openPorts;
     private WafDetectionResult wafDetectionResult;
 
-    private CorsResult corsResult;
+    private CorsResult          corsResult;
     private List<CookieFinding> cookieIssues;
-    private List<String> sensitiveRobotsPaths;
+    private List<String>        sensitiveRobotsPaths;
 
-    private List<SensitiveFileFinding> sensitiveFiles;
-    private List<HttpMethodFinding> dangerousHttpMethods;
-    private boolean securityTxtPresent;
-    private String securityTxtContact;
-    private DnsSecurityResult dnsSecurityResult;
-
-    private List<OpenRedirectFinding> openRedirectFindings;
+    private List<SensitiveFileFinding>    sensitiveFiles;
+    private List<HttpMethodFinding>       dangerousHttpMethods;
+    private boolean                       securityTxtPresent;
+    private String                        securityTxtContact;
+    private DnsSecurityResult             dnsSecurityResult;
+    private List<OpenRedirectFinding>     openRedirectFindings;
     private List<DirectoryListingFinding> directoryListingFindings;
 
     private TechFingerprintResult techFingerprint;
-    private List<CVEFinding> cveFindings;          // ← novo
+    private List<CVEFinding>      cveFindings;
+    private List<ScanChange>      changes;
 
     private ScoreResult score;
 }
