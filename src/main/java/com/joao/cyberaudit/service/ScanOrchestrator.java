@@ -12,28 +12,29 @@ import java.util.concurrent.*;
 @Service
 public class ScanOrchestrator {
 
-    private final SSLService               sslService;
-    private final TlsVersionService        tlsVersionService;
-    private final HeaderService            headerService;
-    private final ScoreService             scoreService;
-    private final HttpFetchService         httpFetchService;
-    private final ErrorDisclosureService   errorDisclosureService;
-    private final PortScanService          portScanService;
-    private final XssProbeService          xssProbeService;
-    private final WafDetectionService      wafDetectionService;
-    private final ScanCacheService         scanCacheService;
-    private final CorsAnalyzerService      corsAnalyzerService;
-    private final CookieSecurityService    cookieSecurityService;
-    private final RobotsTxtService         robotsTxtService;
-    private final DnsSecurityService       dnsSecurityService;
-    private final ScanHistoryService       scanHistoryService;
-    private final DomainProtectionService  domainProtectionService;
-    private final SensitiveFileService     sensitiveFileService;
-    private final HttpMethodService        httpMethodService;
-    private final SecurityTxtService       securityTxtService;
-    private final OpenRedirectService      openRedirectService;
-    private final DirectoryListingService  directoryListingService;
-    private final TechFingerprintService   techFingerprintService;   // ← novo
+    private final SSLService              sslService;
+    private final TlsVersionService       tlsVersionService;
+    private final HeaderService           headerService;
+    private final ScoreService            scoreService;
+    private final HttpFetchService        httpFetchService;
+    private final ErrorDisclosureService  errorDisclosureService;
+    private final PortScanService         portScanService;
+    private final XssProbeService         xssProbeService;
+    private final WafDetectionService     wafDetectionService;
+    private final ScanCacheService        scanCacheService;
+    private final CorsAnalyzerService     corsAnalyzerService;
+    private final CookieSecurityService   cookieSecurityService;
+    private final RobotsTxtService        robotsTxtService;
+    private final DnsSecurityService      dnsSecurityService;
+    private final ScanHistoryService      scanHistoryService;
+    private final DomainProtectionService domainProtectionService;
+    private final SensitiveFileService    sensitiveFileService;
+    private final HttpMethodService       httpMethodService;
+    private final SecurityTxtService      securityTxtService;
+    private final OpenRedirectService     openRedirectService;
+    private final DirectoryListingService directoryListingService;
+    private final TechFingerprintService  techFingerprintService;
+    private final CVECorrelationService   cveCorrelationService;  // ← novo
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -47,7 +48,8 @@ public class ScanOrchestrator {
             SensitiveFileService sensitiveFileService, HttpMethodService httpMethodService,
             SecurityTxtService securityTxtService, OpenRedirectService openRedirectService,
             DirectoryListingService directoryListingService,
-            TechFingerprintService techFingerprintService) {          // ← novo
+            TechFingerprintService techFingerprintService,
+            CVECorrelationService cveCorrelationService) {          // ← novo
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -69,7 +71,8 @@ public class ScanOrchestrator {
         this.securityTxtService      = securityTxtService;
         this.openRedirectService     = openRedirectService;
         this.directoryListingService = directoryListingService;
-        this.techFingerprintService  = techFingerprintService;        // ← novo
+        this.techFingerprintService  = techFingerprintService;
+        this.cveCorrelationService   = cveCorrelationService;      // ← novo
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -96,9 +99,9 @@ public class ScanOrchestrator {
         boolean redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
 
         String analysisUrl;
-        if (supportsHttps)        analysisUrl = httpsUrl;
+        if (supportsHttps)          analysisUrl = httpsUrl;
         else if (sslInfo.isHttps()) analysisUrl = toHttp(inputUrl);
-        else                      analysisUrl = toHttp(inputUrl);
+        else                        analysisUrl = toHttp(inputUrl);
 
         HttpFetchResult fetch = httpFetchService.fetchHeaders(analysisUrl);
 
@@ -115,10 +118,20 @@ public class ScanOrchestrator {
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
 
-        // ── Fase 1b: fingerprint (passivo, usa headers + cookies + HTML) ──────
-        // Roda junto com a infra porque não depende de modo ativo
-        TechFingerprintResult techFingerprint = techFingerprintService.fingerprint(
-                target, analyzedHeaders, fetch.getRawSetCookies());
+        // ── Fase 1b: fingerprint + CVE (passivo, paralelo) ────────────────────
+        // Fingerprint usa headers+cookies já buscados + 1 GET ao HTML
+        // CVE usa resultado do fingerprint para queries na NVD API
+        // Ambos rodam em paralelo com os checks passivos da Fase 2
+        ExecutorService fingerprintPool = Executors.newFixedThreadPool(2);
+
+        var fingerprintFuture = CompletableFuture.supplyAsync(
+                () -> techFingerprintService.fingerprint(target, analyzedHeaders, fetch.getRawSetCookies()),
+                fingerprintPool).exceptionally(e -> null);
+
+        // CVE só pode rodar após fingerprint — encadeia
+        var cveFuture = fingerprintFuture.thenApplyAsync(
+                fp -> fp != null ? cveCorrelationService.correlate(fp) : List.<CVEFinding>of(),
+                fingerprintPool);
 
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
         ExecutorService passivePool = Executors.newFixedThreadPool(5);
@@ -143,16 +156,22 @@ public class ScanOrchestrator {
                             () -> directoryListingService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
 
+            // Aguarda passivos + fingerprint + CVE
             try {
                 CompletableFuture.allOf(
-                        robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture
-                ).get(60, TimeUnit.SECONDS);
+                        robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
+                        cveFuture
+                ).get(90, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
+
+            fingerprintPool.shutdownNow();
 
             List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
             List<DirectoryListingFinding> directoryListingFindings = dirListFuture.getNow(List.of());
             DnsSecurityResult             dnsSecurityResult        = dnsFuture.getNow(null);
+            TechFingerprintResult         techFingerprint          = fingerprintFuture.getNow(null);
+            List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
             boolean secTxtFound   = securityTxt != null && securityTxt.found();
@@ -186,7 +205,8 @@ public class ScanOrchestrator {
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult)
                     .wafDetectionResult(null)
-                    .techFingerprint(techFingerprint)              // ← novo
+                    .techFingerprint(techFingerprint)
+                    .cveFindings(cveFindings)                       // ← novo
                     .score(passiveScore)
                     .build();
 
@@ -217,43 +237,27 @@ public class ScanOrchestrator {
             ExecutorService activePool = Executors.newFixedThreadPool(6);
 
             var corsFuture     = CompletableFuture.supplyAsync(
-                            () -> corsAnalyzerService.analyze(target), activePool)
-                    .exceptionally(e -> null);
-
+                    () -> corsAnalyzerService.analyze(target), activePool).exceptionally(e -> null);
             var filesFuture    = CompletableFuture.supplyAsync(
-                            () -> sensitiveFileService.scan(target), activePool)
-                    .exceptionally(e -> List.of());
-
+                    () -> sensitiveFileService.scan(target), activePool).exceptionally(e -> List.of());
             var wafFuture      = CompletableFuture.supplyAsync(
-                            () -> wafDetectionService.scan(target), activePool)
-                    .exceptionally(e -> null);
-
+                    () -> wafDetectionService.scan(target), activePool).exceptionally(e -> null);
             var redirectFuture = CompletableFuture.supplyAsync(
-                            () -> openRedirectService.scan(target, true), activePool)
-                    .exceptionally(e -> List.of());
+                    () -> openRedirectService.scan(target, true), activePool).exceptionally(e -> List.of());
 
             var xssFuture = inputSurfaceDetected
-                    ? CompletableFuture.supplyAsync(
-                            () -> xssProbeService.reflectedMarkerAppears(target), activePool)
-                    .exceptionally(e -> false)
+                    ? CompletableFuture.supplyAsync(() -> xssProbeService.reflectedMarkerAppears(target), activePool).exceptionally(e -> false)
                     : CompletableFuture.completedFuture(false);
-
             var dbFuture = inputSurfaceDetected
-                    ? CompletableFuture.supplyAsync(
-                            () -> errorDisclosureService.detectsDbErrorLeakage(target), activePool)
-                    .exceptionally(e -> false)
+                    ? CompletableFuture.supplyAsync(() -> errorDisclosureService.detectsDbErrorLeakage(target), activePool).exceptionally(e -> false)
                     : CompletableFuture.completedFuture(false);
-
             var portFuture = (host != null && !host.isBlank())
-                    ? CompletableFuture.supplyAsync(
-                            () -> portScanService.scanCommonPorts(host), activePool)
-                    .exceptionally(e -> List.of())
+                    ? CompletableFuture.supplyAsync(() -> portScanService.scanCommonPorts(host), activePool).exceptionally(e -> List.of())
                     : CompletableFuture.completedFuture(List.<PortFinding>of());
 
             try {
                 CompletableFuture.allOf(
-                        corsFuture, filesFuture, wafFuture, redirectFuture,
-                        xssFuture, dbFuture, portFuture
+                        corsFuture, filesFuture, wafFuture, redirectFuture, xssFuture, dbFuture, portFuture
                 ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
@@ -300,7 +304,8 @@ public class ScanOrchestrator {
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult)
                     .wafDetectionResult(wafDetectionResult)
-                    .techFingerprint(techFingerprint)              // ← novo
+                    .techFingerprint(techFingerprint)
+                    .cveFindings(cveFindings)                       // ← novo
                     .score(score)
                     .build();
 
@@ -327,26 +332,21 @@ public class ScanOrchestrator {
         if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://" + u;
         return u;
     }
-
     private String toHttps(String url) {
         if (url.startsWith("https://")) return url;
         if (url.startsWith("http://"))  return "https://" + url.substring(7);
         return "https://" + url;
     }
-
     private String toHttp(String url) {
         if (url.startsWith("http://"))  return url;
         if (url.startsWith("https://")) return "http://" + url.substring(8);
         return "http://" + url;
     }
-
     private String extractHostSafe(String url) {
         try { return URI.create(url).getHost(); }
         catch (Exception e) { return null; }
     }
-
-    private static final String CACHE_VERSION = "v2";
-
+    private static final String CACHE_VERSION = "v3";
     private String buildCacheKey(String url, boolean active) {
         String h = extractHostSafe(url);
         return CACHE_VERSION + ":scan:" + (h != null ? h : url) + ":active=" + active;

@@ -5,8 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -46,8 +46,8 @@ public class ScanResult {
     private List<OpenRedirectFinding> openRedirectFindings;
     private List<DirectoryListingFinding> directoryListingFindings;
 
-    // ← novo
     private TechFingerprintResult techFingerprint;
+    private List<CVEFinding> cveFindings;          // ← novo
 
     private ScoreResult score;
 }

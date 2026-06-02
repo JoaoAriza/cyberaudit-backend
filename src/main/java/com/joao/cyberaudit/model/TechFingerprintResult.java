@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -13,12 +14,25 @@ import java.util.List;
 @AllArgsConstructor
 public class TechFingerprintResult {
 
-    private String webServer;       // nginx, Apache, IIS, cloudflare
-    private String backend;         // PHP, Java, ASP.NET, Node.js, Python
-    private String framework;       // Laravel, Spring, Django, Next.js, Nuxt
-    private String cms;             // WordPress, Drupal, Joomla, Ghost
-    private String cdn;             // Cloudflare, Fastly, Akamai, AWS CloudFront
-    private String language;        // PHP, Java, Python, Ruby, Go
-    private List<String> libraries; // React, Vue, Angular, jQuery, Bootstrap
-    private List<String> evidence;  // lista de evidências que levaram às detecções
+    private String       webServer;        // nginx, Apache, IIS
+    private String       backend;          // PHP, Java, ASP.NET, Node.js
+    private String       framework;        // Laravel, Spring, Django, Next.js
+    private String       cms;             // WordPress, Drupal, Joomla
+    private String       cdn;             // Cloudflare, Fastly, Akamai
+    private String       language;        // PHP, Java, Python, Ruby
+    private List<String> libraries;       // React, Vue, jQuery, Bootstrap
+    private List<String> evidence;        // evidências técnicas das detecções
+
+    /**
+     * Mapa software → versão detectada.
+     * Só populado quando a versão é identificável nos headers ou HTML.
+     * Usado pelo CVECorrelationService para queries direcionadas na NVD.
+     *
+     * Exemplos:
+     *   "Apache HTTP Server" → "2.4.49"
+     *   "PHP"               → "8.1.2"
+     *   "nginx"             → "1.18.0"
+     *   "OpenSSL"           → "1.1.1k"
+     */
+    private Map<String, String> detectedVersions;
 }
