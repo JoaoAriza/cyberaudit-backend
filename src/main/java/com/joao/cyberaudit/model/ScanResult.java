@@ -48,7 +48,8 @@ public class ScanResult {
     private TechFingerprintResult techFingerprint;
     private List<CVEFinding>      cveFindings;
     private List<ScanChange>               changes;
-    private List<SubdomainTakeoverFinding> subdomainTakeover; // ← novo
+    private List<SubdomainTakeoverFinding> subdomainTakeover;
+    private CertTransparencyResult          certTransparency;  // ← novo
 
     private ScoreResult score;
 }

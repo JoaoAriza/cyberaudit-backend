@@ -36,7 +36,8 @@ public class ScanOrchestrator {
     private final TechFingerprintService  techFingerprintService;
     private final CVECorrelationService   cveCorrelationService;
     private final ScanChangeDetector          scanChangeDetector;
-    private final SubdomainTakeoverService      subdomainTakeoverService; // ← novo
+    private final SubdomainTakeoverService      subdomainTakeoverService;
+    private final CertTransparencyService        certTransparencyService;  // ← novo
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -53,7 +54,8 @@ public class ScanOrchestrator {
             TechFingerprintService techFingerprintService,
             CVECorrelationService cveCorrelationService,
             ScanChangeDetector scanChangeDetector,
-            SubdomainTakeoverService subdomainTakeoverService) {   // ← novo
+            SubdomainTakeoverService subdomainTakeoverService,
+            CertTransparencyService certTransparencyService) {      // ← novo
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -78,7 +80,8 @@ public class ScanOrchestrator {
         this.techFingerprintService  = techFingerprintService;
         this.cveCorrelationService   = cveCorrelationService;
         this.scanChangeDetector         = scanChangeDetector;
-        this.subdomainTakeoverService   = subdomainTakeoverService; // ← novo
+        this.subdomainTakeoverService   = subdomainTakeoverService;
+        this.certTransparencyService   = certTransparencyService;  // ← novo
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -163,10 +166,14 @@ public class ScanOrchestrator {
                             () -> subdomainTakeoverService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
 
+            var certTransFuture = CompletableFuture.supplyAsync(
+                            () -> certTransparencyService.scan(host, dnsFuture.getNow(null)), passivePool)
+                    .exceptionally(e -> null);
+
             try {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
-                        takeoverFuture, cveFuture
+                        takeoverFuture, certTransFuture, cveFuture
                 ).get(90, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
@@ -178,6 +185,7 @@ public class ScanOrchestrator {
             DnsSecurityResult             dnsSecurityResult        = dnsFuture.getNow(null);
             TechFingerprintResult             techFingerprint      = fingerprintFuture.getNow(null);
             List<SubdomainTakeoverFinding>    takeoverFindings     = takeoverFuture.getNow(List.of());
+            CertTransparencyResult               certTransparency     = certTransFuture.getNow(null);
             List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
@@ -210,7 +218,8 @@ public class ScanOrchestrator {
                     .directoryListingFindings(directoryListingFindings)
                     .dnsSecurityResult(dnsSecurityResult).wafDetectionResult(null)
                     .techFingerprint(techFingerprint).cveFindings(cveFindings)
-                    .subdomainTakeover(takeoverFindings)           // ← novo
+                    .subdomainTakeover(takeoverFindings)
+                    .certTransparency(certTransparency)            // ← novo
                     .changes(scanChangeDetector.detect(
                             buildPartialForDiff(passiveScore, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, List.of(),
@@ -310,6 +319,7 @@ public class ScanOrchestrator {
                     .dnsSecurityResult(dnsSecurityResult).wafDetectionResult(wafDetectionResult)
                     .techFingerprint(techFingerprint).cveFindings(cveFindings)
                     .subdomainTakeover(takeoverFindings)
+                    .certTransparency(certTransparency)
                     .changes(scanChangeDetector.detect(              // ← change detection
                             buildPartialForDiff(score, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, openPorts,
