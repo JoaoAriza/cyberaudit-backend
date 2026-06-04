@@ -1,7 +1,6 @@
 package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.model.SubdomainTakeoverFinding;
 import org.springframework.stereotype.Service;
 import org.xbill.DNS.*;
@@ -18,14 +17,8 @@ import java.util.stream.Collectors;
 @Service
 public class SubdomainTakeoverService {
 
-    // ── Fingerprints de serviços com takeover conhecido ───────────────────────
-
     private record TakeoverFingerprint(
-            String cnameSuffix,       // sufixo do CNAME alvo
-            String bodyFingerprint,   // string no body que confirma serviço não reivindicado
-            String serviceName,       // nome legível do serviço
-            String severity           // CRITICAL, HIGH, MEDIUM
-    ) {}
+            String cnameSuffix, String bodyFingerprint, String serviceName, String severity) {}
 
     private static final List<TakeoverFingerprint> FINGERPRINTS = List.of(
             new TakeoverFingerprint("github.io",          "There isn't a GitHub Pages site here",          "GitHub Pages",    "CRITICAL"),
@@ -64,8 +57,6 @@ public class SubdomainTakeoverService {
             new TakeoverFingerprint("cargo.site",         "If you're moving your domain",                  "Cargo",           "MEDIUM")
     );
 
-    // ── Wordlist de subdomínios comuns ────────────────────────────────────────
-
     private static final List<String> WORDLIST = List.of(
             "www", "api", "dev", "staging", "test", "beta", "app", "mail",
             "docs", "help", "support", "admin", "blog", "shop", "store",
@@ -77,35 +68,43 @@ public class SubdomainTakeoverService {
     private static final int MAX_SUBDOMAINS    = 50;
     private static final int CONCURRENT_PROBES = 10;
 
+    private final CrtShService crtShService; // ← compartilhado
     private final HttpClient   httpClient = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    private final ObjectMapper jackson    = new ObjectMapper();
 
-    /**
-     * Detecta subdomínios vulneráveis a takeover.
-     * Roda em modo passivo — usa crt.sh (dados públicos) e DNS (público).
-     * O HTTP probe vai para serviços terceiros (GitHub/Heroku/etc), não ao alvo.
-     */
+    public SubdomainTakeoverService(CrtShService crtShService) {
+        this.crtShService = crtShService;
+    }
+
     public List<SubdomainTakeoverFinding> scan(String targetUrl) {
         String host = extractHost(targetUrl);
         if (host == null) return List.of();
 
-        // ── 1. Coleta subdomínios ─────────────────────────────────────────────
+        // Usa CrtShService compartilhado — não faz nova requisição se CT já buscou
         Set<String> subdomains = new LinkedHashSet<>();
-        subdomains.addAll(fetchFromCrtSh(host));
+        for (JsonNode cert : crtShService.fetchCerts(host)) {
+            String nameValue = cert.path("name_value").asText("");
+            for (String name : nameValue.split("[\\n,]")) {
+                name = name.trim().toLowerCase();
+                if (!name.startsWith("*") && name.endsWith("." + host) && !name.equals(host)) {
+                    subdomains.add(name);
+                    if (subdomains.size() >= 30) break;
+                }
+            }
+            if (subdomains.size() >= 30) break;
+        }
         for (String word : WORDLIST) subdomains.add(word + "." + host);
 
         List<String> toProbe = subdomains.stream()
-                .filter(s -> !s.equals(host) && !s.endsWith("." + host + "." + host))
+                .filter(s -> !s.equals(host))
                 .distinct()
                 .limit(MAX_SUBDOMAINS)
                 .collect(Collectors.toList());
 
         if (toProbe.isEmpty()) return List.of();
 
-        // ── 2. Probe paralelo ─────────────────────────────────────────────────
         ExecutorService pool = Executors.newFixedThreadPool(CONCURRENT_PROBES);
         List<CompletableFuture<SubdomainTakeoverFinding>> futures = toProbe.stream()
                 .map(sub -> CompletableFuture
@@ -127,131 +126,59 @@ public class SubdomainTakeoverService {
                 .collect(Collectors.toList());
     }
 
-    // ── Private ───────────────────────────────────────────────────────────────
-
     private SubdomainTakeoverFinding probe(String subdomain) {
-        // Passo 1: resolve CNAME via dnsjava
         String cnameTarget = resolveCname(subdomain);
         if (cnameTarget == null) return null;
 
-        // Passo 2: verifica se o CNAME aponta para serviço conhecido
         TakeoverFingerprint matched = FINGERPRINTS.stream()
                 .filter(fp -> cnameTarget.contains(fp.cnameSuffix()))
-                .findFirst()
-                .orElse(null);
-
+                .findFirst().orElse(null);
         if (matched == null) return null;
 
-        // Passo 3: probe HTTP — verifica se o serviço está não reivindicado
         try {
-            String probeUrl = "https://" + subdomain;
-            HttpRequest req = HttpRequest.newBuilder(URI.create(probeUrl))
-                    .GET()
-                    .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
-                    .build();
+            HttpRequest req = HttpRequest.newBuilder(URI.create("https://" + subdomain))
+                    .GET().timeout(Duration.ofSeconds(6))
+                    .header("User-Agent", "CyberAuditScanner/1.0").build();
 
-            HttpResponse<String> resp = httpClient.send(req,
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             String body = resp.body() != null ? resp.body() : "";
 
             if (body.toLowerCase().contains(matched.bodyFingerprint().toLowerCase())) {
                 return SubdomainTakeoverFinding.builder()
-                        .subdomain(subdomain)
-                        .cnameTarget(cnameTarget)
+                        .subdomain(subdomain).cnameTarget(cnameTarget)
                         .service(matched.serviceName())
                         .vulnerability("CNAME aponta para " + matched.serviceName()
                                 + " não reivindicado — subdomínio pode ser registrado por atacante")
                         .evidence(extractSnippet(body, matched.bodyFingerprint()))
-                        .severity(matched.severity())
-                        .status("VULNERABLE")
-                        .build();
+                        .severity(matched.severity()).status("VULNERABLE").build();
             }
-
         } catch (Exception e) {
-            // Conexão recusada com CNAME para serviço conhecido = potencial takeover
             String msg = e.getMessage() != null ? e.getMessage() : "";
-            if (msg.contains("Connection refused") || msg.contains("timed out")
-                    || e.getCause() != null && e.getCause().getMessage() != null
-                    && e.getCause().getMessage().contains("Connection refused")) {
+            if (msg.contains("Connection refused") || msg.contains("timed out")) {
                 return SubdomainTakeoverFinding.builder()
-                        .subdomain(subdomain)
-                        .cnameTarget(cnameTarget)
+                        .subdomain(subdomain).cnameTarget(cnameTarget)
                         .service(matched.serviceName())
                         .vulnerability("CNAME aponta para " + matched.serviceName()
-                                + " — serviço não responde (possível recurso removido)")
+                                + " — serviço não responde")
                         .evidence("Conexão recusada: " + cnameTarget)
-                        .severity("MEDIUM")
-                        .status("POTENTIAL")
-                        .build();
+                        .severity("MEDIUM").status("POTENTIAL").build();
             }
         }
-
         return null;
     }
 
-    /**
-     * Resolve CNAME via dnsjava.
-     * Retorna o target do CNAME em lowercase, ou null se não houver CNAME.
-     */
     private String resolveCname(String hostname) {
         try {
             Lookup lookup = new Lookup(hostname, Type.CNAME);
             lookup.run();
             if (lookup.getResult() == Lookup.SUCCESSFUL && lookup.getAnswers() != null) {
                 for (org.xbill.DNS.Record record : lookup.getAnswers()) {
-                    if (record instanceof CNAMERecord cname) {
+                    if (record instanceof CNAMERecord cname)
                         return cname.getTarget().toString().toLowerCase();
-                    }
                 }
             }
             return null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * Busca subdomínios via Certificate Transparency (crt.sh).
-     * Dados públicos — não requer autenticação.
-     */
-    private List<String> fetchFromCrtSh(String domain) {
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(8))
-                    .build();
-            String url = "https://crt.sh/?q=%25." + domain + "&output=json";
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .GET()
-                    .timeout(Duration.ofSeconds(10))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
-                    .build();
-
-            HttpResponse<String> resp = client.send(req,
-                    HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return List.of();
-
-            JsonNode root = jackson.readTree(resp.body());
-            Set<String> subs = new LinkedHashSet<>();
-
-            if (root.isArray()) {
-                for (JsonNode entry : root) {
-                    String nameValue = entry.path("name_value").asText("");
-                    for (String name : nameValue.split("[\\n,]")) {
-                        name = name.trim().toLowerCase();
-                        if (!name.startsWith("*") && name.endsWith("." + domain)
-                                && !name.equals(domain)) {
-                            subs.add(name);
-                        }
-                        if (subs.size() >= 30) break;
-                    }
-                    if (subs.size() >= 30) break;
-                }
-            }
-            return new ArrayList<>(subs);
-        } catch (Exception e) {
-            return List.of();
-        }
+        } catch (Exception e) { return null; }
     }
 
     private String extractSnippet(String body, String fingerprint) {
@@ -269,10 +196,7 @@ public class SubdomainTakeoverService {
 
     private int severityOrder(String sev) {
         return switch (sev != null ? sev.toUpperCase() : "") {
-            case "CRITICAL" -> 0;
-            case "HIGH"     -> 1;
-            case "MEDIUM"   -> 2;
-            default         -> 3;
+            case "CRITICAL" -> 0; case "HIGH" -> 1; case "MEDIUM" -> 2; default -> 3;
         };
     }
 }

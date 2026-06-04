@@ -37,7 +37,8 @@ public class ScanOrchestrator {
     private final CVECorrelationService   cveCorrelationService;
     private final ScanChangeDetector          scanChangeDetector;
     private final SubdomainTakeoverService      subdomainTakeoverService;
-    private final CertTransparencyService        certTransparencyService;  // ← novo
+    private final CertTransparencyService        certTransparencyService;
+    private final CrtShService                  crtShService;             // ← compartilhado
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -55,7 +56,8 @@ public class ScanOrchestrator {
             CVECorrelationService cveCorrelationService,
             ScanChangeDetector scanChangeDetector,
             SubdomainTakeoverService subdomainTakeoverService,
-            CertTransparencyService certTransparencyService) {      // ← novo
+            CertTransparencyService certTransparencyService,
+            CrtShService crtShService) {                               // ← compartilhado
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -81,7 +83,8 @@ public class ScanOrchestrator {
         this.cveCorrelationService   = cveCorrelationService;
         this.scanChangeDetector         = scanChangeDetector;
         this.subdomainTakeoverService   = subdomainTakeoverService;
-        this.certTransparencyService   = certTransparencyService;  // ← novo
+        this.certTransparencyService   = certTransparencyService;
+        this.crtShService              = crtShService;            // ← compartilhado
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -144,7 +147,7 @@ public class ScanOrchestrator {
                 : null;
 
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
-        ExecutorService passivePool = Executors.newFixedThreadPool(5);
+        ExecutorService passivePool = Executors.newFixedThreadPool(8);
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
                             () -> robotsTxtService.findSensitivePaths(target), passivePool)
@@ -166,15 +169,18 @@ public class ScanOrchestrator {
                             () -> subdomainTakeoverService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
 
-            var certTransFuture = CompletableFuture.supplyAsync(
-                            () -> certTransparencyService.scan(host, dnsFuture.getNow(null)), passivePool)
+            // CT encadeado após DNS para garantir que recebe o resultado correto
+            var certTransFuture = dnsFuture
+                    .thenApplyAsync(
+                            dnsResult -> certTransparencyService.scan(host, dnsResult),
+                            passivePool)
                     .exceptionally(e -> null);
 
             try {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
                         takeoverFuture, certTransFuture, cveFuture
-                ).get(90, TimeUnit.SECONDS);
+                ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
             fingerprintPool.shutdownNow();
