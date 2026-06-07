@@ -58,13 +58,15 @@ public class SecurityConfig {
                         // ── Scan passivo e async: público ──────────────────────────
                         .requestMatchers(HttpMethod.GET,  "/scan").permitAll()
                         .requestMatchers(HttpMethod.POST, "/scan/async").permitAll()
+                        .requestMatchers(HttpMethod.GET,  "/scan/async/**").permitAll()
                         .requestMatchers(HttpMethod.GET,  "/scan/report").permitAll()
-                        .requestMatchers(HttpMethod.GET,  "/scan/debug-headers").permitAll()
+
+                        // ── Verify-check público (guests no OwnershipCard) ─────────
+                        .requestMatchers(HttpMethod.GET, "/scan/verify-check").permitAll()
 
                         // ── Scan autenticado ───────────────────────────────────────
                         .requestMatchers(HttpMethod.GET, "/scan/report/pdf").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/scan/async/**").authenticated()
-                        .requestMatchers("/scan/verify-token", "/scan/verify-check").authenticated()
+                        .requestMatchers("/scan/verify-token").authenticated()
 
                         // ── Histórico ──────────────────────────────────────────────
                         .requestMatchers("/history/**").authenticated()
