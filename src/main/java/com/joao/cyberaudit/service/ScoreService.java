@@ -31,7 +31,8 @@ public class ScoreService {
             List<OpenRedirectFinding> openRedirectFindings,
             List<DirectoryListingFinding> directoryListingFindings,
             DnsSecurityResult dnsSecurityResult,
-            WafDetectionResult wafDetectionResult
+            WafDetectionResult wafDetectionResult,
+            List<CVEFinding> cveFindings
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -405,6 +406,48 @@ public class ScoreService {
                 notes.add("WAF/CDN detectado (" + wafDetectionResult.getProvider()
                         + (probeBlocked ? ", probe bloqueado" : "") + "): +" + bonus);
             }
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        // 17. CVE Correlation — apenas CVSS >= 7.0 (HIGH/CRITICAL)
+        // Penalidade por tier de severidade: 1 desconto por tier,
+        // independente de quantos CVEs existam naquele tier.
+        // Máx: CRITICAL(-15) + HIGH(-10) = -25 pts.
+        // ═══════════════════════════════════════════════════════
+        if (cveFindings != null && !cveFindings.isEmpty()) {
+            int cvePenaltyTotal = 0;
+            java.util.Set<String> seenIds      = new java.util.HashSet<>();
+            java.util.Set<String> chargedTiers = new java.util.HashSet<>(); // tiers já descontados
+
+            for (CVEFinding cve : cveFindings) {
+                if (!seenIds.add(cve.getCveId())) continue;  // dedup por CVE ID
+                if (cve.getCvssScore() < 7.0) continue;       // ignorar LOW/MEDIUM
+
+                String tier = cve.getCvssScore() >= 9.0 ? "CRITICAL" : "HIGH";
+
+                // Desconta pontos apenas na primeira ocorrência de cada tier
+                if (chargedTiers.add(tier)) {
+                    int penalty = tier.equals("CRITICAL") ? 15 : 10;
+                    cvePenaltyTotal += penalty;
+                    notes.add("CVE tier " + tier + " detectado: -" + penalty);
+                }
+
+                String recommendation = "Atualizar " + cve.getAffectedSoftware()
+                        + " para uma versão sem esta vulnerabilidade conhecida."
+                        + (cve.getReferenceUrl() != null ? " Ref: " + cve.getReferenceUrl() : "");
+
+                issues.add(new SecurityIssue(
+                        "CVE_" + cve.getCveId().replace("-", "_"),
+                        cve.getCveId() + " — " + cve.getAffectedSoftware()
+                                + " (CVSS " + String.format("%.1f", cve.getCvssScore()) + ")",
+                        cve.getSeverity(),
+                        cve.getDescription(),
+                        recommendation
+                ));
+            }
+
+            score -= cvePenaltyTotal;  // máx -25 pts (CRITICAL + HIGH)
         }
 
         score = Math.max(0, score);

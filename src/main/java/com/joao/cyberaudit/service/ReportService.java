@@ -286,6 +286,113 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── Technology Fingerprint ────────────────────────────────────────────
+        if (r.getTechFingerprint() != null) {
+            TechFingerprintResult t = r.getTechFingerprint();
+            boolean hasAny = t.getWebServer() != null || t.getBackend() != null
+                    || t.getFramework() != null || t.getCms() != null
+                    || t.getCdn() != null || t.getLanguage() != null
+                    || (t.getLibraries() != null && !t.getLibraries().isEmpty())
+                    || (t.getDetectedVersions() != null && !t.getDetectedVersions().isEmpty());
+            if (hasAny) {
+                s.append("== Technology Fingerprint ==\n");
+                if (t.getWebServer()  != null) s.append("  Web Server: ").append(t.getWebServer()).append("\n");
+                if (t.getBackend()    != null) s.append("  Backend:    ").append(t.getBackend()).append("\n");
+                if (t.getFramework()  != null) s.append("  Framework:  ").append(t.getFramework()).append("\n");
+                if (t.getCms()        != null) s.append("  CMS:        ").append(t.getCms()).append("\n");
+                if (t.getCdn()        != null) s.append("  CDN:        ").append(t.getCdn()).append("\n");
+                if (t.getLanguage()   != null) s.append("  Language:   ").append(t.getLanguage()).append("\n");
+                if (t.getLibraries()  != null && !t.getLibraries().isEmpty())
+                    s.append("  Libraries:  ").append(String.join(", ", t.getLibraries())).append("\n");
+                if (t.getDetectedVersions() != null && !t.getDetectedVersions().isEmpty()) {
+                    s.append("  Detected versions:\n");
+                    t.getDetectedVersions().forEach((sw, ver) ->
+                            s.append("    ").append(sw).append(": ").append(ver).append("\n"));
+                }
+                s.append("\n");
+            }
+        }
+
+        // ── CVE Correlation (seção dedicada) ──────────────────────────────────
+        if (r.getCveFindings() != null && !r.getCveFindings().isEmpty()) {
+            List<CVEFinding> highRisk = r.getCveFindings().stream()
+                    .filter(c -> c.getCvssScore() >= 7.0)
+                    .sorted((a, b) -> Double.compare(b.getCvssScore(), a.getCvssScore()))
+                    .toList();
+            if (!highRisk.isEmpty()) {
+                s.append("== CVE Correlation (CVSS >= 7.0) ==\n");
+                for (CVEFinding cve : highRisk) {
+                    s.append("\n  [").append(cve.getSeverity()).append("] ")
+                            .append(cve.getCveId())
+                            .append("  CVSS ").append(String.format("%.1f", cve.getCvssScore())).append("\n");
+                    s.append("    Software:  ").append(cve.getAffectedSoftware()).append("\n");
+                    if (cve.getDescription() != null && !cve.getDescription().isBlank())
+                        s.append("    Detail:    ").append(cve.getDescription()).append("\n");
+                    if (cve.getPublishedDate() != null)
+                        s.append("    Published: ").append(cve.getPublishedDate()).append("\n");
+                    if (cve.getReferenceUrl() != null)
+                        s.append("    Ref:       ").append(cve.getReferenceUrl()).append("\n");
+                }
+                s.append("\n");
+            }
+        }
+
+        // ── Cert Transparency ─────────────────────────────────────────────────
+        if (r.getCertTransparency() != null) {
+            CertTransparencyResult ct = r.getCertTransparency();
+            s.append("== Certificate Transparency ==\n");
+            s.append("  Total certificates: ").append(ct.getTotalCertificates()).append("\n");
+            s.append("  Unique subdomains:  ").append(ct.getUniqueSubdomains()).append("\n");
+            if (ct.getMostRecentIssuance() != null)
+                s.append("  Most recent cert:   ").append(ct.getMostRecentIssuance()).append("\n");
+            if (ct.isWildcardDetected()) s.append("  Wildcard detected:  true\n");
+            if (ct.isUnexpectedIssuer()) s.append("  Unexpected issuer:  true\n");
+            if (ct.getIssuers() != null && !ct.getIssuers().isEmpty())
+                s.append("  Issuers: ").append(String.join(", ", ct.getIssuers())).append("\n");
+            if (ct.getDiscoveredSubdomains() != null && !ct.getDiscoveredSubdomains().isEmpty()) {
+                s.append("  Discovered subdomains (").append(ct.getDiscoveredSubdomains().size()).append("):\n");
+                ct.getDiscoveredSubdomains().forEach(sub -> s.append("    ").append(sub).append("\n"));
+            }
+            s.append("\n");
+        }
+
+        // ── Subdomain Takeover ────────────────────────────────────────────────
+        if (r.getSubdomainTakeover() != null && !r.getSubdomainTakeover().isEmpty()) {
+            s.append("== Subdomain Takeover ==\n");
+            for (SubdomainTakeoverFinding f : r.getSubdomainTakeover()) {
+                s.append("\n  [").append(f.getSeverity()).append("] ")
+                        .append(f.getSubdomain()).append("  (").append(f.getStatus()).append(")\n");
+                s.append("    CNAME:   ").append(f.getCnameTarget()).append("\n");
+                s.append("    Service: ").append(f.getService()).append("\n");
+                if (f.getVulnerability() != null)
+                    s.append("    Issue:   ").append(f.getVulnerability()).append("\n");
+                if (f.getEvidence() != null)
+                    s.append("    Evidence:").append(f.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
+        // ── Changes ───────────────────────────────────────────────────────────
+        if (r.getChanges() != null && !r.getChanges().isEmpty()) {
+            s.append("== Changes Detected ==\n");
+            for (ScanChange c : r.getChanges()) {
+                s.append("\n  [").append(c.getSeverity()).append("] [").append(c.getChangeType()).append("] ")
+                        .append(c.getCategory()).append(": ").append(c.getField()).append("\n");
+                if (c.getOldValue() != null) s.append("    Before: ").append(c.getOldValue()).append("\n");
+                if (c.getNewValue() != null) s.append("    After:  ").append(c.getNewValue()).append("\n");
+                if (c.getDescription() != null) s.append("    Info:   ").append(c.getDescription()).append("\n");
+            }
+            s.append("\n");
+        }
+
+        // ── Score Breakdown ───────────────────────────────────────────────────
+        if (r.getScore() != null && r.getScore().getNotes() != null && !r.getScore().getNotes().isEmpty()) {
+            s.append("== Score Breakdown ==\n");
+            s.append("  Starting score: 100\n");
+            r.getScore().getNotes().forEach(n -> s.append("  ").append(n).append("\n"));
+            s.append("  Final score: ").append(r.getScore().getScore()).append("/100\n\n");
+        }
+
         return s.toString();
     }
 }

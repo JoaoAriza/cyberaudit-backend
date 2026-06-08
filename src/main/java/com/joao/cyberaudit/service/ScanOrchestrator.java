@@ -203,7 +203,8 @@ public class ScanOrchestrator {
                     false, inputSurfaceDetected, false, false, false, List.of(),
                     null, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     List.of(), dangerousHttpMethods, secTxtFound,
-                    List.of(), directoryListingFindings, dnsSecurityResult, null
+                    List.of(), directoryListingFindings, dnsSecurityResult, null,
+                    cveFindings
             );
 
             // ── Monta resultado passivo ────────────────────────────────────────
@@ -302,7 +303,7 @@ public class ScanOrchestrator {
                     corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     sensitiveFiles, dangerousHttpMethods, secTxtFound,
                     openRedirectFindings, directoryListingFindings,
-                    dnsSecurityResult, wafDetectionResult
+                    dnsSecurityResult, wafDetectionResult, cveFindings
             );
 
             ScanResult result = ScanResult.builder()
