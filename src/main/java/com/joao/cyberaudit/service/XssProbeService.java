@@ -57,21 +57,29 @@ public class XssProbeService {
             // (se não reflete nada, não há superfície de XSS)
             if (!body.contains(marker)) return false;
 
-            // Passo 2: verifica se os chars HTML aparecem RAW (não escapados)
-            // Se o site escapa corretamente, veremos &lt;, &quot;, %3C, %22, etc.
-            boolean rawLt    = body.contains(marker + "<");
-            boolean rawQuote = body.contains(marker + "\"");
-            boolean rawGt    = body.contains(marker + ">");
+            // Passo 2: localiza a janela de texto logo após o marker refletido.
+            // Probe injetado: marker + "<\">". Os chars HTML-breaking (<, ", >) NÃO
+            // ficam diretamente colados ao marker — ficam em posições marker+0, +1, +2.
+            // Verificar body.contains(marker + "\"") nunca funciona porque o " está
+            // na posição marker+1 (depois do <), não marker+0. A mesma falha vale para >.
+            // Solução: extrair uma janela de 20 chars após o marker e inspecioná-la.
+            // 20 chars cobre: raw "<\">", URL-encoded "%3C%22%3E", HTML "&lt;&quot;&gt;"
+            // e JS-escaped "\u003c\u0022\u003e".
+            int markerIdx   = body.indexOf(marker);
+            int windowStart = markerIdx + marker.length();
+            int windowEnd   = Math.min(windowStart + 20, body.length());
+            String window   = body.substring(windowStart, windowEnd);
 
-            // Passo 3: verifica se estão escapados
-            boolean escapedLt    = body.contains(marker + "&lt;")  ||
-                    body.contains(marker + "&#60;") ||
-                    body.contains(marker + "\\u003c");
-            boolean escapedQuote = body.contains(marker + "&quot;") ||
-                    body.contains(marker + "&#34;")  ||
-                    body.contains(marker + "\\u0022");
-            boolean urlEncoded   = body.contains(marker + "%3C") ||
-                    body.contains(marker + "%22");
+            boolean rawLt    = window.contains("<");
+            boolean rawQuote = window.contains("\"");
+            boolean rawGt    = window.contains(">");
+
+            // Passo 3: verifica se estão escapados dentro da mesma janela
+            boolean escapedLt    = window.contains("&lt;")   || window.contains("&#60;")  ||
+                    window.contains("\\u003c");
+            boolean escapedQuote = window.contains("&quot;")  || window.contains("&#34;")  ||
+                    window.contains("\\u0022");
+            boolean urlEncoded   = window.contains("%3C")     || window.contains("%22");
 
             // Só reporta se algum char HTML aparece RAW e não foi escapado
             boolean hasRawChars   = rawLt || rawQuote || rawGt;
