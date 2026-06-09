@@ -38,6 +38,7 @@ public class WafDetectionService {
             if (headerMatch != null) {
                 b.detected(true)
                         .provider(headerMatch.provider())
+                        .category(headerMatch.category())
                         .confidence("HIGH")
                         .evidence("Header detectado: " + headerMatch.evidence());
             }
@@ -53,10 +54,11 @@ public class WafDetectionService {
                     );
                     b.detected(true)
                             .provider(hasFastlyHint ? "Fastly" : "Varnish Cache")
+                            .category("CDN")   // Varnish/Fastly = CDN, não WAF
                             .confidence("HIGH")
                             .evidence("Via: " + viaHeader +
                                     (hasFastlyHint ? " + Fastly headers presentes" : ""));
-                    headerMatch = new WafMatch("detected", "via varnish");
+                    headerMatch = new WafMatch("detected", "CDN", "via varnish");
                 }
             }
 
@@ -69,7 +71,9 @@ public class WafDetectionService {
                     probeCode == 429 || probeCode == 503) {
                 probeResponse = "BLOCKED";
                 if (headerMatch == null) {
+                    // Payload bloqueado sem header identificador — WAF sem fingerprint exposto
                     b.detected(true)
+                            .category("WAF")
                             .confidence("MEDIUM")
                             .evidence("Payload bloqueado com HTTP " + probeCode);
                 }
@@ -90,6 +94,7 @@ public class WafDetectionService {
                 if (serverWaf != null) {
                     b.detected(true)
                             .provider(serverWaf)
+                            .category(resolveCategory(serverWaf))
                             .confidence("LOW")
                             .evidence("Server: " + serverHeader);
                 } else {
@@ -118,68 +123,73 @@ public class WafDetectionService {
         // Verifica Server header para Cloudflare antes dos outros
         String serverVal = getHeader(headers, "server");
         if (serverVal != null && serverVal.toLowerCase().contains("cloudflare")) {
-            return new WafMatch("Cloudflare", "Server: " + serverVal);
+            return new WafMatch("Cloudflare", "WAF", "Server: " + serverVal);
         }
 
         // Ordem de prioridade — headers mais exclusivos primeiro
+        // Formato: header → "PROVIDER|CATEGORY"
+        // CATEGORY: WAF = firewall real | CDN = entrega sem WAF | BOTH = CDN com WAF opcional
         List<Map.Entry<String, String>> ordered = List.of(
-                // Cloudflare
-                Map.entry("cf-ray",                "Cloudflare"),
-                Map.entry("cf-cache-status",       "Cloudflare"),
-                Map.entry("cf-placement",          "Cloudflare"),
+                // Cloudflare — WAF real
+                Map.entry("cf-ray",                "Cloudflare|WAF"),
+                Map.entry("cf-cache-status",       "Cloudflare|WAF"),
+                Map.entry("cf-placement",          "Cloudflare|WAF"),
 
-                // AWS
-                Map.entry("x-amz-cf-id",          "AWS CloudFront"),
-                Map.entry("x-amz-cf-pop",         "AWS CloudFront"),
-                Map.entry("x-amzn-requestid",     "AWS WAF"),
+                // AWS CloudFront (CDN) vs AWS WAF (WAF real)
+                Map.entry("x-amz-cf-id",          "AWS CloudFront|BOTH"),
+                Map.entry("x-amz-cf-pop",         "AWS CloudFront|BOTH"),
+                Map.entry("x-amzn-requestid",     "AWS WAF|WAF"),
 
-                // Akamai
-                Map.entry("x-akamai-transformed", "Akamai"),
-                Map.entry("akamai-grn",            "Akamai"),
+                // Akamai — WAF real
+                Map.entry("x-akamai-transformed", "Akamai|WAF"),
+                Map.entry("akamai-grn",            "Akamai|WAF"),
 
-                // Sucuri
-                Map.entry("x-sucuri-id",           "Sucuri"),
-                Map.entry("x-sucuri-cache",        "Sucuri"),
+                // Sucuri — WAF real
+                Map.entry("x-sucuri-id",           "Sucuri|WAF"),
+                Map.entry("x-sucuri-cache",        "Sucuri|WAF"),
 
-                // Imperva
-                Map.entry("x-iinfo",               "Imperva"),
-                Map.entry("incap-ses",             "Imperva"),
-                Map.entry("visid-incap",           "Imperva"),
+                // Imperva — WAF real
+                Map.entry("x-iinfo",               "Imperva|WAF"),
+                Map.entry("incap-ses",             "Imperva|WAF"),
+                Map.entry("visid-incap",           "Imperva|WAF"),
 
-                // Vercel
-                Map.entry("x-vercel-id",           "Vercel Edge"),
+                // Vercel — hosting/CDN, sem WAF nativo
+                Map.entry("x-vercel-id",           "Vercel Edge|CDN"),
 
-                // Azure
-                Map.entry("x-azure-ref",           "Azure Front Door"),
+                // Azure Front Door — CDN com WAF opcional (não garantido)
+                Map.entry("x-azure-ref",           "Azure Front Door|BOTH"),
 
-                // GitHub
-                Map.entry("x-github-request-id",  "GitHub Infrastructure"),
+                // GitHub — infraestrutura de hosting, não WAF
+                Map.entry("x-github-request-id",  "GitHub Infrastructure|CDN"),
 
-                // Google
-                Map.entry("x-goog-request-id",    "Google Cloud"),
+                // Google Cloud — CDN/hosting, não WAF
+                Map.entry("x-goog-request-id",    "Google Cloud|CDN"),
 
-                // F5
-                Map.entry("x-wa-info",             "F5 BIG-IP"),
-                Map.entry("x-f5-request-id",       "F5 BIG-IP"),
+                // F5 BIG-IP — WAF real
+                Map.entry("x-wa-info",             "F5 BIG-IP|WAF"),
+                Map.entry("x-f5-request-id",       "F5 BIG-IP|WAF"),
 
-                // Fastly — depois dos mais específicos
-                Map.entry("x-fastly-request-id",  "Fastly"),
-                Map.entry("fastly-restarts",       "Fastly"),
-                Map.entry("x-served-by",           "Fastly"),
-                Map.entry("x-cache-hits",          "Fastly"),
-                Map.entry("x-timer",               "Fastly"),
+                // Fastly — CDN, sem WAF nativo
+                Map.entry("x-fastly-request-id",  "Fastly|CDN"),
+                Map.entry("fastly-restarts",       "Fastly|CDN"),
+                Map.entry("x-served-by",           "Fastly|CDN"),
+                Map.entry("x-cache-hits",          "Fastly|CDN"),
+                Map.entry("x-timer",               "Fastly|CDN"),
 
-                // Barracuda
-                Map.entry("bni-persistence",       "Barracuda")
+                // Barracuda — WAF real
+                Map.entry("bni-persistence",       "Barracuda|WAF")
         );
 
         for (Map.Entry<String, String> fp : ordered) {
-            String headerKey = fp.getKey();
-            String provider  = fp.getValue();
+            String headerKey  = fp.getKey();
+            String providerRaw = fp.getValue();  // "PROVIDER|CATEGORY"
 
             if (headers.containsKey(headerKey)) {
-                String val = getHeader(headers, headerKey);
-                return new WafMatch(provider, headerKey + ": " + val);
+                String val      = getHeader(headers, headerKey);
+                String[] parts  = providerRaw.split("\\|", 2);
+                String provider = parts[0];
+                String category = parts.length > 1 ? parts[1] : "WAF";
+                return new WafMatch(provider, category, headerKey + ": " + val);
             }
         }
         return null;
@@ -235,15 +245,30 @@ public class WafDetectionService {
                     "ou pode não ter WAF. Probe com payload: " +
                     (r.getProbeResponse() != null ? r.getProbeResponse() : "N/A") + ".";
         }
+        boolean isCdn = "CDN".equals(r.getCategory());
+        boolean isBoth = "BOTH".equals(r.getCategory());
+        String typeLabel = isCdn  ? "CDN (sem WAF nativo)"
+                         : isBoth ? "CDN com WAF opcional"
+                         : "WAF";
+
         return switch (r.getConfidence() != null ? r.getConfidence() : "") {
-            case "HIGH"   -> r.getProvider() + " detectado com alta confiança via header exclusivo. " +
-                    "Camada de proteção ativa.";
+            case "HIGH"   -> r.getProvider() + " detectado (" + typeLabel + ") via header exclusivo."
+                    + (isCdn ? " CDN de entrega — não confere proteção WAF por padrão." : " Camada de proteção ativa.");
             case "MEDIUM" -> "Possível WAF detectado — payloads maliciosos foram bloqueados.";
-            case "LOW"    -> "Indício de " + r.getProvider() + " via Server header. " +
-                    "Confirmação inconclusiva.";
-            default       -> "WAF detectado: " + r.getProvider();
+            case "LOW"    -> "Indício de " + r.getProvider() + " via Server header. Confirmação inconclusiva.";
+            default       -> r.getProvider() + " detectado (" + typeLabel + ").";
         };
     }
 
-    private record WafMatch(String provider, String evidence) {}
+    /** Resolve a categoria de um provider identificado via Server header (fallback). */
+    private String resolveCategory(String provider) {
+        if (provider == null) return null;
+        return switch (provider) {
+            case "Cloudflare", "Akamai", "Sucuri", "Imperva" -> "WAF";
+            case "Fastly" -> "CDN";
+            default -> "WAF";
+        };
+    }
+
+    private record WafMatch(String provider, String category, String evidence) {}
 }

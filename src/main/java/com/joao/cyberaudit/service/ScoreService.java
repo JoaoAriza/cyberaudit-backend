@@ -391,20 +391,30 @@ public class ScoreService {
                         "Considere adicionar Cloudflare, AWS WAF ou similar como camada de proteção."
                 ));
             } else {
-                // WAF detectado — bônus baseado em confiança e bloqueio de probe
+                // WAF detectado — bônus apenas para WAFs reais.
+                // CDNs (Vercel, GitHub, Fastly, Google Cloud) não conferem proteção
+                // contra ataques e não recebem bônus de score.
+                String  category     = wafDetectionResult.getCategory();
+                boolean isRealWaf    = "WAF".equals(category) || "BOTH".equals(category);
                 boolean probeBlocked = "BLOCKED".equals(wafDetectionResult.getProbeResponse());
                 String  confidence   = wafDetectionResult.getConfidence();
 
-                int bonus = 0;
-                if (probeBlocked && "HIGH".equals(confidence))   bonus = 8;
-                else if (probeBlocked)                           bonus = 5;
-                else if ("HIGH".equals(confidence))              bonus = 4;
-                else if ("MEDIUM".equals(confidence))            bonus = 2;
-                else                                             bonus = 1;
+                if (isRealWaf) {
+                    int bonus = 0;
+                    if (probeBlocked && "HIGH".equals(confidence))   bonus = 8;
+                    else if (probeBlocked)                           bonus = 5;
+                    else if ("HIGH".equals(confidence))              bonus = 4;
+                    else if ("MEDIUM".equals(confidence))            bonus = 2;
+                    else                                             bonus = 1;
 
-                score += bonus;
-                notes.add("WAF/CDN detectado (" + wafDetectionResult.getProvider()
-                        + (probeBlocked ? ", probe bloqueado" : "") + "): +" + bonus);
+                    score += bonus;
+                    notes.add("WAF detectado (" + wafDetectionResult.getProvider()
+                            + (probeBlocked ? ", probe bloqueado" : "") + "): +" + bonus);
+                } else {
+                    // CDN detectado — informativo, sem bônus de score
+                    notes.add("CDN detectado (" + wafDetectionResult.getProvider()
+                            + "): sem bônus (não é WAF)");
+                }
             }
         }
 
