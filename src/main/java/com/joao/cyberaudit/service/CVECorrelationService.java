@@ -19,40 +19,46 @@ import java.util.stream.Collectors;
 @Service
 public class CVECorrelationService {
 
-    private static final String NVD_API     = "https://services.nvd.nist.gov/rest/json/cves/2.0";
+    private static final String NVD_CVE_API = "https://services.nvd.nist.gov/rest/json/cves/2.0";
     private static final int    MAX_PER_SW  = 5;
     private static final int    MAX_TOTAL   = 15;
     private static final int    MAX_QUERIES = 4;
     private static final long   DELAY_MS    = 700;
 
     /**
-     * Mapa de aliases: nome interno → nome que o NVD usa nas descrições.
-     * Crítico para obter resultados corretos — o NVD usa nomes completos,
-     * não siglas (ex: "IIS" não encontra nada, "Internet Information Services" encontra).
+     * CPE map: software name → {vendor, product}
+     *
+     * Substitui o antigo keywordSearch, que fazia busca full-text e retornava
+     * CVEs onde nome/versão aparecia em qualquer parte da descrição — incluindo
+     * "fixed in X.Y.Z" ou menções contextuais — gerando alto volume de falsos positivos.
+     *
+     * Com cpeName, o NVD retorna apenas CVEs cujo "vulnerable configuration"
+     * inclui a versão pesquisada (com suporte a ranges: affects >= 1.18.0, < 1.24.1).
+     *
+     * CPE format: cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*
+     * Referência: https://nvd.nist.gov/products/cpe/search
      */
-    private static final Map<String, String> NVD_ALIASES;
+    private static final Map<String, String[]> CPE_MAP;
     static {
-        NVD_ALIASES = new LinkedHashMap<>();
-        NVD_ALIASES.put("Microsoft IIS",         "Internet Information Services");
-        NVD_ALIASES.put("Apache HTTP Server",    "Apache HTTP Server");
-        NVD_ALIASES.put("nginx",                 "nginx");
-        NVD_ALIASES.put("OpenResty",             "OpenResty");
-        NVD_ALIASES.put("Lighttpd",              "Lighttpd");
-        NVD_ALIASES.put("Caddy",                 "Caddy");
-        NVD_ALIASES.put("PHP",                   "PHP");
-        NVD_ALIASES.put("ASP.NET",               "ASP.NET");
-        NVD_ALIASES.put("WordPress",             "WordPress");
-        NVD_ALIASES.put("Drupal",                "Drupal");
-        NVD_ALIASES.put("Joomla",                "Joomla");
-        NVD_ALIASES.put("Ghost",                 "Ghost CMS");
-        NVD_ALIASES.put("jQuery",                "jQuery");
-        NVD_ALIASES.put("Angular",               "Angular");
-        NVD_ALIASES.put("Next.js",               "Next.js");
-        NVD_ALIASES.put("Nuxt.js",               "Nuxt.js");
-        NVD_ALIASES.put("Laravel",               "Laravel");
-        NVD_ALIASES.put("Django",                "Django");
-        NVD_ALIASES.put("Ruby on Rails",         "Ruby on Rails");
-        NVD_ALIASES.put("Java Servlet/Tomcat",   "Apache Tomcat");
+        CPE_MAP = new LinkedHashMap<>();
+        //                  software name              vendor            product
+        CPE_MAP.put("nginx",               new String[]{"nginx",           "nginx"});
+        CPE_MAP.put("Apache HTTP Server",  new String[]{"apache",          "http_server"});
+        CPE_MAP.put("Microsoft IIS",       new String[]{"microsoft",       "internet_information_services"});
+        CPE_MAP.put("Lighttpd",            new String[]{"lighttpd",        "lighttpd"});
+        CPE_MAP.put("OpenResty",           new String[]{"openresty",       "openresty"});
+        CPE_MAP.put("PHP",                 new String[]{"php",             "php"});
+        CPE_MAP.put("WordPress",           new String[]{"wordpress",       "wordpress"});
+        CPE_MAP.put("Drupal",              new String[]{"drupal",          "drupal"});
+        CPE_MAP.put("Joomla",              new String[]{"joomla",          "joomla"});
+        CPE_MAP.put("jQuery",              new String[]{"jquery",          "jquery"});
+        CPE_MAP.put("Angular",             new String[]{"google",          "angular"});
+        CPE_MAP.put("Laravel",             new String[]{"laravel",         "laravel"});
+        CPE_MAP.put("Django",              new String[]{"djangoproject",   "django"});
+        CPE_MAP.put("Ruby on Rails",       new String[]{"rubyonrails",     "ruby_on_rails"});
+        CPE_MAP.put("Java Servlet/Tomcat", new String[]{"apache",          "tomcat"});
+        // ASP.NET e Next.js têm CPE vendors instáveis no NVD — omitidos intencionalmente
+        // para não gerar falsos positivos com CPE errado
     }
 
     private final HttpClient   client  = HttpClient.newBuilder()
@@ -74,7 +80,11 @@ public class CVECorrelationService {
             String software = entry.getKey();
             String version  = entry.getValue();
 
-            List<CVEFinding> cves = queryNvd(software, version);
+            // Sem versão detectada — busca por CPE sem versão retornaria TODOS os CVEs
+            // do produto (ruído massivo). Pulamos.
+            if (version == null || version.isBlank()) continue;
+
+            List<CVEFinding> cves = queryByCpe(software, version);
             findings.addAll(cves);
             queryCount++;
 
@@ -87,13 +97,30 @@ public class CVECorrelationService {
         return findings.stream().limit(MAX_TOTAL).collect(Collectors.toList());
     }
 
-    private List<CVEFinding> queryNvd(String software, String version) {
+    /**
+     * Consulta o NVD via cpeName — retorna somente CVEs cujo vulnerable configuration
+     * inclui a versão exata (ou um range que a contenha).
+     *
+     * Elimina a principal causa de falsos positivos: keywordSearch retornava CVEs
+     * onde versão/software aparecia em qualquer parte do texto da descrição.
+     */
+    private List<CVEFinding> queryByCpe(String software, String version) {
+        String[] cpe = CPE_MAP.get(software);
+        if (cpe == null) {
+            // Sem mapeamento CPE confirmado — não arriscamos keyword search
+            return List.of();
+        }
+
+        // Normaliza versão: remove prefixo 'v', strip whitespace
+        String ver = version.replaceFirst("^[vV]", "").trim();
+        if (ver.isBlank()) return List.of();
+
+        String cpeName = "cpe:2.3:a:" + cpe[0] + ":" + cpe[1] + ":" + ver
+                + ":*:*:*:*:*:*:*";
+
         try {
-            // Usa o nome NVD correto se disponível, senão usa o nome original
-            String nvdName = NVD_ALIASES.getOrDefault(software, software);
-            String keyword = nvdName + " " + version;
-            String encoded = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
-            String url = NVD_API + "?keywordSearch=" + encoded
+            String encoded = URLEncoder.encode(cpeName, StandardCharsets.UTF_8);
+            String url = NVD_CVE_API + "?cpeName=" + encoded
                     + "&resultsPerPage=" + MAX_PER_SW;
 
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
@@ -106,16 +133,13 @@ public class CVECorrelationService {
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
 
             if (resp.statusCode() == 429) {
-                // Rate limit — aguarda e tenta uma vez mais
                 Thread.sleep(3000);
                 resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             }
 
             if (resp.statusCode() != 200) return List.of();
 
-            // Se não encontrou com versão, tenta sem versão (só nome do software)
-            List<CVEFinding> results = parseResponse(resp.body(), software + " " + version);
-            return results;
+            return parseResponse(resp.body(), software + " " + ver);
 
         } catch (Exception e) {
             return List.of();
@@ -168,6 +192,9 @@ public class CVECorrelationService {
                             .asText(metricNode.path("baseSeverity").asText("UNKNOWN"))
                             .toUpperCase();
                 }
+
+                // CVEs sem CVSS score são registros incompletos no NVD — ignorar
+                if (cvssScore == 0.0) continue;
 
                 String published = cve.path("published").asText("").split("T")[0];
                 String refUrl    = "https://nvd.nist.gov/vuln/detail/" + id;
