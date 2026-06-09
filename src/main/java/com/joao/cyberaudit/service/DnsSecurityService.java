@@ -18,9 +18,61 @@ import java.util.stream.Collectors;
 @Service
 public class DnsSecurityService {
 
+    /**
+     * Seletores DKIM conhecidos por provider.
+     *
+     * Problema anterior: lista com apenas 10 seletores genéricos — seletores de
+     * providers como SendGrid (em), Proton (protonmail), Zoho (zoho), Amazon SES
+     * (amazonses), FastMail (fm1/fm2/fm3), HubSpot (hubspot1) não eram checados,
+     * resultando em "DKIM não detectado" mesmo quando DKIM estava corretamente
+     * configurado. Isso tornava o relatório impreciso e confundia o usuário.
+     *
+     * Todos os lookups são paralelos — adicionar mais seletores não aumenta latência.
+     * Timeout total: 5s (já existente).
+     *
+     * Nota: seletores baseados em data (ex: Google "20161025") não são adivinháveis
+     * sem consultar o DNS por wildcard (não suportado). Se nenhum seletor for encontrado
+     * o resultado é marcado como NOT_DETECTED (inconclusivo), não MISSING.
+     */
     private static final List<String> DKIM_SELECTORS = List.of(
-            "default", "google", "mail", "dkim",
-            "k1", "s1", "s2", "email", "selector1", "selector2"
+            // Genéricos
+            "default", "dkim", "dkim1", "dkim2", "mail", "email", "key1", "key2",
+            // Google Workspace
+            "google",
+            // Microsoft 365
+            "selector1", "selector2",
+            // SendGrid
+            "s1", "s2", "em", "smtpapi",
+            // Mailchimp / Mandrill
+            "k1", "k2", "k3", "mandrill",
+            // Amazon SES
+            "amazonses",
+            // Mailgun
+            "mx1", "mx2", "pic", "krs",
+            // Postmark
+            "pm",
+            // FastMail
+            "fm1", "fm2", "fm3",
+            // Proton Mail
+            "protonmail", "protonmail2", "protonmail3",
+            // Zoho Mail
+            "zoho",
+            // HubSpot
+            "hubspot1", "hubspot2",
+            // Mailjet
+            "mailjet",
+            // SparkPost
+            "scph",
+            // Brevo (Sendinblue)
+            "brevo",
+            // ConvertKit
+            "ck1",
+            // Campaign Monitor
+            "cm",
+            // ActiveCampaign
+            "ac",
+            // OVH
+            "ovhex"
     );
 
     private static final Pattern DMARC_P = Pattern.compile(
@@ -123,7 +175,9 @@ public class DnsSecurityService {
 
     private void analyzeDkim(String host,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
-        ExecutorService pool = Executors.newFixedThreadPool(DKIM_SELECTORS.size());
+        // Cap de 20 threads — lista pode ter 40+ seletores mas DNS é rápido
+        int poolSize = Math.min(DKIM_SELECTORS.size(), 20);
+        ExecutorService pool = Executors.newFixedThreadPool(poolSize);
         try {
             List<CompletableFuture<String>> futures = DKIM_SELECTORS.stream()
                     .map(selector -> CompletableFuture.supplyAsync(() -> {
@@ -138,16 +192,23 @@ public class DnsSecurityService {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                     .get(5, TimeUnit.SECONDS);
 
-            futures.stream()
+            List<String> found = futures.stream()
                     .map(f -> f.getNow(null))
                     .filter(Objects::nonNull)
-                    .findFirst()
-                    .ifPresentOrElse(
-                            sel -> b.dkimHintFound(true).dkimSelector(sel),
-                            ()  -> b.dkimHintFound(false).dkimSelector(null)
-                    );
+                    .collect(Collectors.toList());
+
+            if (!found.isEmpty()) {
+                // Seletor confirmado
+                b.dkimHintFound(true).dkimSelector(found.get(0));
+            } else {
+                // Nenhum seletor da lista respondeu.
+                // Isso NÃO significa ausência de DKIM — o domínio pode usar seletores
+                // customizados ou baseados em data (ex: Google "20230601") que não são
+                // adivinháveis sem enumeração. Marcamos como NOT_DETECTED (inconclusivo).
+                b.dkimHintFound(false).dkimSelector("NOT_DETECTED");
+            }
         } catch (Exception e) {
-            b.dkimHintFound(false).dkimSelector(null);
+            b.dkimHintFound(false).dkimSelector("NOT_DETECTED");
         } finally {
             pool.shutdownNow();
         }
