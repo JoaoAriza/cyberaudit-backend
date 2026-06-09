@@ -221,8 +221,39 @@ public class SensitiveFileService {
             return lower.contains("apache") && lower.contains("server status");
         }
 
-        // Fallback genérico: conteúdo não-HTML com tamanho razoável
-        return body.length() > 50;
+        // ── .bak (backups de PHP/config, ex: wp-config.php.bak) ──────────────
+        // Não termina com .php portanto não é capturado pelo check anterior.
+        // Backup real contém PHP ou pares KEY=VALUE de credenciais.
+        if (lowerPath.endsWith(".bak")) {
+            return lower.contains("<?php")  || lower.contains("define(") ||
+                   lower.contains("db_")    || lower.contains("database") ||
+                   (body.contains("=") && body.matches("(?s).*[A-Z_]+=.+.*"));
+        }
+
+        // ── .zip / compactados ─────────────────────────────────────────────────
+        // Zip real começa com magic bytes "PK" (0x50 0x4B).
+        // Evita falso positivo quando servidor devolve 200+text/plain para path inexistente.
+        if (lowerPath.endsWith(".zip")    || lowerPath.endsWith(".tar.gz") ||
+                lowerPath.endsWith(".tgz")) {
+            return body.startsWith("PK") ||
+                   contentType.contains("application/zip") ||
+                   contentType.contains("application/octet-stream") ||
+                   contentType.contains("application/x-tar");
+        }
+
+        // ── .log (Laravel e outros frameworks) ─────────────────────────────────
+        // Laravel: "[YYYY-MM-DD HH:MM:SS] env.LEVEL: mensagem"
+        // Evita falso positivo com respostas de erro genéricas em texto plano.
+        if (lowerPath.endsWith(".log")) {
+            return lower.contains("local.error")      || lower.contains("production.error") ||
+                   lower.contains("local.debug")      || lower.contains("local.info") ||
+                   lower.contains("stack trace")       || lower.contains("exception in") ||
+                   lower.contains("] local.")          || lower.contains("] production.");
+        }
+
+        // Nenhum check específico correspondeu — não reportar.
+        // Preferimos falso negativo a falso positivo para arquivos sem padrão conhecido.
+        return false;
     }
 
     private String extractBase(String url) {
