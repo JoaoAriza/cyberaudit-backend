@@ -17,8 +17,12 @@ public class HttpMethodService {
 
     /**
      * Métodos a testar com seus riscos.
-     * GET, POST, HEAD são normais — não testamos.
+     * GET, POST, HEAD são normais — não testados.
      * OPTIONS é testado indiretamente pelo CORS probe.
+     *
+     * PATCH foi removido intencionalmente: é método padrão REST (RFC 5789).
+     * Qualquer API REST pode aceitar PATCH com 200 e JSON — isso não é vulnerabilidade.
+     * Incluí-lo gerava falso positivo garantido em praticamente toda API moderna.
      */
     private static final Map<String, MethodRisk> METHOD_RISKS = Map.of(
             "TRACE",   new MethodRisk("CRITICAL",
@@ -29,9 +33,7 @@ public class HttpMethodService {
             "DELETE",  new MethodRisk("HIGH",
                     "DELETE habilitado pode permitir remoção de recursos."),
             "CONNECT", new MethodRisk("MEDIUM",
-                    "CONNECT pode ser abusado para proxy tunneling."),
-            "PATCH",   new MethodRisk("LOW",
-                    "PATCH habilitado — verificar se requer autenticação.")
+                    "CONNECT pode ser abusado para proxy tunneling.")
     );
 
     private final HttpClient client = HttpClient.newBuilder()
@@ -90,14 +92,18 @@ public class HttpMethodService {
             if (status == 200) {
                 String contentType = resp.headers()
                         .firstValue("content-type").orElse("").toLowerCase();
+                // 200 + HTML = site retornou sua página padrão, não processou o método
                 if (contentType.contains("text/html")) return null;
             }
 
-            String severity = (status == 401 || status == 403)
-                    ? "LOW"
-                    : risk.severity();
+            boolean requiresAuth = (status == 401 || status == 403);
 
-            String riskDesc = (status == 401 || status == 403)
+            // PUT/DELETE com autenticação = comportamento correto de API REST.
+            // Só é relevante se acessível sem auth (200/204) ou com auth mas TRACE (sempre perigoso).
+            if (requiresAuth && !"TRACE".equals(method)) return null;
+
+            String severity = requiresAuth ? "LOW" : risk.severity();
+            String riskDesc = requiresAuth
                     ? risk.description() + " (requer autenticação)"
                     : risk.description();
 
