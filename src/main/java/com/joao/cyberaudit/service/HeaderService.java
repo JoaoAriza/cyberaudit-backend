@@ -26,9 +26,13 @@ public class HeaderService {
     }
 
     public boolean detectsServerVersionExposure(Map<String, String> h) {
-        String server  = h.getOrDefault("server", "");
+        String server   = h.getOrDefault("server", "");
         String xPowered = h.getOrDefault("x-powered-by", "");
-        return (!server.isBlank() && containsVersion(server)) || !xPowered.isBlank();
+        // Problema anterior: !xPowered.isBlank() retornava true para qualquer valor,
+        // incluindo "Express" ou "PHP" sem numero de versao — nao e "version exposure".
+        // Agora exige versao detectavel nos dois headers.
+        return (!server.isBlank()   && containsVersion(server)) ||
+               (!xPowered.isBlank() && containsVersion(xPowered));
     }
 
 
@@ -69,17 +73,43 @@ public class HeaderService {
         if (v == null) { out.put("Content-Security-Policy", "MISSING"); return; }
 
         String lower = v.toLowerCase(Locale.ROOT);
-        if (lower.contains("'unsafe-inline'") || lower.contains("'unsafe-eval'"))
-            out.put("Content-Security-Policy", "WEAK (unsafe-inline ou unsafe-eval presente)");
+
+        // Problema anterior: lower.contains("'unsafe-inline'") flagava qualquer CSP com
+        // unsafe-inline, mesmo que estivesse so em style-src — prática aceita e sem risco XSS.
+        // Ex: "script-src 'self'; style-src 'unsafe-inline'" e SEGURA mas era marcada WEAK.
+        // Agora: 'unsafe-inline' so e WEAK se aparecer em script-src ou default-src.
+        boolean unsafeInlineInScripts = containsUnsafeInlineInScriptContext(lower);
+        boolean unsafeEval            = lower.contains("'unsafe-eval'");
+
+        if (unsafeInlineInScripts || unsafeEval)
+            out.put("Content-Security-Policy", "WEAK (unsafe-inline em script-src ou unsafe-eval)");
         else if (lower.contains("default-src") || lower.contains("script-src"))
             out.put("Content-Security-Policy", "OK");
         else
             out.put("Content-Security-Policy", "WEAK (" + v + ")");
     }
 
+    /**
+     * Retorna true se 'unsafe-inline' aparecer em script-src ou default-src.
+     * 'unsafe-inline' em style-src e amplamente aceito e nao cria risco XSS.
+     */
+    private boolean containsUnsafeInlineInScriptContext(String cspLower) {
+        if (!cspLower.contains("'unsafe-inline'")) return false;
+        for (String directive : cspLower.split(";")) {
+            String d = directive.trim();
+            if ((d.startsWith("script-src") || d.startsWith("default-src"))
+                    && d.contains("'unsafe-inline'")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void analyzeReferrerPolicy(Map<String, String> h, Map<String, String> out) {
         String v = h.get("referrer-policy");
-        if (v == null) { out.put("Referrer-Policy", "MISSING"); return; }
+        // Problema anterior: valor vazio ("") nao era tratado como MISSING — caía no else
+        // e retornava "OK ("")" mesmo sem nenhuma política definida.
+        if (v == null || v.isBlank()) { out.put("Referrer-Policy", "MISSING"); return; }
 
         String lower = v.toLowerCase(Locale.ROOT);
         if (lower.equals("unsafe-url") || lower.equals("no-referrer-when-downgrade"))

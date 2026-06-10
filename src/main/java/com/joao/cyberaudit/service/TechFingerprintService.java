@@ -37,9 +37,13 @@ public class TechFingerprintService {
         String language  = null;
         List<String> libraries = new ArrayList<>();
 
-        // ── 1. Headers HTTP ────────────────────────────────────────────────────
+        // ── 1. Headers HTTP — fetch unico, nao 1 request por header ───────────
+        // Problema anterior: getRawHeader() fazia 1 HEAD request por chamada,
+        // resultando em 9 requests separadas para o mesmo URL. Alem de lento,
+        // qualquer timeout parcial causava deteccao incompleta.
+        Map<String, List<String>> allHeaders = fetchAllHeaders(targetUrl);
 
-        String serverHeader = getRawHeader(targetUrl, "server");
+        String serverHeader = getFromHeaders(allHeaders, "server");
         if (serverHeader != null) {
             String s = serverHeader.toLowerCase(Locale.ROOT);
             evidence.add("Server: " + serverHeader);
@@ -54,7 +58,6 @@ public class TechFingerprintService {
                 String v = extractVersion(serverHeader).orElse(null);
                 webServer = v != null ? "nginx " + v : "nginx";
                 if (v != null) detectedVersions.put("nginx", v);
-
             } else if (s.contains("microsoft-iis") || s.contains("iis")) {
                 String v = extractVersion(serverHeader).orElse(null);
                 webServer = v != null ? "Microsoft IIS " + v : "Microsoft IIS";
@@ -73,7 +76,7 @@ public class TechFingerprintService {
         }
 
         // X-Powered-By
-        String poweredBy = getRawHeader(targetUrl, "x-powered-by");
+        String poweredBy = getFromHeaders(allHeaders, "x-powered-by");
         if (poweredBy != null) {
             String p = poweredBy.toLowerCase(Locale.ROOT);
             evidence.add("X-Powered-By: " + poweredBy);
@@ -96,7 +99,7 @@ public class TechFingerprintService {
         }
 
         // X-Generator
-        String generator = getRawHeader(targetUrl, "x-generator");
+        String generator = getFromHeaders(allHeaders, "x-generator");
         if (generator != null) {
             evidence.add("X-Generator: " + generator);
             String g = generator.toLowerCase(Locale.ROOT);
@@ -106,15 +109,15 @@ public class TechFingerprintService {
         }
 
         // CDN-specific headers
-        String cfRay = getRawHeader(targetUrl, "cf-ray");
-        if (cfRay != null)    { cdn = "Cloudflare"; evidence.add("cf-ray header presente"); }
+        String cfRay = getFromHeaders(allHeaders, "cf-ray");
+        if (cfRay != null) { cdn = "Cloudflare"; evidence.add("cf-ray header presente"); }
 
-        String xServedBy = getRawHeader(targetUrl, "x-served-by");
+        String xServedBy = getFromHeaders(allHeaders, "x-served-by");
         if (xServedBy != null && xServedBy.toLowerCase().contains("cache")) {
             cdn = "Fastly"; evidence.add("x-served-by: " + xServedBy);
         }
 
-        String via = getRawHeader(targetUrl, "via");
+        String via = getFromHeaders(allHeaders, "via");
         if (via != null) {
             evidence.add("Via: " + via);
             String v = via.toLowerCase(Locale.ROOT);
@@ -122,13 +125,13 @@ public class TechFingerprintService {
             else if (v.contains("varnish"))    cdn = "Varnish";
         }
 
-        String xAmzId = getRawHeader(targetUrl, "x-amz-id-2");
+        String xAmzId = getFromHeaders(allHeaders, "x-amz-id-2");
         if (xAmzId != null) { cdn = "AWS S3/CloudFront"; evidence.add("x-amz-id-2 header presente"); }
 
-        String xVercel = getRawHeader(targetUrl, "x-vercel-id");
+        String xVercel = getFromHeaders(allHeaders, "x-vercel-id");
         if (xVercel != null) { cdn = "Vercel"; evidence.add("x-vercel-id header presente"); }
 
-        String xNetlify = getRawHeader(targetUrl, "x-nf-request-id");
+        String xNetlify = getFromHeaders(allHeaders, "x-nf-request-id");
         if (xNetlify != null) { cdn = "Netlify"; evidence.add("x-nf-request-id header presente"); }
 
         // ── 2. Cookies ─────────────────────────────────────────────────────────
@@ -175,7 +178,7 @@ public class TechFingerprintService {
                 cms = "Webflow"; evidence.add("HTML: Webflow detectado");
             }
 
-            // Meta generator (contém versão do CMS frequentemente)
+            // Meta generator (contem versao do CMS frequentemente)
             int genIdx = lower.indexOf("<meta name=\"generator\"");
             if (genIdx >= 0) {
                 String meta = body.substring(genIdx, Math.min(genIdx + 200, body.length()));
@@ -203,7 +206,6 @@ public class TechFingerprintService {
             } else if (lower.contains("ng-version") || lower.contains("ng-app")) {
                 framework = "Angular"; language = coalesce(language, "TypeScript");
                 evidence.add("HTML: Angular directive detectada");
-                // ng-version="15.2.0" tem a versão
                 extractNgVersion(body).ifPresent(v -> detectedVersions.put("Angular", v));
             } else if (lower.contains("data-reactroot") || lower.contains("__reactfiber")) {
                 libraries.add("React"); evidence.add("HTML: React fiber detectado");
@@ -213,15 +215,38 @@ public class TechFingerprintService {
                 libraries.add("Svelte"); evidence.add("HTML: Svelte detectado");
             }
 
-            // Libraries
-            if (lower.contains("jquery")) {
+            // Libraries — verificar em contexto de asset (src/href), nao texto livre.
+            // Problema anterior: lower.contains("bootstrap") e lower.contains("tailwindcss")
+            // ou lower.contains("tw-") disparavam para qualquer mencao textual na pagina
+            // (ex: "bootstrap the app", "tw-container" de outro design system).
+            // Agora exigimos que a string apareca dentro de um atributo src= ou href=.
+            Pattern assetBootstrap = Pattern.compile(
+                    "(?:src|href)\\s*=\\s*[\"'][^\"']*bootstrap[^\"']*[\"']",
+                    Pattern.CASE_INSENSITIVE);
+            if (assetBootstrap.matcher(body).find()) {
+                libraries.add("Bootstrap"); evidence.add("HTML: Bootstrap asset detectado");
+            }
+
+            // Tailwind: "tw-" era muito generico (qualquer classe prefixada). Mantemos
+            // apenas "tailwindcss" que aparece no CDN/nome do bundle.
+            Pattern assetTailwind = Pattern.compile(
+                    "(?:src|href)\\s*=\\s*[\"'][^\"']*tailwindcss[^\"']*[\"']",
+                    Pattern.CASE_INSENSITIVE);
+            if (assetTailwind.matcher(body).find() || lower.contains("tailwindcss")) {
+                libraries.add("Tailwind CSS"); evidence.add("HTML: Tailwind CSS detectado");
+            }
+
+            // jQuery: exige script src com "jquery" no caminho do arquivo JS.
+            // Isso evita match em texto como "Previously we used jQuery...".
+            Pattern jqScript = Pattern.compile(
+                    "<script[^>]+src\\s*=\\s*[\"'][^\"']*jquery[^\"']*\\.js[^\"']*[\"']",
+                    Pattern.CASE_INSENSITIVE);
+            if (jqScript.matcher(body).find()) {
                 String jqVersion = extractJQueryVersion(body).orElse(null);
                 libraries.add(jqVersion != null ? "jQuery " + jqVersion : "jQuery");
                 evidence.add("HTML: jQuery detectado");
                 if (jqVersion != null) detectedVersions.put("jQuery", jqVersion);
             }
-            if (lower.contains("bootstrap")) { libraries.add("Bootstrap"); evidence.add("HTML: Bootstrap detectado"); }
-            if (lower.contains("tailwindcss") || lower.contains("tw-")) { libraries.add("Tailwind CSS"); evidence.add("HTML: Tailwind CSS detectado"); }
 
             // Backend patterns
             if (lower.contains("__viewstate") || lower.contains("asp.net_sessionid")) {
@@ -232,10 +257,20 @@ public class TechFingerprintService {
                 framework = "Spring + Thymeleaf"; language = coalesce(language, "Java");
                 evidence.add("HTML: Thymeleaf template detectado");
             }
-            if (lower.contains("laravel") && framework == null) {
+
+            // Laravel: requer path de asset especifico (/vendor/laravel/, livewire) OU
+            // combinacao de csrf-token meta + linguagem PHP ja identificada.
+            // Problema anterior: lower.contains("laravel") disparava para qualquer pagina
+            // que mencionasse "Laravel" em texto (ex: "Migrating from Laravel to Django").
+            boolean laravelAsset = lower.contains("/vendor/laravel/") ||
+                                   lower.contains("laravel-livewire") ||
+                                   lower.contains("livewire/livewire.js");
+            boolean laravelCsrf  = lower.contains("csrf-token") && "PHP".equals(language);
+            if ((laravelAsset || laravelCsrf) && framework == null) {
                 framework = "Laravel"; language = coalesce(language, "PHP");
-                evidence.add("HTML: Laravel signature");
+                evidence.add("HTML: Laravel path/CSRF detectado");
             }
+
             if (lower.contains("inertia") && lower.contains("data-page")) {
                 libraries.add("Inertia.js"); evidence.add("HTML: Inertia.js detectado");
             }
@@ -257,7 +292,12 @@ public class TechFingerprintService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String getRawHeader(String url, String headerName) {
+    /**
+     * Busca todos os headers em uma unica requisicao HEAD.
+     * Substitui o padrao anterior de getRawHeader() que fazia 1 request por header
+     * (chegava a 9 requests HEAD para o mesmo URL).
+     */
+    private Map<String, List<String>> fetchAllHeaders(String url) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .method("HEAD", HttpRequest.BodyPublishers.noBody())
@@ -265,34 +305,65 @@ public class TechFingerprintService {
                     .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
                     .build();
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
-            return resp.headers().firstValue(headerName).orElse(null);
-        } catch (Exception e) {
-            return null;
-        }
+            return resp.headers().map();
+        } catch (Exception e) { return Map.of(); }
     }
 
-    /** Extrai a primeira versão semântica (x.y.z) de uma string. */
+    private String getFromHeaders(Map<String, List<String>> headers, String name) {
+        List<String> vals = headers.get(name.toLowerCase(Locale.ROOT));
+        return (vals != null && !vals.isEmpty()) ? vals.get(0) : null;
+    }
+
+    /** Extrai a primeira versao semantica (x.y.z) de uma string. */
     private Optional<String> extractVersion(String value) {
         if (value == null) return Optional.empty();
         Matcher m = VERSION_PATTERN.matcher(value);
         return m.find() ? Optional.of(m.group(1)) : Optional.empty();
     }
 
-    /** Extrai versão do WordPress de query strings como ?ver=6.4.3 */
+    /**
+     * Extrai a versao do WordPress core — NAO de plugins.
+     *
+     * Problema anterior: Pattern "?ver=(\d+\.\d+)" pegava o PRIMEIRO ?ver= do HTML,
+     * que frequentemente e versao de plugin (ex: Contact Form 7 5.7.7), nao do core WP.
+     * Isso passava versao errada para CVECorrelationService gerando CVE lookups incorretos.
+     *
+     * Agora prioriza:
+     * 1. Meta generator: <meta name="generator" content="WordPress X.Y.Z"> — mais confiavel
+     * 2. Fallback: ?ver= em paths /wp-includes/ (arquivos do core, nao plugins)
+     */
     private Optional<String> extractWpVersion(String html) {
-        Pattern p = Pattern.compile("\\?ver=(\\d+\\.\\d+(?:\\.\\d+)?)");
-        Matcher m = p.matcher(html);
-        return m.find() ? Optional.of(m.group(1)) : Optional.empty();
+        // Meta generator e a fonte mais confiavel da versao do core
+        Pattern metaP = Pattern.compile(
+                "name=[\"']generator[\"'][^>]*content=[\"']WordPress (\\d+\\.\\d+(?:\\.\\d+)?)[\"']",
+                Pattern.CASE_INSENSITIVE);
+        Matcher m = metaP.matcher(html);
+        if (m.find()) return Optional.of(m.group(1));
+
+        // Alternativa: content primeiro, name depois (ordem de atributos varia)
+        Pattern metaP2 = Pattern.compile(
+                "content=[\"']WordPress (\\d+\\.\\d+(?:\\.\\d+)?)[\"'][^>]*name=[\"']generator[\"']",
+                Pattern.CASE_INSENSITIVE);
+        m = metaP2.matcher(html);
+        if (m.find()) return Optional.of(m.group(1));
+
+        // Fallback: ?ver= apenas em /wp-includes/ (core WP, nao plugins em /wp-content/)
+        Pattern coreP = Pattern.compile(
+                "/wp-includes/[^\"'?]*\\?ver=(\\d+\\.\\d+(?:\\.\\d+)?)");
+        m = coreP.matcher(html);
+        if (m.find()) return Optional.of(m.group(1));
+
+        return Optional.empty();
     }
 
-    /** Extrai versão do Angular do atributo ng-version="x.y.z" */
+    /** Extrai versao do Angular do atributo ng-version="x.y.z" */
     private Optional<String> extractNgVersion(String html) {
         Pattern p = Pattern.compile("ng-version=\"(\\d+\\.\\d+\\.\\d+)\"");
         Matcher m = p.matcher(html);
         return m.find() ? Optional.of(m.group(1)) : Optional.empty();
     }
 
-    /** Extrai versão do jQuery de scripts como jquery-3.6.0.min.js ou jquery/3.6.0 */
+    /** Extrai versao do jQuery de scripts como jquery-3.6.0.min.js ou jquery/3.6.0 */
     private Optional<String> extractJQueryVersion(String html) {
         Pattern p = Pattern.compile("jquery[/-](\\d+\\.\\d+\\.\\d+)");
         Matcher m = p.matcher(html.toLowerCase(Locale.ROOT));
