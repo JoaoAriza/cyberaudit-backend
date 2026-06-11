@@ -372,6 +372,23 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── JWT Security ──────────────────────────────────────────────────────
+        if (r.getJwtSecurity() != null && !r.getJwtSecurity().isEmpty()) {
+            s.append("== JWT Security ==\n");
+            for (JwtSecurityFinding jwt : r.getJwtSecurity()) {
+                s.append("\n  [").append(jwt.getSeverity()).append("] ")
+                        .append(jwt.getSource()).append("  (alg=").append(jwt.getAlgorithm()).append(")\n");
+                s.append("    Expiry:   ").append(jwt.isHasExpiry() ? (jwt.isExpired() ? "EXPIRED" : "present") : "MISSING").append("\n");
+                s.append("    Issuer:   ").append(jwt.isHasIssuer() ? "present" : "missing").append("\n");
+                s.append("    Audience: ").append(jwt.isHasAudience() ? "present" : "missing").append("\n");
+                if (jwt.getIssues() != null)
+                    jwt.getIssues().forEach(i -> s.append("    Issue: ").append(i).append("\n"));
+                if (jwt.getEvidence() != null)
+                    s.append("    Evidence: ").append(jwt.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── GraphQL Introspection ─────────────────────────────────────────────
         if (r.getGraphQlIntrospection() != null && !r.getGraphQlIntrospection().isEmpty()) {
             s.append("== GraphQL Introspection ==\n");

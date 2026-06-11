@@ -110,13 +110,15 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
-        // 16. GraphQL Introspection
+        // 16. JWT Security
+        if (r.getJwtSecurity() != null && !r.getJwtSecurity().isEmpty()) jwtSection(r);
+        // 17. GraphQL Introspection
         if (r.getGraphQlIntrospection() != null && !r.getGraphQlIntrospection().isEmpty()) graphQlSection(r);
-        // 17. API Docs Exposure
+        // 18. API Docs Exposure
         if (r.getApiDocsExposure() != null && !r.getApiDocsExposure().isEmpty()) apiDocsSection(r);
-        // 18. Changes
+        // 19. Changes
         if (r.getChanges() != null && !r.getChanges().isEmpty()) changesSection(r);
-        // 19. Score breakdown
+        // 20. Score breakdown
         if (r.getScore() != null && r.getScore().getNotes() != null && !r.getScore().getNotes().isEmpty())
             scoreBreakdown(r);
     }
@@ -623,6 +625,35 @@ public class PdfReportService {
         cy -= 6;
     }
 
+
+    private void jwtSection(ScanResult r) throws IOException {
+        secHead("JWT SECURITY");
+        for (JwtSecurityFinding jwt : r.getJwtSecurity()) {
+            int rows = 3 + jwt.getIssues().size();
+            need(LH * rows + 10);
+            float[] sc = sevColor(jwt.getSeverity());
+            float[] sb = sevBg(jwt.getSeverity());
+            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            fill(M + 8, cy - LH + 1, FBW, 11, sb);
+            txt(jwt.getSeverity(), M + 8 + (FBW - sw(jwt.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(jwt.getSource()) + "  (alg=" + s(jwt.getAlgorithm()) + ")", TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            String expStr = !jwt.isHasExpiry() ? "MISSING" : jwt.isExpired() ? "EXPIRED" : "present";
+            float[] expCol = !jwt.isHasExpiry() || jwt.isExpired() ? CRIT : OK;
+            kv("Expiry",   expStr, expCol);
+            kv("Issuer",   jwt.isHasIssuer()   ? "present" : "missing",
+                    jwt.isHasIssuer()   ? OK : MED);
+            kv("Audience", jwt.isHasAudience() ? "present" : "missing",
+                    jwt.isHasAudience() ? OK : MED);
+            if (jwt.getIssues() != null) {
+                for (String issue : jwt.getIssues()) kv("Issue", issue);
+            }
+            cy -= 5;
+        }
+        cy -= 6;
+    }
 
     private void graphQlSection(ScanResult r) throws IOException {
         secHead("GRAPHQL INTROSPECTION");

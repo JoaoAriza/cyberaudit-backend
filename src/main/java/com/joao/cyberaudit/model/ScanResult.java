@@ -45,13 +45,14 @@ public class ScanResult {
     private List<OpenRedirectFinding>     openRedirectFindings;
     private List<DirectoryListingFinding> directoryListingFindings;
 
-    private TechFingerprintResult techFingerprint;
-    private List<CVEFinding>      cveFindings;
+    private TechFingerprintResult          techFingerprint;
+    private List<CVEFinding>               cveFindings;
     private List<ScanChange>               changes;
     private List<SubdomainTakeoverFinding> subdomainTakeover;
-    private CertTransparencyResult          certTransparency;
-    private List<ApiDocsExposureFinding>    apiDocsExposure;
+    private CertTransparencyResult         certTransparency;
+    private List<ApiDocsExposureFinding>   apiDocsExposure;
     private List<GraphQlIntrospectionFinding> graphQlIntrospection;
+    private List<JwtSecurityFinding>       jwtSecurity;
 
     private ScoreResult score;
 }

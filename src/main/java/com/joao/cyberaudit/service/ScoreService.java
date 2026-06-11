@@ -34,7 +34,8 @@ public class ScoreService {
             WafDetectionResult wafDetectionResult,
             List<CVEFinding> cveFindings,
             List<ApiDocsExposureFinding> apiDocsExposure,
-            List<GraphQlIntrospectionFinding> graphQlIntrospection
+            List<GraphQlIntrospectionFinding> graphQlIntrospection,
+            List<JwtSecurityFinding> jwtSecurity
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -460,6 +461,36 @@ public class ScoreService {
             }
 
             score -= cvePenaltyTotal;  // máx -25 pts (CRITICAL + HIGH)
+        }
+
+        // JWT Security penalty
+        // alg:none         — CRITICAL: -15 pts
+        // sem expiracao    — HIGH: -8 pts
+        // algoritmo fraco  — MEDIUM: -4 pts
+        // sem iss/aud      — LOW: -2 pts
+        // Cap: -15 pts total
+        if (jwtSecurity != null && !jwtSecurity.isEmpty()) {
+            int jwtPenalty = 0;
+            for (JwtSecurityFinding jwt : jwtSecurity) {
+                int p = switch (jwt.getSeverity()) {
+                    case "CRITICAL" -> 15;
+                    case "HIGH"     -> 8;
+                    case "MEDIUM"   -> 4;
+                    default          -> 2;
+                };
+                jwtPenalty = Math.max(jwtPenalty, p); // pega o pior caso
+                String issueDesc = String.join("; ", jwt.getIssues());
+                issues.add(new SecurityIssue(
+                        "JWT_" + jwt.getSeverity(),
+                        "JWT inseguro em '" + jwt.getSource() + "' (alg=" + jwt.getAlgorithm() + ")",
+                        jwt.getSeverity(),
+                        issueDesc,
+                        "Usar algoritmo assimetrico (RS256/ES256), adicionar claims exp/iss/aud, "
+                        + "nunca usar alg=none em producao."
+                ));
+            }
+            score -= jwtPenalty;
+            notes.add("JWT inseguro detectado: -" + jwtPenalty);
         }
 
         // GraphQL Introspection penalty

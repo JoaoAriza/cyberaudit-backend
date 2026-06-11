@@ -42,6 +42,7 @@ public class ScanOrchestrator {
     private final CrtShService                  crtShService;             // ← compartilhado
     private final ApiDocsExposureService         apiDocsExposureService;
     private final GraphQlIntrospectionService    graphQlIntrospectionService;
+    private final JwtSecurityService             jwtSecurityService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -62,7 +63,8 @@ public class ScanOrchestrator {
             CertTransparencyService certTransparencyService,
             CrtShService crtShService,                               // ← compartilhado
             ApiDocsExposureService apiDocsExposureService,
-            GraphQlIntrospectionService graphQlIntrospectionService) {
+            GraphQlIntrospectionService graphQlIntrospectionService,
+            JwtSecurityService jwtSecurityService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -92,6 +94,7 @@ public class ScanOrchestrator {
         this.crtShService              = crtShService;            // ← compartilhado
         this.apiDocsExposureService    = apiDocsExposureService;
         this.graphQlIntrospectionService = graphQlIntrospectionService;
+        this.jwtSecurityService          = jwtSecurityService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -136,6 +139,9 @@ public class ScanOrchestrator {
         String  target               = fetch.getFinalUrl() != null ? fetch.getFinalUrl() : analysisUrl;
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
+        // JWT analysis: passivo, usa cookies ja obtidos — sem request adicional
+        List<JwtSecurityFinding> jwtSecurity = jwtSecurityService.analyze(
+                fetch.getRawSetCookies(), fetch.getHeaders());
 
         // ── Fase 1b: fingerprint + CVE (paralelo) ─────────────────────────────
         ExecutorService fingerprintPool = Executors.newFixedThreadPool(2);
@@ -219,7 +225,7 @@ public class ScanOrchestrator {
                     null, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     List.of(), dangerousHttpMethods, secTxtFound,
                     List.of(), directoryListingFindings, dnsSecurityResult, null,
-                    cveFindings, apiDocsExposure, graphQlIntrospection
+                    cveFindings, apiDocsExposure, graphQlIntrospection, jwtSecurity
             );
 
             // ── Monta resultado passivo ────────────────────────────────────────
@@ -244,6 +250,7 @@ public class ScanOrchestrator {
                     .certTransparency(certTransparency)
                     .apiDocsExposure(apiDocsExposure)
                     .graphQlIntrospection(graphQlIntrospection)
+                    .jwtSecurity(jwtSecurity)
                     .changes(scanChangeDetector.detect(
                             buildPartialForDiff(passiveScore, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, List.of(),
@@ -321,7 +328,7 @@ public class ScanOrchestrator {
                     sensitiveFiles, dangerousHttpMethods, secTxtFound,
                     openRedirectFindings, directoryListingFindings,
                     dnsSecurityResult, wafDetectionResult, cveFindings,
-                    apiDocsExposure, graphQlIntrospection
+                    apiDocsExposure, graphQlIntrospection, jwtSecurity
             );
 
             ScanResult result = ScanResult.builder()
@@ -347,6 +354,7 @@ public class ScanOrchestrator {
                     .certTransparency(certTransparency)
                     .apiDocsExposure(apiDocsExposure)
                     .graphQlIntrospection(graphQlIntrospection)
+                    .jwtSecurity(jwtSecurity)
                     .changes(scanChangeDetector.detect(              // ← change detection
                             buildPartialForDiff(score, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, openPorts,
