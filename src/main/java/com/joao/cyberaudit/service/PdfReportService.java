@@ -110,11 +110,13 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
-        // 16. API Docs Exposure
+        // 16. GraphQL Introspection
+        if (r.getGraphQlIntrospection() != null && !r.getGraphQlIntrospection().isEmpty()) graphQlSection(r);
+        // 17. API Docs Exposure
         if (r.getApiDocsExposure() != null && !r.getApiDocsExposure().isEmpty()) apiDocsSection(r);
-        // 17. Changes
+        // 18. Changes
         if (r.getChanges() != null && !r.getChanges().isEmpty()) changesSection(r);
-        // 18. Score breakdown
+        // 19. Score breakdown
         if (r.getScore() != null && r.getScore().getNotes() != null && !r.getScore().getNotes().isEmpty())
             scoreBreakdown(r);
     }
@@ -621,6 +623,31 @@ public class PdfReportService {
         cy -= 6;
     }
 
+
+    private void graphQlSection(ScanResult r) throws IOException {
+        secHead("GRAPHQL INTROSPECTION");
+        for (GraphQlIntrospectionFinding gql : r.getGraphQlIntrospection()) {
+            need(LH * 4 + 10);
+            float[] sc = sevColor(gql.getSeverity());
+            float[] sb = sevBg(gql.getSeverity());
+            fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            fill(M + 8, cy - LH + 1, FBW, 11, sb);
+            txt(gql.getSeverity(), M + 8 + (FBW - sw(gql.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(gql.getEndpoint()), TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            kv("Introspection", o(gql.isIntrospectionEnabled()),
+                    gql.isIntrospectionEnabled() ? CRIT : OK);
+            kv("Playground",    o(gql.isPlaygroundExposed()),
+                    gql.isPlaygroundExposed() ? CRIT : OK);
+            if (gql.getTypeCount() > 0)
+                kv("Types exposed", String.valueOf(gql.getTypeCount()));
+            if (gql.getEvidence() != null) kv("Evidence", gql.getEvidence());
+            cy -= 5;
+        }
+        cy -= 6;
+    }
 
     private void apiDocsSection(ScanResult r) throws IOException {
         secHead("API DOCUMENTATION EXPOSURE");

@@ -372,6 +372,21 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── GraphQL Introspection ─────────────────────────────────────────────
+        if (r.getGraphQlIntrospection() != null && !r.getGraphQlIntrospection().isEmpty()) {
+            s.append("== GraphQL Introspection ==\n");
+            for (GraphQlIntrospectionFinding gql : r.getGraphQlIntrospection()) {
+                s.append("\n  [").append(gql.getSeverity()).append("] ").append(gql.getEndpoint()).append("\n");
+                s.append("    Introspection: ").append(gql.isIntrospectionEnabled()).append("\n");
+                s.append("    Playground:    ").append(gql.isPlaygroundExposed()).append("\n");
+                if (gql.getTypeCount() > 0)
+                    s.append("    Types exposed: ").append(gql.getTypeCount()).append("\n");
+                if (gql.getEvidence() != null)
+                    s.append("    Evidence: ").append(gql.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── API Documentation Exposure ────────────────────────────────────────
         if (r.getApiDocsExposure() != null && !r.getApiDocsExposure().isEmpty()) {
             s.append("== API Documentation Exposure ==\n");

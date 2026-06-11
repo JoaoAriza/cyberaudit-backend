@@ -41,6 +41,7 @@ public class ScanOrchestrator {
     private final CertTransparencyService        certTransparencyService;
     private final CrtShService                  crtShService;             // ← compartilhado
     private final ApiDocsExposureService         apiDocsExposureService;
+    private final GraphQlIntrospectionService    graphQlIntrospectionService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -60,7 +61,8 @@ public class ScanOrchestrator {
             SubdomainTakeoverService subdomainTakeoverService,
             CertTransparencyService certTransparencyService,
             CrtShService crtShService,                               // ← compartilhado
-            ApiDocsExposureService apiDocsExposureService) {
+            ApiDocsExposureService apiDocsExposureService,
+            GraphQlIntrospectionService graphQlIntrospectionService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -89,6 +91,7 @@ public class ScanOrchestrator {
         this.certTransparencyService   = certTransparencyService;
         this.crtShService              = crtShService;            // ← compartilhado
         this.apiDocsExposureService    = apiDocsExposureService;
+        this.graphQlIntrospectionService = graphQlIntrospectionService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -175,6 +178,9 @@ public class ScanOrchestrator {
             var apiDocsFuture  = CompletableFuture.supplyAsync(
                             () -> apiDocsExposureService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
+            var graphQlFuture  = CompletableFuture.supplyAsync(
+                            () -> graphQlIntrospectionService.scan(target), passivePool)
+                    .exceptionally(e -> List.of());
 
             // CT encadeado após DNS para garantir que recebe o resultado correto
             var certTransFuture = dnsFuture
@@ -186,7 +192,7 @@ public class ScanOrchestrator {
             try {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
-                        takeoverFuture, certTransFuture, cveFuture, apiDocsFuture
+                        takeoverFuture, certTransFuture, cveFuture, apiDocsFuture, graphQlFuture
                 ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
@@ -200,6 +206,7 @@ public class ScanOrchestrator {
             List<SubdomainTakeoverFinding>    takeoverFindings     = takeoverFuture.getNow(List.of());
             CertTransparencyResult               certTransparency     = certTransFuture.getNow(null);
             List<ApiDocsExposureFinding>         apiDocsExposure      = apiDocsFuture.getNow(List.of());
+            List<GraphQlIntrospectionFinding>    graphQlIntrospection = graphQlFuture.getNow(List.of());
             List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
@@ -212,7 +219,7 @@ public class ScanOrchestrator {
                     null, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     List.of(), dangerousHttpMethods, secTxtFound,
                     List.of(), directoryListingFindings, dnsSecurityResult, null,
-                    cveFindings, apiDocsExposure
+                    cveFindings, apiDocsExposure, graphQlIntrospection
             );
 
             // ── Monta resultado passivo ────────────────────────────────────────
@@ -236,6 +243,7 @@ public class ScanOrchestrator {
                     .subdomainTakeover(takeoverFindings)
                     .certTransparency(certTransparency)
                     .apiDocsExposure(apiDocsExposure)
+                    .graphQlIntrospection(graphQlIntrospection)
                     .changes(scanChangeDetector.detect(
                             buildPartialForDiff(passiveScore, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, List.of(),
@@ -313,7 +321,7 @@ public class ScanOrchestrator {
                     sensitiveFiles, dangerousHttpMethods, secTxtFound,
                     openRedirectFindings, directoryListingFindings,
                     dnsSecurityResult, wafDetectionResult, cveFindings,
-                    apiDocsExposure
+                    apiDocsExposure, graphQlIntrospection
             );
 
             ScanResult result = ScanResult.builder()
@@ -337,6 +345,8 @@ public class ScanOrchestrator {
                     .techFingerprint(techFingerprint).cveFindings(cveFindings)
                     .subdomainTakeover(takeoverFindings)
                     .certTransparency(certTransparency)
+                    .apiDocsExposure(apiDocsExposure)
+                    .graphQlIntrospection(graphQlIntrospection)
                     .changes(scanChangeDetector.detect(              // ← change detection
                             buildPartialForDiff(score, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, openPorts,

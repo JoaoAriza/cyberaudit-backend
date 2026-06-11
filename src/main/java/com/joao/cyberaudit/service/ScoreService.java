@@ -33,7 +33,8 @@ public class ScoreService {
             DnsSecurityResult dnsSecurityResult,
             WafDetectionResult wafDetectionResult,
             List<CVEFinding> cveFindings,
-            List<ApiDocsExposureFinding> apiDocsExposure
+            List<ApiDocsExposureFinding> apiDocsExposure,
+            List<GraphQlIntrospectionFinding> graphQlIntrospection
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -459,6 +460,31 @@ public class ScoreService {
             }
 
             score -= cvePenaltyTotal;  // máx -25 pts (CRITICAL + HIGH)
+        }
+
+        // GraphQL Introspection penalty
+        // Introspection habilitada em producao: -5 pts (schema completo exposto)
+        // Playground exposto: -8 pts (UI interativa sem auth)
+        // Cap: -8 pts total por endpoint
+        if (graphQlIntrospection != null && !graphQlIntrospection.isEmpty()) {
+            for (GraphQlIntrospectionFinding gql : graphQlIntrospection) {
+                int gqlPenalty = gql.isPlaygroundExposed() ? 8 : 5;
+                score -= gqlPenalty;
+                notes.add("GraphQL " + (gql.isPlaygroundExposed() ? "playground exposto" : "introspection habilitada")
+                        + " (" + gql.getEndpoint() + "): -" + gqlPenalty);
+                String tc = gql.getTypeCount() > 0 ? " (" + gql.getTypeCount() + " tipos no schema)" : "";
+                issues.add(new SecurityIssue(
+                        "GRAPHQL_" + (gql.isPlaygroundExposed() ? "PLAYGROUND" : "INTROSPECTION"),
+                        "GraphQL " + (gql.isPlaygroundExposed() ? "playground publico" : "introspection habilitada")
+                                + " em " + gql.getEndpoint() + tc,
+                        gql.getSeverity(),
+                        gql.isPlaygroundExposed()
+                                ? "Interface GraphQL interativa acessivel sem autenticacao — permite explorar e executar queries na API."
+                                : "Introspection habilitada em producao — expoe schema completo: queries, mutations, tipos e campos.",
+                        "Desabilitar introspection em producao (ex: spring.graphql.schema.introspection.enabled=false). "
+                        + "Restringir acesso ao playground a ambientes de desenvolvimento."
+                ));
+            }
         }
 
         // API docs exposure penalty

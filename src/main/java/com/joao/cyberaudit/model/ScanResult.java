@@ -51,6 +51,7 @@ public class ScanResult {
     private List<SubdomainTakeoverFinding> subdomainTakeover;
     private CertTransparencyResult          certTransparency;
     private List<ApiDocsExposureFinding>    apiDocsExposure;
+    private List<GraphQlIntrospectionFinding> graphQlIntrospection;
 
     private ScoreResult score;
 }
