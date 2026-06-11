@@ -110,6 +110,8 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
+        // 15. Path Traversal
+        if (r.getPathTraversal() != null && !r.getPathTraversal().isEmpty()) pathTraversalSection(r);
         // 16. JWT Security
         if (r.getJwtSecurity() != null && !r.getJwtSecurity().isEmpty()) jwtSection(r);
         // 17. GraphQL Introspection
@@ -625,6 +627,25 @@ public class PdfReportService {
         cy -= 6;
     }
 
+
+    private void pathTraversalSection(ScanResult r) throws IOException {
+        secHead("PATH TRAVERSAL / LFI");
+        for (PathTraversalFinding pt : r.getPathTraversal()) {
+            int rows = 3;
+            need(LH * rows + 10);
+            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            fill(M + 8, cy - LH + 1, FBW, 11, CRIT);
+            txt("CRITICAL", M + 8 + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
+            txt("param: " + s(pt.getParameter()) + "  →  " + s(pt.getTarget()), TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            kv("Payload",  pt.getPayload());
+            kv("Evidence", pt.getEvidence() != null ? pt.getEvidence() : "n/a");
+            cy -= 5;
+        }
+        cy -= 6;
+    }
 
     private void jwtSection(ScanResult r) throws IOException {
         secHead("JWT SECURITY");

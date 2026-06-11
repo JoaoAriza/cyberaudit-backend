@@ -372,6 +372,19 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── Path Traversal ─────────────────────────────────────────────────────
+        if (r.getPathTraversal() != null && !r.getPathTraversal().isEmpty()) {
+            s.append("== Path Traversal / LFI ==\n");
+            for (PathTraversalFinding pt : r.getPathTraversal()) {
+                s.append("\n  [CRITICAL] param='").append(pt.getParameter()).append("'\n");
+                s.append("    Target:  ").append(pt.getTarget()).append("\n");
+                s.append("    Payload: ").append(pt.getPayload()).append("\n");
+                if (pt.getEvidence() != null)
+                    s.append("    Evidence: ").append(pt.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── JWT Security ──────────────────────────────────────────────────────
         if (r.getJwtSecurity() != null && !r.getJwtSecurity().isEmpty()) {
             s.append("== JWT Security ==\n");

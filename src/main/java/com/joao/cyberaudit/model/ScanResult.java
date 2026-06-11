@@ -53,6 +53,7 @@ public class ScanResult {
     private List<ApiDocsExposureFinding>   apiDocsExposure;
     private List<GraphQlIntrospectionFinding> graphQlIntrospection;
     private List<JwtSecurityFinding>       jwtSecurity;
+    private List<PathTraversalFinding>     pathTraversal;
 
     private ScoreResult score;
 }

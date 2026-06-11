@@ -35,7 +35,8 @@ public class ScoreService {
             List<CVEFinding> cveFindings,
             List<ApiDocsExposureFinding> apiDocsExposure,
             List<GraphQlIntrospectionFinding> graphQlIntrospection,
-            List<JwtSecurityFinding> jwtSecurity
+            List<JwtSecurityFinding> jwtSecurity,
+            List<PathTraversalFinding> pathTraversal
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -461,6 +462,13 @@ public class ScoreService {
             }
 
             score -= cvePenaltyTotal;  // máx -25 pts (CRITICAL + HIGH)
+        }
+
+        // Path Traversal penalty — CRITICAL: -15 pts por finding, cap -20
+        if (pathTraversal != null && !pathTraversal.isEmpty()) {
+            int ptPenalty = Math.min(pathTraversal.size() * 15, 20);
+            score -= ptPenalty;
+            notes.add("Path Traversal / LFI (" + pathTraversal.size() + " param(s)): -" + ptPenalty);
         }
 
         // JWT Security penalty
