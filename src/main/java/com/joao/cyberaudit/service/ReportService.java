@@ -372,6 +372,20 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── API Documentation Exposure ────────────────────────────────────────
+        if (r.getApiDocsExposure() != null && !r.getApiDocsExposure().isEmpty()) {
+            s.append("== API Documentation Exposure ==\n");
+            for (ApiDocsExposureFinding f : r.getApiDocsExposure()) {
+                s.append("\n  [").append(f.getSeverity()).append("] ")
+                        .append(f.getType()).append("  ").append(f.getPath()).append("\n");
+                if (f.getDescription() != null)
+                    s.append("    ").append(f.getDescription()).append("\n");
+                if (f.getEvidence() != null)
+                    s.append("    Evidence: ").append(f.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── Changes ───────────────────────────────────────────────────────────
         if (r.getChanges() != null && !r.getChanges().isEmpty()) {
             s.append("== Changes Detected ==\n");

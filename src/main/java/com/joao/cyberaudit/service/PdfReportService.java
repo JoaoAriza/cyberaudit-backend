@@ -110,9 +110,11 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
-        // 16. Changes
+        // 16. API Docs Exposure
+        if (r.getApiDocsExposure() != null && !r.getApiDocsExposure().isEmpty()) apiDocsSection(r);
+        // 17. Changes
         if (r.getChanges() != null && !r.getChanges().isEmpty()) changesSection(r);
-        // 17. Score breakdown
+        // 18. Score breakdown
         if (r.getScore() != null && r.getScore().getNotes() != null && !r.getScore().getNotes().isEmpty())
             scoreBreakdown(r);
     }
@@ -616,6 +618,28 @@ public class PdfReportService {
         kvBool("Credentials allowed",  c.isCredentialsAllowed(), false);
         kvBool("Null origin accepted", c.isNullOriginAccepted(), false);
         if (c.getMessage() != null) kv("Assessment", c.getMessage());
+        cy -= 6;
+    }
+
+
+    private void apiDocsSection(ScanResult r) throws IOException {
+        secHead("API DOCUMENTATION EXPOSURE");
+        for (ApiDocsExposureFinding f : r.getApiDocsExposure()) {
+            need(LH * 3 + 10);
+            float[] sc = sevColor(f.getSeverity());
+            float[] sb = sevBg(f.getSeverity());
+            fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            fill(M + 8, cy - LH + 1, FBW, 11, sb);
+            txt(f.getSeverity(), M + 8 + (FBW - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(f.getPath()), TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            kv("Type",     f.getType());
+            kv("Evidence", f.getEvidence());
+            if (f.getDescription() != null) kv("Risk", f.getDescription());
+            cy -= 5;
+        }
         cy -= 6;
     }
 

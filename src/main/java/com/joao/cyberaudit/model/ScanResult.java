@@ -49,7 +49,8 @@ public class ScanResult {
     private List<CVEFinding>      cveFindings;
     private List<ScanChange>               changes;
     private List<SubdomainTakeoverFinding> subdomainTakeover;
-    private CertTransparencyResult          certTransparency;  // ← novo
+    private CertTransparencyResult          certTransparency;
+    private List<ApiDocsExposureFinding>    apiDocsExposure;
 
     private ScoreResult score;
 }

@@ -32,7 +32,8 @@ public class ScoreService {
             List<DirectoryListingFinding> directoryListingFindings,
             DnsSecurityResult dnsSecurityResult,
             WafDetectionResult wafDetectionResult,
-            List<CVEFinding> cveFindings
+            List<CVEFinding> cveFindings,
+            List<ApiDocsExposureFinding> apiDocsExposure
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -458,6 +459,27 @@ public class ScoreService {
             }
 
             score -= cvePenaltyTotal;  // máx -25 pts (CRITICAL + HIGH)
+        }
+
+        // API docs exposure penalty
+        // Cada endpoint exposto e -3 pts, cap de -8 pts total.
+        // Severidade HIGH (spec JSON/YAML) gera issue MEDIUM no score;
+        // MEDIUM (UI) gera issue LOW — informacional mas relevante.
+        if (apiDocsExposure != null && !apiDocsExposure.isEmpty()) {
+            int apiPenalty = Math.min(apiDocsExposure.size() * 3, 8);
+            score -= apiPenalty;
+            notes.add("API docs expostos (" + apiDocsExposure.size() + " endpoint(s)): -" + apiPenalty);
+            for (ApiDocsExposureFinding f : apiDocsExposure) {
+                String issueSev = "HIGH".equals(f.getSeverity()) ? "MEDIUM" : "LOW";
+                issues.add(new SecurityIssue(
+                        "API_DOCS_" + f.getType(),
+                        "Documentacao de API exposta: " + f.getPath(),
+                        issueSev,
+                        f.getDescription(),
+                        "Restringir acesso a documentacao de API em producao via autenticacao " +
+                        "ou remover os endpoints /swagger-ui, /api-docs, /openapi.json."
+                ));
+            }
         }
 
         score = Math.max(0, score);

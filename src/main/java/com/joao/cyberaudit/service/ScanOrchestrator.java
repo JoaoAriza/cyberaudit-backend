@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.*;
+import java.util.Collections;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +40,7 @@ public class ScanOrchestrator {
     private final SubdomainTakeoverService      subdomainTakeoverService;
     private final CertTransparencyService        certTransparencyService;
     private final CrtShService                  crtShService;             // ← compartilhado
+    private final ApiDocsExposureService         apiDocsExposureService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -57,7 +59,8 @@ public class ScanOrchestrator {
             ScanChangeDetector scanChangeDetector,
             SubdomainTakeoverService subdomainTakeoverService,
             CertTransparencyService certTransparencyService,
-            CrtShService crtShService) {                               // ← compartilhado
+            CrtShService crtShService,                               // ← compartilhado
+            ApiDocsExposureService apiDocsExposureService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -85,6 +88,7 @@ public class ScanOrchestrator {
         this.subdomainTakeoverService   = subdomainTakeoverService;
         this.certTransparencyService   = certTransparencyService;
         this.crtShService              = crtShService;            // ← compartilhado
+        this.apiDocsExposureService    = apiDocsExposureService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -168,6 +172,9 @@ public class ScanOrchestrator {
             var takeoverFuture = CompletableFuture.supplyAsync(
                             () -> subdomainTakeoverService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
+            var apiDocsFuture  = CompletableFuture.supplyAsync(
+                            () -> apiDocsExposureService.scan(target), passivePool)
+                    .exceptionally(e -> List.of());
 
             // CT encadeado após DNS para garantir que recebe o resultado correto
             var certTransFuture = dnsFuture
@@ -179,7 +186,7 @@ public class ScanOrchestrator {
             try {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
-                        takeoverFuture, certTransFuture, cveFuture
+                        takeoverFuture, certTransFuture, cveFuture, apiDocsFuture
                 ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
@@ -192,6 +199,7 @@ public class ScanOrchestrator {
             TechFingerprintResult             techFingerprint      = fingerprintFuture.getNow(null);
             List<SubdomainTakeoverFinding>    takeoverFindings     = takeoverFuture.getNow(List.of());
             CertTransparencyResult               certTransparency     = certTransFuture.getNow(null);
+            List<ApiDocsExposureFinding>         apiDocsExposure      = apiDocsFuture.getNow(List.of());
             List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
@@ -204,7 +212,7 @@ public class ScanOrchestrator {
                     null, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     List.of(), dangerousHttpMethods, secTxtFound,
                     List.of(), directoryListingFindings, dnsSecurityResult, null,
-                    cveFindings
+                    cveFindings, apiDocsExposure
             );
 
             // ── Monta resultado passivo ────────────────────────────────────────
@@ -226,7 +234,8 @@ public class ScanOrchestrator {
                     .dnsSecurityResult(dnsSecurityResult).wafDetectionResult(null)
                     .techFingerprint(techFingerprint).cveFindings(cveFindings)
                     .subdomainTakeover(takeoverFindings)
-                    .certTransparency(certTransparency)            // ← novo
+                    .certTransparency(certTransparency)
+                    .apiDocsExposure(apiDocsExposure)
                     .changes(scanChangeDetector.detect(
                             buildPartialForDiff(passiveScore, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, List.of(),
@@ -303,7 +312,8 @@ public class ScanOrchestrator {
                     corsResult, cookieIssues, sensitiveRobotsPaths, serverVersionExposed,
                     sensitiveFiles, dangerousHttpMethods, secTxtFound,
                     openRedirectFindings, directoryListingFindings,
-                    dnsSecurityResult, wafDetectionResult, cveFindings
+                    dnsSecurityResult, wafDetectionResult, cveFindings,
+                    apiDocsExposure
             );
 
             ScanResult result = ScanResult.builder()
