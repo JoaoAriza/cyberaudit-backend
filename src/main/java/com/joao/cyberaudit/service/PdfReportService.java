@@ -110,6 +110,8 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
+        // 14a. Host Header Injection
+        if (r.getHostHeaderFindings() != null && !r.getHostHeaderFindings().isEmpty()) hostHeaderSection(r);
         // 14b. SSRF
         if (r.getSsrfFindings() != null && !r.getSsrfFindings().isEmpty()) ssrfSection(r);
         // 15. Path Traversal
@@ -636,7 +638,28 @@ public class PdfReportService {
     }
 
 
-    private void ssrfSection(ScanResult r) throws IOException {
+    private void hostHeaderSection(ScanResult r) throws IOException {
+        secHead("HOST HEADER INJECTION");
+        for (HostHeaderFinding hh : r.getHostHeaderFindings()) {
+            int rows = 3;
+            need(LH * rows + 10);
+            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            float[] sc = sevColor("HIGH");
+            float[] sb = sevBg("HIGH");
+            fill(M + 8, cy - LH + 1, FBW, 11, sb);
+            txt("HIGH", M + 8 + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(hh.getInjectedHeader()) + "  →  reflected in " + s(hh.getReflectionPoint()), TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            kv("Injected",   hh.getInjectedValue());
+            kv("Evidence",   hh.getEvidence() != null ? hh.getEvidence() : "n/a");
+            cy -= 5;
+        }
+        cy -= 6;
+    }
+
+        private void ssrfSection(ScanResult r) throws IOException {
         secHead("SSRF — SERVER-SIDE REQUEST FORGERY");
         for (SsrfFinding ssrf : r.getSsrfFindings()) {
             int rows = 3;

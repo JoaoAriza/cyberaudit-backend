@@ -372,6 +372,19 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── Host Header Injection ─────────────────────────────────────────────────
+        if (r.getHostHeaderFindings() != null && !r.getHostHeaderFindings().isEmpty()) {
+            s.append("== Host Header Injection ==\n");
+            for (HostHeaderFinding hh : r.getHostHeaderFindings()) {
+                s.append("\n  [HIGH] header='").append(hh.getInjectedHeader()).append("'\n");
+                s.append("    Reflection: ").append(hh.getReflectionPoint()).append("\n");
+                s.append("    Injected:   ").append(hh.getInjectedValue()).append("\n");
+                if (hh.getEvidence() != null)
+                    s.append("    Evidence:   ").append(hh.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── SSRF ─────────────────────────────────────────────────────────────────
         if (r.getSsrfFindings() != null && !r.getSsrfFindings().isEmpty()) {
             s.append("== SSRF (Server-Side Request Forgery) ==\n");

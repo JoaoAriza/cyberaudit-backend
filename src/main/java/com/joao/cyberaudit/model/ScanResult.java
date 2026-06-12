@@ -55,6 +55,7 @@ public class ScanResult {
     private List<JwtSecurityFinding>       jwtSecurity;
     private List<PathTraversalFinding>     pathTraversal;
     private List<SsrfFinding>             ssrfFindings;
+    private List<HostHeaderFinding>       hostHeaderFindings;
 
     private ScoreResult score;
 }

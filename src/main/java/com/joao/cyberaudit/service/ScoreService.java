@@ -37,7 +37,8 @@ public class ScoreService {
             List<GraphQlIntrospectionFinding> graphQlIntrospection,
             List<JwtSecurityFinding> jwtSecurity,
             List<PathTraversalFinding> pathTraversal,
-            List<SsrfFinding> ssrfFindings
+            List<SsrfFinding> ssrfFindings,
+            List<HostHeaderFinding> hostHeaderFindings
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -477,6 +478,13 @@ public class ScoreService {
             int ssrfPenalty = Math.min(ssrfFindings.size() * 15, 20);
             score -= ssrfPenalty;
             notes.add("SSRF (" + ssrfFindings.size() + " param(s)): -" + ssrfPenalty);
+        }
+
+        // Host Header Injection penalty — HIGH: -10 pts per finding, cap -15
+        if (hostHeaderFindings != null && !hostHeaderFindings.isEmpty()) {
+            int hhPenalty = Math.min(hostHeaderFindings.size() * 10, 15);
+            score -= hhPenalty;
+            notes.add("Host Header Injection (" + hostHeaderFindings.size() + " header(s)): -" + hhPenalty);
         }
 
         // JWT Security penalty

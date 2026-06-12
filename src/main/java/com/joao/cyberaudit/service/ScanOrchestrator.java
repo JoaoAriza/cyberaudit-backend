@@ -45,6 +45,7 @@ public class ScanOrchestrator {
     private final GraphQlIntrospectionService    graphQlIntrospectionService;
     private final JwtSecurityService             jwtSecurityService;
     private final SsrfService                    ssrfService;
+    private final HostHeaderService              hostHeaderService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -68,7 +69,8 @@ public class ScanOrchestrator {
             PathTraversalService pathTraversalService,
             GraphQlIntrospectionService graphQlIntrospectionService,
             JwtSecurityService jwtSecurityService,
-            SsrfService ssrfService) {
+            SsrfService ssrfService,
+            HostHeaderService hostHeaderService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -101,6 +103,7 @@ public class ScanOrchestrator {
         this.graphQlIntrospectionService = graphQlIntrospectionService;
         this.jwtSecurityService          = jwtSecurityService;
         this.ssrfService                 = ssrfService;
+        this.hostHeaderService           = hostHeaderService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -187,6 +190,8 @@ public class ScanOrchestrator {
             var takeoverFuture = CompletableFuture.supplyAsync(
                             () -> subdomainTakeoverService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
+            var hostHeaderFuture = CompletableFuture.supplyAsync(
+                    () -> hostHeaderService.scan(target), passivePool).exceptionally(e -> List.of());
             var apiDocsFuture  = CompletableFuture.supplyAsync(
                             () -> apiDocsExposureService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
@@ -204,6 +209,7 @@ public class ScanOrchestrator {
             try {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
+                        hostHeaderFuture,
                         takeoverFuture, certTransFuture, cveFuture, apiDocsFuture, graphQlFuture
                 ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
@@ -217,6 +223,7 @@ public class ScanOrchestrator {
             TechFingerprintResult             techFingerprint      = fingerprintFuture.getNow(null);
             List<SubdomainTakeoverFinding>    takeoverFindings     = takeoverFuture.getNow(List.of());
             CertTransparencyResult               certTransparency     = certTransFuture.getNow(null);
+            List<HostHeaderFinding>    hostHeaderFindings   = hostHeaderFuture.getNow(List.of());
             List<ApiDocsExposureFinding>         apiDocsExposure      = apiDocsFuture.getNow(List.of());
             List<GraphQlIntrospectionFinding>    graphQlIntrospection = graphQlFuture.getNow(List.of());
             List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
@@ -232,7 +239,7 @@ public class ScanOrchestrator {
                     List.of(), dangerousHttpMethods, secTxtFound,
                     List.of(), directoryListingFindings, dnsSecurityResult, null,
                     cveFindings, apiDocsExposure, graphQlIntrospection, jwtSecurity,
-                    List.of(), List.of()
+                    List.of(), List.of(), hostHeaderFindings
             );
 
             // ── Monta resultado passivo ────────────────────────────────────────
@@ -260,6 +267,7 @@ public class ScanOrchestrator {
                     .jwtSecurity(jwtSecurity)
                     .pathTraversal(List.of())
                     .ssrfFindings(List.of())
+                    .hostHeaderFindings(hostHeaderFindings)
                     .changes(scanChangeDetector.detect(
                             buildPartialForDiff(passiveScore, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, List.of(),
@@ -348,7 +356,7 @@ public class ScanOrchestrator {
                     openRedirectFindings, directoryListingFindings,
                     dnsSecurityResult, wafDetectionResult, cveFindings,
                     apiDocsExposure, graphQlIntrospection, jwtSecurity,
-                    pathTraversal, ssrfFindings
+                    pathTraversal, ssrfFindings, hostHeaderFindings
             );
 
             ScanResult result = ScanResult.builder()
@@ -377,6 +385,7 @@ public class ScanOrchestrator {
                     .jwtSecurity(jwtSecurity)
                     .pathTraversal(pathTraversal)
                     .ssrfFindings(ssrfFindings)
+                    .hostHeaderFindings(hostHeaderFindings)
                     .changes(scanChangeDetector.detect(              // ← change detection
                             buildPartialForDiff(score, sslInfo, analyzedHeaders,
                                     serverVersionExposed, dangerousHttpMethods, openPorts,
