@@ -54,6 +54,7 @@ public class ScanResult {
     private List<GraphQlIntrospectionFinding> graphQlIntrospection;
     private List<JwtSecurityFinding>       jwtSecurity;
     private List<PathTraversalFinding>     pathTraversal;
+    private List<SsrfFinding>             ssrfFindings;
 
     private ScoreResult score;
 }

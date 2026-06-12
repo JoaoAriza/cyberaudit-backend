@@ -372,6 +372,19 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── SSRF ─────────────────────────────────────────────────────────────────
+        if (r.getSsrfFindings() != null && !r.getSsrfFindings().isEmpty()) {
+            s.append("== SSRF (Server-Side Request Forgery) ==\n");
+            for (SsrfFinding ssrf : r.getSsrfFindings()) {
+                s.append("\n  [CRITICAL] param='").append(ssrf.getParameter()).append("'\n");
+                s.append("    Indicator: ").append(ssrf.getIndicator()).append("\n");
+                s.append("    Payload:   ").append(ssrf.getPayload()).append("\n");
+                if (ssrf.getEvidence() != null)
+                    s.append("    Evidence:  ").append(ssrf.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── Path Traversal ─────────────────────────────────────────────────────
         if (r.getPathTraversal() != null && !r.getPathTraversal().isEmpty()) {
             s.append("== Path Traversal / LFI ==\n");

@@ -110,6 +110,8 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
+        // 14b. SSRF
+        if (r.getSsrfFindings() != null && !r.getSsrfFindings().isEmpty()) ssrfSection(r);
         // 15. Path Traversal
         if (r.getPathTraversal() != null && !r.getPathTraversal().isEmpty()) pathTraversalSection(r);
         // 16. JWT Security
@@ -188,8 +190,8 @@ public class PdfReportService {
             float bx = M + 12 + sw(score + " / 100", bold, 20) + 12;
             float[] bgc = riskBg(risk);
             float bw = sw(risk, bold, 8) + 14;
-            fill(bx, cy - 65, bw, 15, bgc);
-            txt(risk, bx + 7, cy - 56, bold, 8, rc);
+            fill(bx, cy - 59, bw, 14, bgc);
+            txt(risk, bx + 7, cy - 51, bold, 8, rc);
         }
         cy -= boxH + 12;
 
@@ -268,27 +270,34 @@ public class PdfReportService {
     // ── Issue row ─────────────────────────────────────────────────────────────
 
     private void issueRow(SecurityIssue issue) throws IOException {
-        // Estimate height before drawing
-        int titleLines  = lineCount(s(issue.getTitle()), bold, 9, CW - 74);
-        int impactLines = issue.getImpact() != null && !issue.getImpact().isBlank()
-                ? lineCount(s(issue.getImpact()), normal, 8, CW - 60) : 0;
+        final float FBW = 58f;
+        final float TX  = M + 8 + FBW + 8;  // M+74 — badge right edge + 8px gap
+        // Impact/Fix labels sit at TX; value at TX+IL, same column as title
+        final float IL  = sw("Impact: ", bold, 7);   // ~32px — avoids hardcoded guesses
+
         String rec0 = issue.getRecommendation() != null
                 ? issue.getRecommendation().replaceAll("\\s*Ref:\\s*https?://\\S+", "").trim() : "";
-        int fixLines = !rec0.isBlank() ? lineCount(s(rec0), normal, 8, CW - 60) : 0;
-        int totalLines = 1 + titleLines + (impactLines > 0 ? impactLines : 0) + (fixLines > 0 ? fixLines : 0);
+
+        // All widths relative to TX so height estimate matches actual rendering
+        float txtW  = CW - (TX - M);               // title wrap width
+        float valW  = CW - (TX - M) - IL;           // impact/fix value wrap width
+
+        int titleLines  = lineCount(s(issue.getTitle()), bold, 9, txtW);
+        int impactLines = issue.getImpact() != null && !issue.getImpact().isBlank()
+                ? lineCount(s(issue.getImpact()), normal, 8, valW) : 0;
+        int fixLines    = !rec0.isBlank() ? lineCount(s(rec0), normal, 8, valW) : 0;
+        int totalLines  = 1 + titleLines
+                + (impactLines > 0 ? impactLines : 0)
+                + (fixLines    > 0 ? fixLines    : 0);
         need(LH * totalLines + 14);
 
         float[] sc = sevColor(issue.getSeverity());
         float[] sb = sevBg(issue.getSeverity());
         float startY = cy;
 
-        // Fixed-width badge (58px) → titles always start at M+74 regardless of severity label
-        final float FBW = 58f;
-        final float TX  = M + 8 + FBW + 8;   // M+74 — fixed column for title and detail values
         fill(M + 8, cy - LH + 1, FBW, 11, sb);
         txt(issue.getSeverity(), M + 8 + (FBW - sw(issue.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
 
-        // Optional CVE label after fixed badge
         float titleX = TX;
         if (issue.getId() != null && issue.getId().startsWith("CVE_")) {
             fill(titleX, cy - LH + 1, 28, 11, new float[]{0.88f, 0.93f, 0.99f});
@@ -297,21 +306,20 @@ public class PdfReportService {
         }
 
         float lastY = wrapTxt(s(issue.getTitle()), titleX, cy, bold, 9, TEXT, CW - (titleX - M));
-        cy = lastY - LH + 1;
+        cy = lastY - LH;
 
-        // Impact / Fix: label near-left, value aligned with title column (TX)
+        // Impact / Fix: labels at TX (same column as title), values at TX+IL
         if (issue.getImpact() != null && !issue.getImpact().isBlank()) {
-            txt("Impact", M + 12, cy, bold, 7, MUTED);
-            lastY = wrapTxt(s(issue.getImpact()), TX, cy, normal, 8, MUTED, CW - (TX - M));
+            txt("Impact: ", TX, cy, bold, 7, MUTED);
+            lastY = wrapTxt(s(issue.getImpact()), TX + IL, cy, normal, 8, MUTED, valW);
             cy = lastY - LH;
         }
         if (!rec0.isBlank()) {
-            txt("Fix", M + 12, cy, bold, 7, MUTED);
-            lastY = wrapTxt(s(rec0), TX, cy, normal, 8, MUTED, CW - (TX - M));
+            txt("Fix: ", TX, cy, bold, 7, MUTED);
+            lastY = wrapTxt(s(rec0), TX + IL, cy, normal, 8, MUTED, valW);
             cy = lastY - LH;
         }
 
-        // Left severity bar drawn retroactively (x=M, no overlap with text at x=M+8+)
         fill(M, cy, 3, startY - cy + LH, sc);
         fill(M, cy - 1, CW, 0.3f, BORDER);
         cy -= 5;
@@ -628,7 +636,27 @@ public class PdfReportService {
     }
 
 
-    private void pathTraversalSection(ScanResult r) throws IOException {
+    private void ssrfSection(ScanResult r) throws IOException {
+        secHead("SSRF — SERVER-SIDE REQUEST FORGERY");
+        for (SsrfFinding ssrf : r.getSsrfFindings()) {
+            int rows = 3;
+            need(LH * rows + 10);
+            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            fill(M + 8, cy - LH + 1, FBW, 11, CRIT);
+            txt("CRITICAL", M + 8 + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
+            txt("param: " + s(ssrf.getParameter()), TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            kv("Indicator", ssrf.getIndicator());
+            kv("Payload",   ssrf.getPayload());
+            kv("Evidence",  ssrf.getEvidence() != null ? ssrf.getEvidence() : "n/a");
+            cy -= 5;
+        }
+        cy -= 6;
+    }
+
+        private void pathTraversalSection(ScanResult r) throws IOException {
         secHead("PATH TRAVERSAL / LFI");
         for (PathTraversalFinding pt : r.getPathTraversal()) {
             int rows = 3;

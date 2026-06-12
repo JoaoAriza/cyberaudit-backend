@@ -36,7 +36,8 @@ public class ScoreService {
             List<ApiDocsExposureFinding> apiDocsExposure,
             List<GraphQlIntrospectionFinding> graphQlIntrospection,
             List<JwtSecurityFinding> jwtSecurity,
-            List<PathTraversalFinding> pathTraversal
+            List<PathTraversalFinding> pathTraversal,
+            List<SsrfFinding> ssrfFindings
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -469,6 +470,13 @@ public class ScoreService {
             int ptPenalty = Math.min(pathTraversal.size() * 15, 20);
             score -= ptPenalty;
             notes.add("Path Traversal / LFI (" + pathTraversal.size() + " param(s)): -" + ptPenalty);
+        }
+
+        // SSRF penalty — CRITICAL: -15 pts per finding, cap -20
+        if (ssrfFindings != null && !ssrfFindings.isEmpty()) {
+            int ssrfPenalty = Math.min(ssrfFindings.size() * 15, 20);
+            score -= ssrfPenalty;
+            notes.add("SSRF (" + ssrfFindings.size() + " param(s)): -" + ssrfPenalty);
         }
 
         // JWT Security penalty
