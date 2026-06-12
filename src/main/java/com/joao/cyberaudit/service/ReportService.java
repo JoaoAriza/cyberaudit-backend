@@ -372,6 +372,19 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── CRLF Injection ───────────────────────────────────────────────────────
+        if (r.getCrlfFindings() != null && !r.getCrlfFindings().isEmpty()) {
+            s.append("== CRLF Injection ==\n");
+            for (CrlfFinding crlf : r.getCrlfFindings()) {
+                s.append("\n  [HIGH] param='").append(crlf.getParameter()).append("'\n");
+                s.append("    Type:    ").append(crlf.getInjectionType()).append("\n");
+                s.append("    Payload: ").append(crlf.getPayload()).append("\n");
+                if (crlf.getEvidence() != null)
+                    s.append("    Evidence: ").append(crlf.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── Source Map / Debug Exposure ──────────────────────────────────────────
         if (r.getSourceMapFindings() != null && !r.getSourceMapFindings().isEmpty()) {
             s.append("== Source Map / Debug Exposure ==\n");

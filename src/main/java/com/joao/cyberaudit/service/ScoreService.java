@@ -39,7 +39,8 @@ public class ScoreService {
             List<PathTraversalFinding> pathTraversal,
             List<SsrfFinding> ssrfFindings,
             List<HostHeaderFinding> hostHeaderFindings,
-            List<SourceMapFinding> sourceMapFindings
+            List<SourceMapFinding> sourceMapFindings,
+            List<CrlfFinding> crlfFindings
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -497,6 +498,13 @@ public class ScoreService {
             int smPenalty = (int) Math.min(highCount * 8, 15) + (int) Math.min(mediumCount * 4, 8);
             score -= smPenalty;
             notes.add("Source Map / Debug Exposure (" + sourceMapFindings.size() + " finding(s)): -" + smPenalty);
+        }
+
+        // CRLF Injection penalty — HIGH: -12 pts per finding, cap -18
+        if (crlfFindings != null && !crlfFindings.isEmpty()) {
+            int crlfPenalty = Math.min(crlfFindings.size() * 12, 18);
+            score -= crlfPenalty;
+            notes.add("CRLF Injection (" + crlfFindings.size() + " param(s)): -" + crlfPenalty);
         }
 
         // JWT Security penalty

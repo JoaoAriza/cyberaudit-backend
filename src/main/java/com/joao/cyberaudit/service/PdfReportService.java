@@ -110,6 +110,8 @@ public class PdfReportService {
                 && (r.getCorsResult().isWildcardOrigin() || r.getCorsResult().isReflectsOrigin()
                     || r.getCorsResult().isCredentialsAllowed()))
             corsSection(r);
+        // 13a. CRLF Injection
+        if (r.getCrlfFindings() != null && !r.getCrlfFindings().isEmpty()) crlfSection(r);
         // 13b. Source Map / Debug Exposure
         if (r.getSourceMapFindings() != null && !r.getSourceMapFindings().isEmpty()) sourceMapSection(r);
         // 14a. Host Header Injection
@@ -640,7 +642,26 @@ public class PdfReportService {
     }
 
 
-    private void sourceMapSection(ScanResult r) throws IOException {
+    private void crlfSection(ScanResult r) throws IOException {
+        secHead("CRLF INJECTION");
+        for (CrlfFinding crlf : r.getCrlfFindings()) {
+            int rows = 3;
+            need(LH * rows + 10);
+            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            final float FBW = 58f;
+            final float TX  = M + 8 + FBW + 8;
+            fill(M + 8, cy - LH + 1, FBW, 11, HIGH);
+            txt("HIGH", M + 8 + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
+            txt("param: " + s(crlf.getParameter()) + "  [" + s(crlf.getInjectionType()) + "]", TX, cy, bold, 9, TEXT);
+            cy -= LH + 3;
+            kv("Payload",  crlf.getPayload());
+            kv("Evidence", crlf.getEvidence() != null ? crlf.getEvidence() : "n/a");
+            cy -= 5;
+        }
+        cy -= 6;
+    }
+
+        private void sourceMapSection(ScanResult r) throws IOException {
         secHead("SOURCE MAP / DEBUG EXPOSURE");
         for (SourceMapFinding sm : r.getSourceMapFindings()) {
             int rows = 2;
