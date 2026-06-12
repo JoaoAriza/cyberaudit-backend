@@ -38,7 +38,8 @@ public class ScoreService {
             List<JwtSecurityFinding> jwtSecurity,
             List<PathTraversalFinding> pathTraversal,
             List<SsrfFinding> ssrfFindings,
-            List<HostHeaderFinding> hostHeaderFindings
+            List<HostHeaderFinding> hostHeaderFindings,
+            List<SourceMapFinding> sourceMapFindings
     ) {
         int score = 100;
         List<String> notes  = new ArrayList<>();
@@ -485,6 +486,17 @@ public class ScoreService {
             int hhPenalty = Math.min(hostHeaderFindings.size() * 10, 15);
             score -= hhPenalty;
             notes.add("Host Header Injection (" + hostHeaderFindings.size() + " header(s)): -" + hhPenalty);
+        }
+
+        // Source Map / Debug Exposure penalty
+        // HIGH findings (source map, actuator/env): -8 pts each, cap -15
+        // MEDIUM findings (debug endpoints): -4 pts each, cap -8
+        if (sourceMapFindings != null && !sourceMapFindings.isEmpty()) {
+            long highCount   = sourceMapFindings.stream().filter(f -> "HIGH".equals(f.getSeverity())).count();
+            long mediumCount = sourceMapFindings.stream().filter(f -> "MEDIUM".equals(f.getSeverity())).count();
+            int smPenalty = (int) Math.min(highCount * 8, 15) + (int) Math.min(mediumCount * 4, 8);
+            score -= smPenalty;
+            notes.add("Source Map / Debug Exposure (" + sourceMapFindings.size() + " finding(s)): -" + smPenalty);
         }
 
         // JWT Security penalty

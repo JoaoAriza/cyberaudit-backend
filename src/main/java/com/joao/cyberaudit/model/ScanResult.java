@@ -56,6 +56,7 @@ public class ScanResult {
     private List<PathTraversalFinding>     pathTraversal;
     private List<SsrfFinding>             ssrfFindings;
     private List<HostHeaderFinding>       hostHeaderFindings;
+    private List<SourceMapFinding>        sourceMapFindings;
 
     private ScoreResult score;
 }

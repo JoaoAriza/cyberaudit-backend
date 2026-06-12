@@ -372,6 +372,18 @@ public class ReportService {
             s.append("\n");
         }
 
+        // ── Source Map / Debug Exposure ──────────────────────────────────────────
+        if (r.getSourceMapFindings() != null && !r.getSourceMapFindings().isEmpty()) {
+            s.append("== Source Map / Debug Exposure ==\n");
+            for (SourceMapFinding sm : r.getSourceMapFindings()) {
+                s.append("\n  [").append(sm.getSeverity()).append("] [").append(sm.getType()).append("]\n");
+                s.append("    URL:      ").append(sm.getUrl()).append("\n");
+                if (sm.getEvidence() != null)
+                    s.append("    Evidence: ").append(sm.getEvidence()).append("\n");
+            }
+            s.append("\n");
+        }
+
         // ── Host Header Injection ─────────────────────────────────────────────────
         if (r.getHostHeaderFindings() != null && !r.getHostHeaderFindings().isEmpty()) {
             s.append("== Host Header Injection ==\n");
