@@ -584,9 +584,29 @@ public class ScoreService {
         }
 
         score = Math.max(0, score);
-        RiskLevel risk = score >= 80 ? RiskLevel.SECURE
-                : score >= 50 ? RiskLevel.WARNING
-                : RiskLevel.CRITICAL;
+
+        // ── Risk level — 5 tiers ─────────────────────────────────────────────
+        RiskLevel risk;
+        if      (score >= 85) risk = RiskLevel.SECURE;
+        else if (score >= 70) risk = RiskLevel.LOW;
+        else if (score >= 45) risk = RiskLevel.MEDIUM;
+        else if (score >= 20) risk = RiskLevel.HIGH;
+        else                  risk = RiskLevel.CRITICAL;
+
+        // ── Severity override ─────────────────────────────────────────────────
+        // Garante que findings exploráveis forcem um nível mínimo de risco,
+        // independente de outros fatores positivos (WAF bonus, etc.)
+        boolean hasCriticalIssue = issues.stream()
+                .anyMatch(i -> "CRITICAL".equals(i.getSeverity()));
+        boolean hasHighIssue = issues.stream()
+                .anyMatch(i -> "HIGH".equals(i.getSeverity()));
+
+        if (hasCriticalIssue && risk.ordinal() < RiskLevel.HIGH.ordinal()) {
+            risk = RiskLevel.HIGH;
+        }
+        if (hasHighIssue && risk.ordinal() < RiskLevel.MEDIUM.ordinal()) {
+            risk = RiskLevel.MEDIUM;
+        }
 
         return new ScoreResult(score, risk, notes, issues);
     }

@@ -148,7 +148,9 @@ public class BadgeService {
     private String colorFor(RiskLevel risk) {
         return switch (risk) {
             case SECURE   -> "#4c9a2a"; // verde
-            case WARNING  -> "#d4a017"; // amarelo
+            case LOW      -> "#3b9eff"; // azul
+            case MEDIUM   -> "#d4a017"; // amarelo
+            case HIGH     -> "#ff6b35"; // laranja
             case CRITICAL -> "#c0392b"; // vermelho
         };
     }

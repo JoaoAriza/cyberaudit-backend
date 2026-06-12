@@ -999,7 +999,9 @@ public class PdfReportService {
         if (risk == null) return INFO_C;
         return switch (risk.toUpperCase()) {
             case "SECURE"   -> OK;
-            case "WARNING"  -> MED;
+            case "LOW"      -> INFO_C;
+            case "MEDIUM", "WARNING" -> MED;
+            case "HIGH"     -> new float[]{1.0f, 0.42f, 0.21f};  // laranja
             case "CRITICAL" -> CRIT;
             default         -> INFO_C;
         };
@@ -1009,7 +1011,9 @@ public class PdfReportService {
         if (risk == null) return BGLIGHT;
         return switch (risk.toUpperCase()) {
             case "SECURE"   -> new float[]{0.89f, 0.98f, 0.93f};
-            case "WARNING"  -> new float[]{0.99f, 0.97f, 0.87f};
+            case "LOW"      -> new float[]{0.88f, 0.94f, 1.00f};
+            case "MEDIUM", "WARNING" -> new float[]{0.99f, 0.97f, 0.87f};
+            case "HIGH"     -> new float[]{1.00f, 0.93f, 0.88f};
             case "CRITICAL" -> new float[]{0.98f, 0.91f, 0.91f};
             default         -> BGLIGHT;
         };
