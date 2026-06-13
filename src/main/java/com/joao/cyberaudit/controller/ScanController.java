@@ -95,7 +95,7 @@ public class ScanController {
                 ? result.getUrl().replaceAll("[^a-zA-Z0-9]", "-") : "report") + ".pdf";
 
         return ResponseEntity.ok()
-                .header("Content-Disposition", "attachment; filename="" + filename + """)
+                .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
                 .header("Content-Type", "application/pdf")
                 .body(pdf);
     }
