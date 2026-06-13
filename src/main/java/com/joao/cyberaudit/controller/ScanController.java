@@ -123,6 +123,7 @@ public class ScanController {
             @RequestParam String url,
             @RequestParam(defaultValue = "false") boolean active,
             @RequestParam(defaultValue = "false") boolean refresh,
+            @RequestParam(defaultValue = "false") boolean notify,
             HttpServletRequest request) {
 
         AppUser currentUser = getCurrentUser();
@@ -136,7 +137,7 @@ public class ScanController {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
         }
 
-        String scanId = asyncScanService.submit(url, active, currentUser, refresh);
+        String scanId = asyncScanService.submit(url, active, currentUser, refresh, notify);
         return ResponseEntity.accepted().body(Map.of("scanId", scanId));
     }
 
