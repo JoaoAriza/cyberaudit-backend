@@ -72,7 +72,35 @@ public class ScanController {
                 scanOrchestrator.execute(url, active, currentUser, false));
     }
 
-    // ── Relatório PDF ─────────────────────────────────────────────────────────
+    // ── Relatório PDF — via scanId (sem re-scan, resultado já em memória) ───────
+
+    @GetMapping(value = "/report/pdf/{scanId}", produces = "application/pdf")
+    public ResponseEntity<byte[]> scanReportPdfByScanId(@PathVariable String scanId) {
+        AppUser currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Geração de PDF requer autenticação. Faça login para continuar.");
+        }
+
+        AsyncScanStatus status = asyncScanService.getStatus(scanId);
+        if (status == null || status.getResult() == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Resultado de scan não encontrado. Realize um novo scan antes de exportar o PDF.");
+        }
+
+        ScanResult result = status.getResult();
+        byte[] pdf = pdfReportService.generatePdf(result, reportService.generateReport(result));
+
+        String filename = "cyberaudit-" + (result.getUrl() != null
+                ? result.getUrl().replaceAll("[^a-zA-Z0-9]", "-") : "report") + ".pdf";
+
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename="" + filename + """)
+                .header("Content-Type", "application/pdf")
+                .body(pdf);
+    }
+
+    // ── Relatório PDF — re-scan completo (fallback) ────────────────────────────
 
     @GetMapping(value = "/report/pdf", produces = "application/pdf")
     public byte[] scanReportPdf(@RequestParam String url,
