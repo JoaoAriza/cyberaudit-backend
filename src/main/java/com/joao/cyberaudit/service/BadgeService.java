@@ -15,15 +15,32 @@ public class BadgeService {
         this.scanHistoryService = scanHistoryService;
     }
 
+    /**
+     * Gera badge lendo do histórico de scans (fallback padrão).
+     */
     public String generateBadge(String host, String style) {
         List<ScanRecord> records = scanHistoryService.findByHost(host, 1);
-
-        if (records.isEmpty()) {
-            return buildNotScannedBadge(host, style);
-        }
-
+        if (records.isEmpty()) return buildNotScannedBadge(host, style);
         ScanRecord latest = records.get(0);
         return buildBadge(host, latest.getScore(), latest.getRiskLevel(), style);
+    }
+
+    /**
+     * Gera badge com score e riskLevel passados diretamente (resultado atual do scan).
+     * Usado pelo frontend logo após um scan completar — evita lag do histórico.
+     */
+    public String generateBadge(String host, int score, String riskLevel, String style) {
+        RiskLevel risk;
+        try {
+            risk = RiskLevel.valueOf(riskLevel.toUpperCase());
+        } catch (Exception e) {
+            risk = score >= 85 ? RiskLevel.SECURE
+                 : score >= 70 ? RiskLevel.LOW
+                 : score >= 45 ? RiskLevel.MEDIUM
+                 : score >= 20 ? RiskLevel.HIGH
+                 : RiskLevel.CRITICAL;
+        }
+        return buildBadge(host, score, risk, style);
     }
 
     private String buildBadge(String host, int score, RiskLevel risk, String style) {
@@ -147,11 +164,11 @@ public class BadgeService {
 
     private String colorFor(RiskLevel risk) {
         return switch (risk) {
-            case SECURE   -> "#4c9a2a"; // verde
-            case LOW      -> "#3b9eff"; // azul
-            case MEDIUM   -> "#d4a017"; // amarelo
-            case HIGH     -> "#ff6b35"; // laranja
-            case CRITICAL -> "#c0392b"; // vermelho
+            case SECURE            -> "#4c9a2a"; // verde
+            case LOW               -> "#3b9eff"; // azul
+            case MEDIUM, WARNING   -> "#d4a017"; // amarelo (WARNING = legado)
+            case HIGH              -> "#ff6b35"; // laranja
+            case CRITICAL          -> "#c0392b"; // vermelho
         };
     }
 

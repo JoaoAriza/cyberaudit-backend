@@ -21,9 +21,15 @@ public class BadgeController {
     @GetMapping(value = "/{host}", produces = "image/svg+xml")
     public ResponseEntity<String> badge(
             @PathVariable String host,
-            @RequestParam(defaultValue = "classic") String style) {
+            @RequestParam(defaultValue = "classic") String style,
+            @RequestParam(required = false) Integer score,
+            @RequestParam(required = false) String risk) {
 
-        String svg = badgeService.generateBadge(host, style);
+        // Se score e risk passados diretamente (scan recém-concluído), usa-os.
+        // Caso contrário, lê do histórico de scans.
+        String svg = (score != null && risk != null)
+                ? badgeService.generateBadge(host, score, risk, style)
+                : badgeService.generateBadge(host, style);
 
         return ResponseEntity.ok()
                 .contentType(MediaType.valueOf("image/svg+xml"))

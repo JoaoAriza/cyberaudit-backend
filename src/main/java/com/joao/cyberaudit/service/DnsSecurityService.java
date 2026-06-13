@@ -138,9 +138,26 @@ public class DnsSecurityService {
 
     private void analyzeDmarc(String host,
                               DnsSecurityResult.DnsSecurityResultBuilder b) {
+        // RFC 7489 §6.6.3: receivers fall back to org domain if subdomain has no record.
+        // We mirror this: try the host first, then the parent domain.
+        if (queryDmarc(host, b)) return;
+
+        String parent = parentDomain(host);
+        if (parent != null && !parent.equals(host)) {
+            queryDmarc(parent, b);
+        }
+        // queryDmarc sets MISSING if nothing was found
+    }
+
+    /**
+     * Queries _dmarc.<domain> and populates the builder.
+     * @return true if a valid DMARC record was found and parsed
+     */
+    private boolean queryDmarc(String domain,
+                               DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup("_dmarc." + host, Type.TXT).run();
-            if (records == null) { b.dmarcPresent(false).dmarcPolicy("MISSING"); return; }
+            org.xbill.DNS.Record[] records = new Lookup("_dmarc." + domain, Type.TXT).run();
+            if (records == null) { b.dmarcPresent(false).dmarcPolicy("MISSING"); return false; }
 
             for (org.xbill.DNS.Record r : records) {
                 if (!(r instanceof TXTRecord txt)) continue;
@@ -163,12 +180,26 @@ public class DnsSecurityService {
                 } else {
                     b.dmarcPolicy("WEAK");
                 }
-                return;
+                return true;
             }
-            b.dmarcPresent(false).dmarcPolicy("MISSING");
-        } catch (Exception e) {
-            b.dmarcPresent(false).dmarcPolicy("MISSING");
-        }
+        } catch (Exception ignored) {}
+        b.dmarcPresent(false).dmarcPolicy("MISSING");
+        return false;
+    }
+
+    /**
+     * Returns the parent (organisational) domain for a subdomain.
+     * "app.exemplo.com.br" → "exemplo.com.br"
+     * "exemplo.com.br"     → null (already apex-ish; don't recurse)
+     * Handles up to one level of stripping. Good enough for DMARC fallback.
+     */
+    private String parentDomain(String host) {
+        if (host == null) return null;
+        int dot = host.indexOf('.');
+        if (dot < 0) return null;
+        String candidate = host.substring(dot + 1);
+        // Only return if candidate still looks like a real domain (has at least one more dot)
+        return candidate.contains(".") ? candidate : null;
     }
 
     // ── DKIM — seletores testados em paralelo ─────────────────────────────────
@@ -251,7 +282,11 @@ public class DnsSecurityService {
     // ── Risk + Summary ────────────────────────────────────────────────────────
 
     private String calculateRisk(DnsSecurityResult r) {
-        if (!r.isSpfPresent() && !r.isDmarcPresent()) return "CRITICAL";
+        if (!r.isSpfPresent() && !r.isDmarcPresent()) {
+            // Domínio sem MX não envia email por design — risco real existe mas é
+            // menor que um domínio ativo sem proteção. HIGH é mais calibrado.
+            return r.isMxPresent() ? "CRITICAL" : "HIGH";
+        }
         if (!r.isSpfPresent() || !r.isDmarcPresent()) return "HIGH";
         if ("STRONG".equals(r.getSpfPolicy()) && "STRONG".equals(r.getDmarcPolicy())) return "LOW";
         return "MEDIUM";
