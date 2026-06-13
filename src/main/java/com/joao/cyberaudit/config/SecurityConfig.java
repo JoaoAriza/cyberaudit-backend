@@ -70,6 +70,7 @@ public class SecurityConfig {
 
                         // ── Histórico ──────────────────────────────────────────────
                         .requestMatchers("/history/**").authenticated()
+                        .requestMatchers("/scheduled-scans/**").authenticated()
 
                         // ── Admin ──────────────────────────────────────────────────
                         .requestMatchers("/admin/**").hasAnyRole("OWNER", "ADMIN")
