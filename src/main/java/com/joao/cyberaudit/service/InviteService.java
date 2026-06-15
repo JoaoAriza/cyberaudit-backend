@@ -35,6 +35,13 @@ public class InviteService {
     @Transactional
     public InviteDto create(InviteRequest req, AppUser inviter) {
 
+        // Somente contas COMPANY podem ter múltiplos usuários
+        if (inviter.getAccount() == null ||
+                inviter.getAccount().getType() != AccountType.COMPANY) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Convites de usuários estão disponíveis apenas para contas Empresa.");
+        }
+
         if (inviter.getRole() == Role.ADMIN && req.getRole() != Role.FREE_EMPLOYEE) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Admins só podem convidar funcionários.");

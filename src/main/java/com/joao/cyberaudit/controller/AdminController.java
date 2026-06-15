@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.dto.*;
+import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.AppUserRepository;
@@ -105,6 +106,13 @@ public class AdminController {
         if (caller.getRole() == Role.FREE_EMPLOYEE) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Funcionários não podem criar convites.");
+        }
+
+        // Conta INDIVIDUAL não pode convidar usuários (verificado também no InviteService)
+        if (caller.getAccount() == null ||
+                caller.getAccount().getType() != AccountType.COMPANY) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Convites estão disponíveis apenas para contas Empresa.");
         }
 
         InviteDto dto = inviteService.create(req, caller);
