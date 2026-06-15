@@ -73,6 +73,9 @@ public class SecurityConfig {
                         .requestMatchers("/history/**").authenticated()
                         .requestMatchers("/scheduled-scans/**").authenticated()
 
+                        // ── Domínios ───────────────────────────────────────────────
+                        .requestMatchers("/domains/**").authenticated()
+
                         // ── Admin ──────────────────────────────────────────────────
                         .requestMatchers("/admin/**").hasAnyRole("OWNER", "ADMIN")
 

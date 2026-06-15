@@ -1,0 +1,121 @@
+package com.joao.cyberaudit.service;
+
+import com.joao.cyberaudit.dto.DomainDto;
+import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.Domain;
+import com.joao.cyberaudit.repository.DomainRepository;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+public class DomainService {
+
+    private final DomainRepository         domainRepository;
+    private final DomainProtectionService  domainProtectionService;
+
+    public DomainService(DomainRepository domainRepository,
+                         DomainProtectionService domainProtectionService) {
+        this.domainRepository        = domainRepository;
+        this.domainProtectionService = domainProtectionService;
+    }
+
+    // ── Listagem ──────────────────────────────────────────────────────────────
+
+    public List<DomainDto> list(AppUser user) {
+        requireAccount(user);
+        return domainRepository.findByAccountOrderByCreatedAtDesc(user.getAccount())
+                .stream()
+                .map(d -> DomainDto.from(d, domainProtectionService.generateVerificationToken(d.getHost())))
+                .toList();
+    }
+
+    // ── Cadastro ──────────────────────────────────────────────────────────────
+
+    @Transactional
+    public DomainDto add(String rawHost, AppUser user) {
+        requireAccount(user);
+
+        String host = normalize(rawHost);
+
+        if (domainRepository.existsByAccountAndHost(user.getAccount(), host)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Domínio já cadastrado nesta conta.");
+        }
+
+        Domain domain = Domain.builder()
+                .account(user.getAccount())
+                .host(host)
+                .verified(false)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        Domain saved = domainRepository.save(domain);
+        return DomainDto.from(saved, domainProtectionService.generateVerificationToken(host));
+    }
+
+    // ── Remoção ───────────────────────────────────────────────────────────────
+
+    @Transactional
+    public void remove(UUID domainId, AppUser user) {
+        Domain domain = getOwned(domainId, user);
+        domainRepository.delete(domain);
+    }
+
+    // ── Verificação de propriedade ────────────────────────────────────────────
+
+    @Transactional
+    public DomainDto verify(UUID domainId, AppUser user) {
+        Domain domain = getOwned(domainId, user);
+
+        boolean ok = domainProtectionService.isOwnershipVerified(domain.getHost());
+        if (!ok) {
+            throw new ResponseStatusException(HttpStatus.EXPECTATION_FAILED,
+                    "Verificação falhou. Certifique-se de que o arquivo /.well-known/cyberaudit.txt "
+                    + "está acessível com o token correto e tente novamente.");
+        }
+
+        domain.setVerified(true);
+        domain.setVerifiedAt(LocalDateTime.now());
+        return DomainDto.from(domainRepository.save(domain),
+                domainProtectionService.generateVerificationToken(domain.getHost()));
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private Domain getOwned(UUID domainId, AppUser user) {
+        requireAccount(user);
+        Domain domain = domainRepository.findById(domainId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Domínio não encontrado."));
+        if (!domain.getAccount().getId().equals(user.getAccount().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Sem permissão para este domínio.");
+        }
+        return domain;
+    }
+
+    private void requireAccount(AppUser user) {
+        if (user == null || user.getAccount() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Usuário sem conta associada.");
+        }
+    }
+
+    /** Remove protocolo, trailing slash e path — mantém só o hostname. */
+    private String normalize(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Host não pode ser vazio.");
+        }
+        return raw.trim()
+                  .replaceFirst("^https?://", "")
+                  .split("/")[0]
+                  .toLowerCase();
+    }
+}
