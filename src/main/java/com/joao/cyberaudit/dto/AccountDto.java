@@ -3,6 +3,7 @@ package com.joao.cyberaudit.dto;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.Plan;
+import com.joao.cyberaudit.util.CnpjUtil;
 import lombok.Data;
 
 import java.util.UUID;
@@ -16,6 +17,8 @@ public class AccountDto {
     private String displayName;
     private String companyName;
     private String country;
+    /** CNPJ formatado (XX.XXX.XXX/XXXX-XX) — null para contas individuais */
+    private String cnpj;
 
     /** Limites derivados do plano efetivo — podem ser sobrescritos para OWNER/ADMIN */
     private int     dailyScanLimit;
@@ -46,6 +49,8 @@ public class AccountDto {
         dto.setDisplayName(a.getDisplayName());
         dto.setCompanyName(a.getCompanyName());
         dto.setCountry(a.getCountry());
+        // Formata CNPJ se presente (armazenado como 14 dígitos)
+        dto.setCnpj(a.getCnpj() != null ? CnpjUtil.format(a.getCnpj()) : null);
         // limites calculados do plano efetivo (pode ser ENTERPRISE para OWNER/ADMIN)
         dto.setDailyScanLimit(usedPlan.dailyScanLimit);
         dto.setScheduledScanLimit(usedPlan.scheduledScanLimit);

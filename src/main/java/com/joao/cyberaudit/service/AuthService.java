@@ -5,6 +5,7 @@ import com.joao.cyberaudit.model.*;
 import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.AppUserRepository;
 import com.joao.cyberaudit.security.JwtUtil;
+import com.joao.cyberaudit.util.CnpjUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -93,12 +94,23 @@ public class AuthService {
                 .createdAt(LocalDateTime.now());
 
         if (req.getAccountType() == AccountType.COMPANY) {
+            // Valida CNPJ obrigatório para conta COMPANY
+            String rawCnpj = req.getCnpj();
+            if (rawCnpj == null || rawCnpj.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "CNPJ é obrigatório para contas empresa.");
+            }
+            if (!CnpjUtil.isValid(rawCnpj)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "CNPJ inválido: " + rawCnpj);
+            }
             builder
                     .displayName(req.getCompanyName() != null
                             ? req.getCompanyName() : req.getName())
                     .companyName(req.getCompanyName())
                     .companyDomain(req.getCompanyDomain())
-                    .companySize(req.getCompanySize());
+                    .companySize(req.getCompanySize())
+                    .cnpj(CnpjUtil.strip(rawCnpj));
         } else {
             builder
                     .displayName(req.getName())

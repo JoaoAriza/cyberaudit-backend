@@ -40,6 +40,10 @@ public class Account {
 
     private String country;
 
+    /** CNPJ (apenas dígitos, 14 chars). Preenchido apenas para contas COMPANY. */
+    @Column(length = 14)
+    private String cnpj;
+
     @Column(nullable = false)
     private LocalDateTime createdAt;
 }

@@ -15,6 +15,8 @@ public class SetupRequest {
     private String companyName;
     private String companyDomain;
     private String companySize;
+    /** CNPJ enviado pelo cliente (aceita com ou sem máscara). Obrigatório para accountType=COMPANY. */
+    private String cnpj;
 
     private String profession;
     private String website;
