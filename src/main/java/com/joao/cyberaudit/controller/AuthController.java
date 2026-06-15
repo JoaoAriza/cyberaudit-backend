@@ -3,6 +3,7 @@ package com.joao.cyberaudit.controller;
 import com.joao.cyberaudit.dto.*;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Invite;
+import com.joao.cyberaudit.repository.AppUserRepository;
 import com.joao.cyberaudit.service.AuthService;
 import com.joao.cyberaudit.service.GuestRateLimitService;
 import com.joao.cyberaudit.service.InviteService;
@@ -24,15 +25,28 @@ public class AuthController {
     private final AuthService           authService;
     private final GuestRateLimitService guestRateLimitService;
     private final PlanLimitService      planLimitService;
+    private final AppUserRepository     userRepository;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
                           InviteService inviteService,
-                          PlanLimitService planLimitService) {
+                          PlanLimitService planLimitService,
+                          AppUserRepository userRepository) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
         this.planLimitService      = planLimitService;
+        this.userRepository        = userRepository;
+    }
+
+    /**
+     * Retorna se o sistema já foi configurado (primeiro usuário criado).
+     * Público — usado pelo frontend para exibir wizard de setup na primeira instalação.
+     */
+    @GetMapping("/setup-status")
+    public ResponseEntity<Map<String, Object>> setupStatus() {
+        boolean configured = userRepository.count() > 0;
+        return ResponseEntity.ok(Map.of("configured", configured));
     }
 
     @PostMapping("/setup")

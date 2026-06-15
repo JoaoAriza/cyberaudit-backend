@@ -52,6 +52,7 @@ public class SecurityConfig {
 
                         // ── Públicos sem auth ──────────────────────────────────────
                         .requestMatchers("/auth/**").permitAll()
+                        // /auth/** já cobre setup-status, mas explicitando para clareza
                         .requestMatchers("/badge/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
 
