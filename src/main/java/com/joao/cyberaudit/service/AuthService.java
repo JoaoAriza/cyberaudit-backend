@@ -23,17 +23,20 @@ public class AuthService {
     private final PasswordEncoder     passwordEncoder;
     private final JwtUtil             jwtUtil;
     private final AuthenticationManager authManager;
+    private final PlanLimitService    planLimitService;
 
     public AuthService(AppUserRepository userRepository,
                        AccountRepository accountRepository,
                        PasswordEncoder passwordEncoder,
                        JwtUtil jwtUtil,
-                       AuthenticationManager authManager) {
-        this.userRepository  = userRepository;
+                       AuthenticationManager authManager,
+                       PlanLimitService planLimitService) {
+        this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.jwtUtil         = jwtUtil;
-        this.authManager     = authManager;
+        this.passwordEncoder   = passwordEncoder;
+        this.jwtUtil           = jwtUtil;
+        this.authManager       = authManager;
+        this.planLimitService  = planLimitService;
     }
 
     @Transactional
@@ -59,7 +62,7 @@ public class AuthService {
         userRepository.save(owner);
 
         String token = jwtUtil.generateToken(owner);
-        return new AuthResponse(token, UserDto.from(owner));
+        return new AuthResponse(token, UserDto.from(owner, planLimitService));
     }
 
     public AuthResponse login(LoginRequest req) {
@@ -80,7 +83,7 @@ public class AuthService {
         }
 
         String token = jwtUtil.generateToken(user);
-        return new AuthResponse(token, UserDto.from(user));
+        return new AuthResponse(token, UserDto.from(user, planLimitService));
     }
 
     private Account buildAccount(SetupRequest req) {

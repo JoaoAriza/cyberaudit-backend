@@ -21,19 +21,26 @@ public class ScheduledScanService {
     private final ScheduledScanRepository repo;
     private final ScanOrchestrator        orchestrator;
     private final EmailService            emailService;
+    private final PlanLimitService        planLimitService;
 
     public ScheduledScanService(ScheduledScanRepository repo,
                                 ScanOrchestrator orchestrator,
-                                EmailService emailService) {
-        this.repo        = repo;
-        this.orchestrator = orchestrator;
-        this.emailService = emailService;
+                                EmailService emailService,
+                                PlanLimitService planLimitService) {
+        this.repo             = repo;
+        this.orchestrator     = orchestrator;
+        this.emailService     = emailService;
+        this.planLimitService = planLimitService;
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
     @Transactional
     public ScheduledScanDto create(ScheduledScanRequest req, AppUser user) {
+        // Verifica se o plano permite mais agendamentos
+        int currentCount = repo.findByUserOrderByCreatedAtDesc(user).size();
+        planLimitService.checkScheduledScanSlots(user, currentCount);
+
         Frequency freq = Frequency.valueOf(req.getFrequency().toUpperCase());
 
         ScheduledScan scan = ScheduledScan.builder()

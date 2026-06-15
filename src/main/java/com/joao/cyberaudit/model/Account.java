@@ -22,6 +22,11 @@ public class Account {
     @Column(nullable = false)
     private AccountType type;
 
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = true)   // nullable para compatibilidade com linhas existentes; código trata null como FREE
+    private Plan plan = Plan.FREE;
+
     @Column(nullable = false)
     private String displayName;
 

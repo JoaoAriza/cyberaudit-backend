@@ -24,6 +24,7 @@ public class ScanController {
     private final RateLimitService        rateLimitService;
     private final DomainProtectionService domainProtectionService;
     private final GuestRateLimitService   guestRateLimitService;
+    private final PlanLimitService        planLimitService;
 
     public ScanController(
             ScanOrchestrator scanOrchestrator,
@@ -32,7 +33,8 @@ public class ScanController {
             PdfReportService pdfReportService,
             RateLimitService rateLimitService,
             DomainProtectionService domainProtectionService,
-            GuestRateLimitService guestRateLimitService) {
+            GuestRateLimitService guestRateLimitService,
+            PlanLimitService planLimitService) {
         this.scanOrchestrator        = scanOrchestrator;
         this.asyncScanService        = asyncScanService;
         this.reportService           = reportService;
@@ -40,6 +42,7 @@ public class ScanController {
         this.rateLimitService        = rateLimitService;
         this.domainProtectionService = domainProtectionService;
         this.guestRateLimitService   = guestRateLimitService;
+        this.planLimitService        = planLimitService;
     }
 
     // ── Scan síncrono ─────────────────────────────────────────────────────────
@@ -56,6 +59,9 @@ public class ScanController {
         }
         if (currentUser == null) {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
+        } else {
+            if (active) planLimitService.checkActiveScan(currentUser);
+            planLimitService.checkAndIncrementDailyScan(currentUser);
         }
         return scanOrchestrator.execute(url, active, currentUser, false);
     }
@@ -81,6 +87,8 @@ public class ScanController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Geração de PDF requer autenticação. Faça login para continuar.");
         }
+
+        planLimitService.checkPdfExport(currentUser);
 
         AsyncScanStatus status = asyncScanService.getStatus(scanId);
         if (status == null || status.getResult() == null) {
@@ -111,6 +119,7 @@ public class ScanController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Geração de PDF requer autenticação. Faça login para continuar.");
         }
+        planLimitService.checkPdfExport(currentUser);
         checkRateLimit(request, currentUser);
         ScanResult result = scanOrchestrator.execute(url, active, currentUser, false);
         return pdfReportService.generatePdf(result, reportService.generateReport(result));
@@ -135,6 +144,9 @@ public class ScanController {
         }
         if (currentUser == null) {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
+        } else {
+            if (active) planLimitService.checkActiveScan(currentUser);
+            planLimitService.checkAndIncrementDailyScan(currentUser);
         }
 
         String scanId = asyncScanService.submit(url, active, currentUser, refresh, notify);

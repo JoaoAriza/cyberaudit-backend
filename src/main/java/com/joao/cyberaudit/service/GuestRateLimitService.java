@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Service
 public class GuestRateLimitService {
 
-    public static final int DAILY_LIMIT = 10;
+    public static final int DAILY_LIMIT = 5;
 
     private final GuestScanLimitRepository repository;
 

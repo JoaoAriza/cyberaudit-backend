@@ -6,6 +6,7 @@ import com.joao.cyberaudit.model.Invite;
 import com.joao.cyberaudit.service.AuthService;
 import com.joao.cyberaudit.service.GuestRateLimitService;
 import com.joao.cyberaudit.service.InviteService;
+import com.joao.cyberaudit.service.PlanLimitService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,13 +23,16 @@ public class AuthController {
     private final InviteService         inviteService;
     private final AuthService           authService;
     private final GuestRateLimitService guestRateLimitService;
+    private final PlanLimitService      planLimitService;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
-                          InviteService inviteService) {
+                          InviteService inviteService,
+                          PlanLimitService planLimitService) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
+        this.planLimitService      = planLimitService;
     }
 
     @PostMapping("/setup")
@@ -50,7 +54,7 @@ public class AuthController {
                     .body(Map.of("error", "Token inválido ou expirado."));
         }
         AppUser u = (AppUser) auth.getPrincipal();
-        return ResponseEntity.ok(UserDto.from(u));
+        return ResponseEntity.ok(UserDto.from(u, planLimitService));
     }
 
     @GetMapping("/guest-status")
