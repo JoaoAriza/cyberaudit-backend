@@ -48,6 +48,7 @@ public class ScanOrchestrator {
     private final HostHeaderService              hostHeaderService;
     private final SourceMapService               sourceMapService;
     private final CrlfService                    crlfService;
+    private final AuditService                   auditService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -74,7 +75,8 @@ public class ScanOrchestrator {
             SsrfService ssrfService,
             HostHeaderService hostHeaderService,
             SourceMapService sourceMapService,
-            CrlfService crlfService) {
+            CrlfService crlfService,
+            AuditService auditService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -110,6 +112,7 @@ public class ScanOrchestrator {
         this.hostHeaderService           = hostHeaderService;
         this.sourceMapService            = sourceMapService;
         this.crlfService                 = crlfService;
+        this.auditService                = auditService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -121,6 +124,12 @@ public class ScanOrchestrator {
             if (cached != null) return cached;
         } else {
             scanCacheService.invalidate(cacheKey);
+        }
+
+        // Registra início do scan somente para usuários autenticados
+        if (currentUser != null) {
+            auditService.log(currentUser, AuditAction.SCAN_STARTED,
+                    (active ? "active" : "passive") + " — " + inputUrl);
         }
 
         // ── Fase 1: infraestrutura — sequencial ───────────────────────────────
@@ -306,6 +315,10 @@ public class ScanOrchestrator {
             if (!active) {
                 scanCacheService.put(cacheKey, passiveResult);
                 scanHistoryService.save(passiveResult);
+                if (currentUser != null) {
+                    auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
+                            "passive — " + inputUrl + " — score=" + passiveResult.getScore().getScore());
+                }
                 return passiveResult;
             }
 
@@ -414,6 +427,10 @@ public class ScanOrchestrator {
 
             scanCacheService.put(cacheKey, result);
             scanHistoryService.save(result);
+            if (currentUser != null) {
+                auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
+                        "active — " + inputUrl + " — score=" + result.getScore().getScore());
+            }
             return result;
 
         } catch (OwnershipNotVerifiedException e) {

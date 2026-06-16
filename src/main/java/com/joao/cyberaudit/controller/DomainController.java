@@ -2,6 +2,8 @@ package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.dto.DomainDto;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.AuditAction;
+import com.joao.cyberaudit.service.AuditService;
 import com.joao.cyberaudit.service.DomainService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +19,11 @@ import java.util.UUID;
 public class DomainController {
 
     private final DomainService domainService;
+    private final AuditService  auditService;
 
-    public DomainController(DomainService domainService) {
+    public DomainController(DomainService domainService, AuditService auditService) {
         this.domainService = domainService;
+        this.auditService  = auditService;
     }
 
     /** Lista todos os domínios da conta do usuário autenticado. */
@@ -36,6 +40,7 @@ public class DomainController {
 
         String host = body.get("host");
         DomainDto created = domainService.add(host, user);
+        auditService.log(user, AuditAction.DOMAIN_ADDED, host);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
@@ -46,6 +51,7 @@ public class DomainController {
             @AuthenticationPrincipal AppUser user) {
 
         domainService.remove(id, user);
+        auditService.log(user, AuditAction.DOMAIN_REMOVED, "id=" + id);
         return ResponseEntity.noContent().build();
     }
 
@@ -59,6 +65,7 @@ public class DomainController {
             @AuthenticationPrincipal AppUser user) {
 
         DomainDto result = domainService.verify(id, user);
+        auditService.log(user, AuditAction.DOMAIN_VERIFIED, result.getHost());
         return ResponseEntity.ok(result);
     }
 }

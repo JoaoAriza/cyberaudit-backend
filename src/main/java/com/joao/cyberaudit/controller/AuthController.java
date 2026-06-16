@@ -2,6 +2,7 @@ package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.dto.*;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.AuditAction;
 import com.joao.cyberaudit.model.Invite;
 import com.joao.cyberaudit.repository.AppUserRepository;
 import com.joao.cyberaudit.security.JwtUtil;
@@ -27,6 +28,7 @@ public class AuthController {
     private final AppUserRepository     userRepository;
     private final TwoFactorService      twoFactorService;
     private final JwtUtil               jwtUtil;
+    private final AuditService          auditService;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
@@ -34,7 +36,8 @@ public class AuthController {
                           PlanLimitService planLimitService,
                           AppUserRepository userRepository,
                           TwoFactorService twoFactorService,
-                          JwtUtil jwtUtil) {
+                          JwtUtil jwtUtil,
+                          AuditService auditService) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
@@ -42,6 +45,7 @@ public class AuthController {
         this.userRepository        = userRepository;
         this.twoFactorService      = twoFactorService;
         this.jwtUtil               = jwtUtil;
+        this.auditService          = auditService;
     }
 
     /**
@@ -107,6 +111,7 @@ public class AuthController {
             @RequestBody Map<String, String> body) {
         AppUser user = currentUser();
         twoFactorService.confirmTotpSetup(user, body.get("code"));
+        auditService.log(user, AuditAction.TOTP_ENABLED, null);
         return ResponseEntity.ok(Map.of("message", "TOTP ativado com sucesso."));
     }
 
@@ -115,6 +120,7 @@ public class AuthController {
     public ResponseEntity<Map<String, String>> disableTotp() {
         AppUser user = currentUser();
         twoFactorService.disableTotp(user);
+        auditService.log(user, AuditAction.TOTP_DISABLED, null);
         return ResponseEntity.ok(Map.of("message", "TOTP desativado."));
     }
 
@@ -123,6 +129,7 @@ public class AuthController {
     public ResponseEntity<Map<String, String>> enableEmailOtp() {
         AppUser user = currentUser();
         twoFactorService.enableEmailOtp(user);
+        auditService.log(user, AuditAction.EMAIL_OTP_ENABLED, null);
         return ResponseEntity.ok(Map.of("message", "Email OTP ativado."));
     }
 
@@ -131,6 +138,7 @@ public class AuthController {
     public ResponseEntity<Map<String, String>> disableEmailOtp() {
         AppUser user = currentUser();
         twoFactorService.disableEmailOtp(user);
+        auditService.log(user, AuditAction.EMAIL_OTP_DISABLED, null);
         return ResponseEntity.ok(Map.of("message", "Email OTP desativado."));
     }
 
@@ -149,6 +157,8 @@ public class AuthController {
         String  code   = body.get("code");
         String  method = body.getOrDefault("method", "TOTP");
         twoFactorService.verifyLoginCode(user, code, method);
+        auditService.log(user, AuditAction.LOGIN_2FA_VERIFIED, "method=" + method);
+        auditService.log(user, AuditAction.LOGIN_SUCCESS, "via 2FA (" + method + ")");
         String fullToken = jwtUtil.generateToken(user);
         return ResponseEntity.ok(new AuthResponse(fullToken, UserDto.from(user, planLimitService)));
     }

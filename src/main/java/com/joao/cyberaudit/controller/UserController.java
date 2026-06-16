@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.AuditAction;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.AppUserRepository;
@@ -8,6 +9,7 @@ import com.joao.cyberaudit.repository.DomainRepository;
 import com.joao.cyberaudit.repository.InviteRepository;
 import com.joao.cyberaudit.repository.OtpCodeRepository;
 import com.joao.cyberaudit.repository.ScheduledScanRepository;
+import com.joao.cyberaudit.service.AuditService;
 import com.joao.cyberaudit.service.DataExportService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +34,7 @@ public class UserController {
     private final InviteRepository       inviteRepository;
     private final DomainRepository       domainRepository;
     private final OtpCodeRepository      otpCodeRepository;
+    private final AuditService           auditService;
 
     public UserController(DataExportService dataExportService,
                           AppUserRepository userRepository,
@@ -39,7 +42,8 @@ public class UserController {
                           ScheduledScanRepository scheduledScanRepository,
                           InviteRepository inviteRepository,
                           DomainRepository domainRepository,
-                          OtpCodeRepository otpCodeRepository) {
+                          OtpCodeRepository otpCodeRepository,
+                          AuditService auditService) {
         this.dataExportService       = dataExportService;
         this.userRepository          = userRepository;
         this.accountRepository       = accountRepository;
@@ -47,6 +51,7 @@ public class UserController {
         this.inviteRepository        = inviteRepository;
         this.domainRepository        = domainRepository;
         this.otpCodeRepository       = otpCodeRepository;
+        this.auditService            = auditService;
     }
 
     /**
@@ -56,6 +61,7 @@ public class UserController {
     @GetMapping("/data-export")
     public ResponseEntity<Map<String, Object>> exportData(
             @AuthenticationPrincipal AppUser user) {
+        auditService.log(user, AuditAction.DATA_EXPORTED, null);
         return ResponseEntity.ok(dataExportService.exportUserData(user));
     }
 
@@ -92,6 +98,11 @@ public class UserController {
             }
         }
 
+        // Audit antes de deletar (após deleção o usuário não existe mais)
+        String deletedEmail = user.getEmail();
+        String deletedName  = user.getName();
+        java.util.UUID deletedAccountId = user.getAccount() != null ? user.getAccount().getId() : null;
+
         // 1. OTPs do usuário
         otpCodeRepository.deleteByUserId(user.getId());
 
@@ -121,6 +132,9 @@ public class UserController {
             // Apenas o usuário
             userRepository.delete(user);
         }
+
+        auditService.log(deletedAccountId, null, deletedEmail, deletedName,
+                AuditAction.ACCOUNT_DELETED, isOwner ? "OWNER self-deleted" : "user self-deleted", true);
 
         return ResponseEntity.ok(Map.of(
                 "message", "Conta excluída com sucesso. Seus dados foram removidos."

@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.repository.AuditLogRepository;
 import com.joao.cyberaudit.repository.GuestScanLimitRepository;
 import com.joao.cyberaudit.repository.ScanRecordRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +20,7 @@ public class DataRetentionService {
 
     private final ScanRecordRepository    scanRecordRepository;
     private final GuestScanLimitRepository guestScanLimitRepository;
+    private final AuditLogRepository      auditLogRepository;
 
     /** Manter scan_records por X dias (padrão: 365). -1 = nunca deletar. */
     @Value("${data.retention.scan-records-days:365}")
@@ -28,10 +30,16 @@ public class DataRetentionService {
     @Value("${data.retention.guest-scans-days:30}")
     private int guestRetentionDays;
 
+    /** Manter audit_logs por X dias (padrão: 365). -1 = nunca deletar. */
+    @Value("${data.retention.audit-logs-days:365}")
+    private int auditLogRetentionDays;
+
     public DataRetentionService(ScanRecordRepository scanRecordRepository,
-                                GuestScanLimitRepository guestScanLimitRepository) {
+                                GuestScanLimitRepository guestScanLimitRepository,
+                                AuditLogRepository auditLogRepository) {
         this.scanRecordRepository   = scanRecordRepository;
         this.guestScanLimitRepository = guestScanLimitRepository;
+        this.auditLogRepository     = auditLogRepository;
     }
 
     /**
@@ -60,6 +68,16 @@ public class DataRetentionService {
             if (deleted > 0) {
                 System.out.printf("[DataRetention] guest_daily_scans: %d registros removidos (> %d dias)%n",
                         deleted, guestRetentionDays);
+            }
+        }
+
+        if (auditLogRetentionDays > 0) {
+            LocalDateTime auditCutoff = LocalDateTime.now().minusDays(auditLogRetentionDays);
+            int deleted = auditLogRepository.deleteByTimestampBefore(auditCutoff);
+            totalDeleted += deleted;
+            if (deleted > 0) {
+                System.out.printf("[DataRetention] audit_logs: %d registros removidos (> %d dias)%n",
+                        deleted, auditLogRetentionDays);
             }
         }
 

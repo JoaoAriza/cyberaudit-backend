@@ -4,9 +4,11 @@ import com.joao.cyberaudit.dto.*;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.AuditAction;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.AppUserRepository;
+import com.joao.cyberaudit.service.AuditService;
 import com.joao.cyberaudit.service.InviteService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,13 +27,16 @@ public class AdminController {
     private final AppUserRepository userRepository;
     private final AccountRepository accountRepository;
     private final InviteService     inviteService;
+    private final AuditService      auditService;
 
     public AdminController(AppUserRepository userRepository,
                            AccountRepository accountRepository,
-                           InviteService inviteService) {
+                           InviteService inviteService,
+                           AuditService auditService) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.inviteService     = inviteService;
+        this.auditService      = auditService;
     }
 
     @GetMapping("/users")
@@ -63,8 +68,11 @@ public class AdminController {
                     "Não é possível alterar o role do OWNER.");
         }
 
+        Role oldRole = target.getRole();
         target.setRole(req.getRole());
         userRepository.save(target);
+        auditService.log(caller, AuditAction.USER_ROLE_CHANGED,
+                target.getEmail() + ": " + oldRole + " → " + req.getRole());
         return ResponseEntity.ok(UserManagementDto.from(target));
     }
 
@@ -89,6 +97,7 @@ public class AdminController {
 
         target.setActive(false);
         userRepository.save(target);
+        auditService.log(caller, AuditAction.USER_DEACTIVATED, target.getEmail());
         return ResponseEntity.noContent().build();
     }
 
@@ -101,6 +110,7 @@ public class AdminController {
         AppUser target = findUser(id);
         target.setActive(true);
         userRepository.save(target);
+        auditService.log(caller, AuditAction.USER_REACTIVATED, target.getEmail());
         return ResponseEntity.ok(UserManagementDto.from(target));
     }
 
@@ -122,6 +132,8 @@ public class AdminController {
         }
 
         InviteDto dto = inviteService.create(req, caller);
+        auditService.log(caller, AuditAction.USER_INVITED,
+                req.getEmail() + " (" + req.getRole() + ")");
         return ResponseEntity.status(HttpStatus.CREATED).body(dto);
     }
 
@@ -159,6 +171,7 @@ public class AdminController {
         boolean require = Boolean.TRUE.equals(body.get("require2fa"));
         account.setRequire2fa(require);
         accountRepository.save(account);
+        auditService.log(caller, AuditAction.REQUIRE_2FA_CHANGED, "require2fa=" + require);
         return ResponseEntity.ok(Map.of("require2fa", require));
     }
 

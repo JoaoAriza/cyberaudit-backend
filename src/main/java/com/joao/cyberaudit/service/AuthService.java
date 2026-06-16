@@ -9,6 +9,7 @@ import com.joao.cyberaudit.util.CnpjUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,7 @@ public class AuthService {
     private final AuthenticationManager authManager;
     private final PlanLimitService    planLimitService;
     private final TwoFactorService    twoFactorService;
+    private final AuditService        auditService;
 
     public AuthService(AppUserRepository userRepository,
                        AccountRepository accountRepository,
@@ -33,7 +35,8 @@ public class AuthService {
                        JwtUtil jwtUtil,
                        AuthenticationManager authManager,
                        PlanLimitService planLimitService,
-                       TwoFactorService twoFactorService) {
+                       TwoFactorService twoFactorService,
+                       AuditService auditService) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.passwordEncoder   = passwordEncoder;
@@ -41,6 +44,7 @@ public class AuthService {
         this.authManager       = authManager;
         this.planLimitService  = planLimitService;
         this.twoFactorService  = twoFactorService;
+        this.auditService      = auditService;
     }
 
     @Transactional
@@ -77,31 +81,39 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest req) {
-        authManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        req.getEmail().toLowerCase().trim(),
-                        req.getPassword()
-                )
-        );
+        String email = req.getEmail().toLowerCase().trim();
 
-        AppUser user = userRepository.findByEmail(req.getEmail().toLowerCase().trim())
+        try {
+            authManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(email, req.getPassword())
+            );
+        } catch (AuthenticationException e) {
+            auditService.log(null, null, email, null,
+                    AuditAction.LOGIN_FAILED, null, false);
+            throw e;
+        }
+
+        AppUser user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.UNAUTHORIZED, "Credenciais inválidas."));
 
         if (!user.isActive()) {
+            auditService.log(null, user.getId(), user.getEmail(), user.getName(),
+                    AuditAction.LOGIN_FAILED, "Conta desativada", false);
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Conta desativada. Entre em contato com o administrador.");
         }
 
-        // 2FA habilitado → retorna pre-auth token
+        // 2FA habilitado → retorna pre-auth token (login real registrado em verify2fa)
         if (twoFactorService.isEnabled(user)) {
             if (user.isEmailOtpEnabled()) {
-                twoFactorService.sendEmailOtp(user); // envia código imediatamente
+                twoFactorService.sendEmailOtp(user);
             }
             String preAuthToken = jwtUtil.generatePreAuthToken(user);
             return new AuthResponse(preAuthToken, twoFactorService.getMethods(user));
         }
 
+        auditService.log(user, AuditAction.LOGIN_SUCCESS, null);
         String token = jwtUtil.generateToken(user);
         return new AuthResponse(token, UserDto.from(user, planLimitService));
     }
