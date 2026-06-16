@@ -76,6 +76,9 @@ public class SecurityConfig {
                         // ── Domínios ───────────────────────────────────────────────
                         .requestMatchers("/domains/**").authenticated()
 
+                        // ── Dados pessoais (LGPD) ─────────────────────────────────
+                        .requestMatchers("/user/**").authenticated()
+
                         // ── Admin ──────────────────────────────────────────────────
                         .requestMatchers("/admin/**").hasAnyRole("OWNER", "ADMIN")
 

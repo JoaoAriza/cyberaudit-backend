@@ -26,4 +26,16 @@ public interface InviteRepository extends JpaRepository<Invite, UUID> {
     void deleteExpired(LocalDateTime now);
 
     boolean existsByEmailAndAcceptedFalse(String email);
+
+    /** Exclusão de conta: remove todos os convites da conta. */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM Invite i WHERE i.account.id = :accountId")
+    void deleteByAccountId(java.util.UUID accountId);
+
+    /** Exclusão de conta: remove convites criados por este usuário. */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM Invite i WHERE i.invitedBy.id = :userId")
+    void deleteByInvitedById(java.util.UUID userId);
 }

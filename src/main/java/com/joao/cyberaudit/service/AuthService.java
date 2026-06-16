@@ -50,6 +50,11 @@ public class AuthService {
                     "Sistema já configurado. Use /auth/login.");
         }
 
+        if (!req.isTermsAccepted()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "É necessário aceitar os Termos de Uso e Política de Privacidade.");
+        }
+
         Account account = buildAccount(req);
         accountRepository.save(account);
 
@@ -61,6 +66,8 @@ public class AuthService {
                 .active(true)
                 .createdAt(LocalDateTime.now())
                 .account(account)
+                .termsAccepted(true)
+                .termsAcceptedAt(LocalDateTime.now())
                 .build();
 
         userRepository.save(owner);

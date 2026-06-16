@@ -12,4 +12,9 @@ public interface GuestScanLimitRepository
         extends JpaRepository<GuestScanLimit, GuestScanLimit.GuestScanLimitId> {
 
     Optional<GuestScanLimit> findByIdIpAndIdScanDate(String ip, LocalDate date);
+
+    /** Retenção: remove registros de scan de guests anteriores à data de corte. */
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("DELETE FROM GuestScanLimit g WHERE g.id.scanDate < :cutoff")
+    int deleteByIdScanDateBefore(LocalDate cutoff);
 }

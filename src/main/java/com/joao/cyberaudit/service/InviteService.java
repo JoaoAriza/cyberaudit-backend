@@ -106,6 +106,11 @@ public class InviteService {
                     "Já existe um usuário com esse email.");
         }
 
+        if (!req.isTermsAccepted()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "É necessário aceitar os Termos de Uso e Política de Privacidade.");
+        }
+
         String name = (req.getName() != null && !req.getName().isBlank())
                 ? req.getName() : invite.getName();
 
@@ -119,6 +124,8 @@ public class InviteService {
                 .createdAt(LocalDateTime.now())
                 .account(invite.getAccount())
                 .invitedBy(invite.getInvitedBy())
+                .termsAccepted(true)
+                .termsAcceptedAt(java.time.LocalDateTime.now())
                 .build();
 
         userRepository.save(newUser);

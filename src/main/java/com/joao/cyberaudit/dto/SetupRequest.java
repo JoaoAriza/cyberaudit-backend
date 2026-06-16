@@ -22,4 +22,7 @@ public class SetupRequest {
     private String website;
 
     private String country;
+
+    /** LGPD — aceite explícito dos Termos de Uso e Política de Privacidade. */
+    private boolean termsAccepted;
 }
