@@ -1,9 +1,11 @@
 package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.dto.*;
+import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Role;
+import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.AppUserRepository;
 import com.joao.cyberaudit.service.InviteService;
 import org.springframework.http.HttpStatus;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -20,12 +23,15 @@ import java.util.UUID;
 public class AdminController {
 
     private final AppUserRepository userRepository;
+    private final AccountRepository accountRepository;
     private final InviteService     inviteService;
 
     public AdminController(AppUserRepository userRepository,
+                           AccountRepository accountRepository,
                            InviteService inviteService) {
-        this.userRepository = userRepository;
-        this.inviteService  = inviteService;
+        this.userRepository    = userRepository;
+        this.accountRepository = accountRepository;
+        this.inviteService     = inviteService;
     }
 
     @GetMapping("/users")
@@ -137,6 +143,23 @@ public class AdminController {
 
         inviteService.revoke(id, caller);
         return ResponseEntity.noContent().build();
+    }
+
+    /** Alterna require2fa da conta. Apenas OWNER. */
+    @PutMapping("/account/require2fa")
+    public ResponseEntity<Map<String, Object>> setRequire2fa(
+            @RequestBody Map<String, Boolean> body,
+            @AuthenticationPrincipal AppUser caller) {
+
+        requireOwner(caller);
+        Account account = caller.getAccount();
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
+        }
+        boolean require = Boolean.TRUE.equals(body.get("require2fa"));
+        account.setRequire2fa(require);
+        accountRepository.save(account);
+        return ResponseEntity.ok(Map.of("require2fa", require));
     }
 
     private void requireOwner(AppUser caller) {

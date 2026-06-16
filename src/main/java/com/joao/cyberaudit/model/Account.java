@@ -46,4 +46,9 @@ public class Account {
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
+
+    /** OWNER pode exigir que todos os usuários da conta configurem 2FA. */
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean require2fa = false;
 }

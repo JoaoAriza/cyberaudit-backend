@@ -53,6 +53,57 @@ public class EmailService {
         }
     }
 
+    /**
+     * Envia o código OTP de 6 dígitos para verificação 2FA via email.
+     */
+    public void sendOtpEmail(String toEmail, String toName, String code) {
+        if (!enabled || toEmail == null || toEmail.isBlank()) return;
+        try {
+            String firstName = toName != null && toName.contains(" ")
+                    ? toName.substring(0, toName.indexOf(' ')) : (toName != null ? toName : "usuário");
+            String formattedCode = code.substring(0, 3) + " " + code.substring(3);
+            String html = """
+                <!DOCTYPE html>
+                <html lang="pt-BR">
+                <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
+                  <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
+                    <tr><td align="center">
+                      <table width="480" cellpadding="0" cellspacing="0"
+                             style="background:#0d1b2a;border:1px solid #1c2a3a;border-radius:8px;overflow:hidden;">
+                        <tr><td style="background:#0a1520;padding:20px 28px;border-bottom:1px solid #1c2a3a;">
+                          <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
+                        </td></tr>
+                        <tr><td style="padding:32px 28px;text-align:center;">
+                          <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">Olá, <strong style="color:#e0eaf4;">%s</strong>.</p>
+                          <p style="margin:0 0 28px;color:#5a7a96;font-size:14px;">Seu código de verificação 2FA:</p>
+                          <div style="display:inline-block;padding:18px 36px;background:#0a1520;border:2px solid #00d4a0;
+                                      border-radius:8px;margin-bottom:20px;">
+                            <span style="font-family:monospace;font-size:36px;font-weight:700;
+                                         letter-spacing:.25em;color:#00d4a0;">%s</span>
+                          </div>
+                          <p style="margin:0;color:#344d62;font-size:12px;">Válido por 10 minutos. Não compartilhe este código.</p>
+                        </td></tr>
+                        <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
+                          Se você não tentou fazer login, ignore este email.
+                        </td></tr>
+                      </table>
+                    </td></tr>
+                  </table>
+                </body></html>
+                """.formatted(firstName, formattedCode);
+
+            MimeMessage msg = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
+            helper.setFrom(from);
+            helper.setTo(toEmail);
+            helper.setSubject("CyberAudit — Código de verificação 2FA");
+            helper.setText(html, true);
+            mailSender.send(msg);
+        } catch (MessagingException | RuntimeException e) {
+            System.err.println("[EmailService] Falha ao enviar OTP: " + e.getMessage());
+        }
+    }
+
     // ── HTML Template ─────────────────────────────────────────────────────────
 
     private String buildHtml(String name, String host, int score, String risk,

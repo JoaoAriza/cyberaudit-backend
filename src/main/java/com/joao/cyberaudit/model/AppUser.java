@@ -53,6 +53,19 @@ public class AppUser implements UserDetails {
     @JoinColumn(name = "invited_by")
     private AppUser invitedBy;
 
+    // ── 2FA ──────────────────────────────────────────────────────────────────
+
+    /** Segredo TOTP base32, presente somente quando TOTP está ativado. */
+    private String totpSecret;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean totpEnabled = false;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean emailOtpEnabled = false;
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));

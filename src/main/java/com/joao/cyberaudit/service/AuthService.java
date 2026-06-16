@@ -25,19 +25,22 @@ public class AuthService {
     private final JwtUtil             jwtUtil;
     private final AuthenticationManager authManager;
     private final PlanLimitService    planLimitService;
+    private final TwoFactorService    twoFactorService;
 
     public AuthService(AppUserRepository userRepository,
                        AccountRepository accountRepository,
                        PasswordEncoder passwordEncoder,
                        JwtUtil jwtUtil,
                        AuthenticationManager authManager,
-                       PlanLimitService planLimitService) {
+                       PlanLimitService planLimitService,
+                       TwoFactorService twoFactorService) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.passwordEncoder   = passwordEncoder;
         this.jwtUtil           = jwtUtil;
         this.authManager       = authManager;
         this.planLimitService  = planLimitService;
+        this.twoFactorService  = twoFactorService;
     }
 
     @Transactional
@@ -81,6 +84,15 @@ public class AuthService {
         if (!user.isActive()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Conta desativada. Entre em contato com o administrador.");
+        }
+
+        // 2FA habilitado → retorna pre-auth token
+        if (twoFactorService.isEnabled(user)) {
+            if (user.isEmailOtpEnabled()) {
+                twoFactorService.sendEmailOtp(user); // envia código imediatamente
+            }
+            String preAuthToken = jwtUtil.generatePreAuthToken(user);
+            return new AuthResponse(preAuthToken, twoFactorService.getMethods(user));
         }
 
         String token = jwtUtil.generateToken(user);

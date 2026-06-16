@@ -18,8 +18,11 @@ public class UserDto {
     private AccountDto account;
 
     private Integer remainingScans;
-
     private Integer dailyLimit;
+
+    // 2FA status (retornado em /auth/me)
+    private boolean totpEnabled;
+    private boolean emailOtpEnabled;
 
     public static UserDto from(AppUser u) {
         UserDto dto = new UserDto();
@@ -30,6 +33,8 @@ public class UserDto {
         dto.setJobTitle(u.getJobTitle());
         dto.setCountry(u.getCountry());
         dto.setAccount(AccountDto.from(u.getAccount()));
+        dto.setTotpEnabled(u.isTotpEnabled());
+        dto.setEmailOtpEnabled(u.isEmailOtpEnabled());
         return dto;
     }
 
@@ -50,6 +55,8 @@ public class UserDto {
         dto.setJobTitle(u.getJobTitle());
         dto.setCountry(u.getCountry());
         dto.setAccount(AccountDto.from(u.getAccount(), effectivePlan));
+        dto.setTotpEnabled(u.isTotpEnabled());
+        dto.setEmailOtpEnabled(u.isEmailOtpEnabled());
 
         if (u.getAccount() != null) {
             int remaining = planLimitService.getRemainingScans(u);

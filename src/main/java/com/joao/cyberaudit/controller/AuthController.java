@@ -4,15 +4,14 @@ import com.joao.cyberaudit.dto.*;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Invite;
 import com.joao.cyberaudit.repository.AppUserRepository;
-import com.joao.cyberaudit.service.AuthService;
-import com.joao.cyberaudit.service.GuestRateLimitService;
-import com.joao.cyberaudit.service.InviteService;
-import com.joao.cyberaudit.service.PlanLimitService;
+import com.joao.cyberaudit.security.JwtUtil;
+import com.joao.cyberaudit.service.*;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.Map;
@@ -26,17 +25,23 @@ public class AuthController {
     private final GuestRateLimitService guestRateLimitService;
     private final PlanLimitService      planLimitService;
     private final AppUserRepository     userRepository;
+    private final TwoFactorService      twoFactorService;
+    private final JwtUtil               jwtUtil;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
                           InviteService inviteService,
                           PlanLimitService planLimitService,
-                          AppUserRepository userRepository) {
+                          AppUserRepository userRepository,
+                          TwoFactorService twoFactorService,
+                          JwtUtil jwtUtil) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
         this.planLimitService      = planLimitService;
         this.userRepository        = userRepository;
+        this.twoFactorService      = twoFactorService;
+        this.jwtUtil               = jwtUtil;
     }
 
     /**
@@ -85,6 +90,91 @@ public class AuthController {
                 "resetsAt",      LocalDate.now().plusDays(1).atStartOfDay().toString(),
                 "authenticated", false
         ));
+    }
+
+    // ── 2FA Setup (requer token válido — não pre-auth) ────────────────────────
+
+    /** Inicia setup TOTP: gera secret provisório, retorna {secret, qrUri}. */
+    @PostMapping("/2fa/setup/totp")
+    public ResponseEntity<Map<String, String>> startTotpSetup() {
+        AppUser user = currentUser();
+        return ResponseEntity.ok(twoFactorService.startTotpSetup(user));
+    }
+
+    /** Confirma setup TOTP com o código do authenticator. */
+    @PostMapping("/2fa/setup/totp/confirm")
+    public ResponseEntity<Map<String, String>> confirmTotpSetup(
+            @RequestBody Map<String, String> body) {
+        AppUser user = currentUser();
+        twoFactorService.confirmTotpSetup(user, body.get("code"));
+        return ResponseEntity.ok(Map.of("message", "TOTP ativado com sucesso."));
+    }
+
+    /** Desativa TOTP. */
+    @DeleteMapping("/2fa/totp")
+    public ResponseEntity<Map<String, String>> disableTotp() {
+        AppUser user = currentUser();
+        twoFactorService.disableTotp(user);
+        return ResponseEntity.ok(Map.of("message", "TOTP desativado."));
+    }
+
+    /** Ativa Email OTP. */
+    @PostMapping("/2fa/email")
+    public ResponseEntity<Map<String, String>> enableEmailOtp() {
+        AppUser user = currentUser();
+        twoFactorService.enableEmailOtp(user);
+        return ResponseEntity.ok(Map.of("message", "Email OTP ativado."));
+    }
+
+    /** Desativa Email OTP. */
+    @DeleteMapping("/2fa/email")
+    public ResponseEntity<Map<String, String>> disableEmailOtp() {
+        AppUser user = currentUser();
+        twoFactorService.disableEmailOtp(user);
+        return ResponseEntity.ok(Map.of("message", "Email OTP desativado."));
+    }
+
+    // ── 2FA Login (requer pre-auth token) ─────────────────────────────────────
+
+    /**
+     * Verifica o código 2FA durante o login.
+     * Aceita pre-auth token (twoFactorPending=true).
+     * Retorna token completo em caso de sucesso.
+     */
+    @PostMapping("/2fa/verify")
+    public ResponseEntity<AuthResponse> verify2fa(
+            @RequestBody Map<String, String> body,
+            HttpServletRequest request) {
+        AppUser user = currentUser();
+        String  code   = body.get("code");
+        String  method = body.getOrDefault("method", "TOTP");
+        twoFactorService.verifyLoginCode(user, code, method);
+        String fullToken = jwtUtil.generateToken(user);
+        return ResponseEntity.ok(new AuthResponse(fullToken, UserDto.from(user, planLimitService)));
+    }
+
+    /**
+     * Reenvia OTP por email durante o login (aceita pre-auth token).
+     */
+    @PostMapping("/2fa/send-email-otp")
+    public ResponseEntity<Map<String, String>> resendEmailOtp() {
+        AppUser user = currentUser();
+        if (!user.isEmailOtpEnabled()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Email OTP não está habilitado para este usuário.");
+        }
+        twoFactorService.sendEmailOtp(user);
+        return ResponseEntity.ok(Map.of("message", "Código reenviado para " + user.getEmail()));
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    private AppUser currentUser() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !(auth.getPrincipal() instanceof AppUser u)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Não autenticado.");
+        }
+        return u;
     }
 
     @PostMapping("/accept-invite/{token}")

@@ -20,6 +20,9 @@ public class AccountDto {
     /** CNPJ formatado (XX.XXX.XXX/XXXX-XX) — null para contas individuais */
     private String cnpj;
 
+    /** 2FA obrigatório configurado pelo OWNER */
+    private boolean require2fa;
+
     /** Limites derivados do plano efetivo — podem ser sobrescritos para OWNER/ADMIN */
     private int     dailyScanLimit;
     private int     scheduledScanLimit;
@@ -51,6 +54,7 @@ public class AccountDto {
         dto.setCountry(a.getCountry());
         // Formata CNPJ se presente (armazenado como 14 dígitos)
         dto.setCnpj(a.getCnpj() != null ? CnpjUtil.format(a.getCnpj()) : null);
+        dto.setRequire2fa(a.isRequire2fa());
         // limites calculados do plano efetivo (pode ser ENTERPRISE para OWNER/ADMIN)
         dto.setDailyScanLimit(usedPlan.dailyScanLimit);
         dto.setScheduledScanLimit(usedPlan.scheduledScanLimit);
