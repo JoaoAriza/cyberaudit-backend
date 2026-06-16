@@ -5,17 +5,23 @@ import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.AuditAction;
+import com.joao.cyberaudit.model.Domain;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.AppUserRepository;
+import com.joao.cyberaudit.repository.DomainRepository;
 import com.joao.cyberaudit.service.AuditService;
+import com.joao.cyberaudit.service.ExecutivePdfReportService;
 import com.joao.cyberaudit.service.InviteService;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,19 +30,25 @@ import java.util.UUID;
 @RequestMapping("/admin")
 public class AdminController {
 
-    private final AppUserRepository userRepository;
-    private final AccountRepository accountRepository;
-    private final InviteService     inviteService;
-    private final AuditService      auditService;
+    private final AppUserRepository      userRepository;
+    private final AccountRepository      accountRepository;
+    private final InviteService          inviteService;
+    private final AuditService           auditService;
+    private final DomainRepository       domainRepository;
+    private final ExecutivePdfReportService pdfReportService;
 
     public AdminController(AppUserRepository userRepository,
                            AccountRepository accountRepository,
                            InviteService inviteService,
-                           AuditService auditService) {
+                           AuditService auditService,
+                           DomainRepository domainRepository,
+                           ExecutivePdfReportService pdfReportService) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.inviteService     = inviteService;
         this.auditService      = auditService;
+        this.domainRepository  = domainRepository;
+        this.pdfReportService  = pdfReportService;
     }
 
     @GetMapping("/users")
@@ -173,6 +185,33 @@ public class AdminController {
         accountRepository.save(account);
         auditService.log(caller, AuditAction.REQUIRE_2FA_CHANGED, "require2fa=" + require);
         return ResponseEntity.ok(Map.of("require2fa", require));
+    }
+
+    /**
+     * Gera e retorna um PDF executivo consolidado da conta.
+     * Disponível para OWNER e ADMIN.
+     */
+    @GetMapping("/report/executive-pdf")
+    public ResponseEntity<byte[]> executivePdf(@AuthenticationPrincipal AppUser caller) {
+        if (caller.getRole() != Role.OWNER && caller.getRole() != Role.ADMIN) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Acesso restrito a OWNER ou ADMIN.");
+        }
+
+        Account account = caller.getAccount();
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
+        }
+
+        List<Domain> domains = domainRepository.findByAccountOrderByCreatedAtDesc(account);
+        byte[] pdfBytes = pdfReportService.generate(account, domains);
+
+        String filename = "cyberaudit-report-" + LocalDate.now() + ".pdf";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(pdfBytes);
     }
 
     private void requireOwner(AppUser caller) {
