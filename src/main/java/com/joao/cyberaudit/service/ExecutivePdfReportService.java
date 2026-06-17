@@ -78,10 +78,16 @@ public class ExecutivePdfReportService {
             pageNo = 0;
             cs     = null;
 
-            // Coleta último scan por domínio
-            List<DomainReport> reports = domains.stream()
-                    .map(this::buildDomainReport)
-                    .collect(Collectors.toList());
+            // Coleta último scan por domínio.
+            // Se não há domínios registrados, usa scans recentes vinculados à conta.
+            List<DomainReport> reports;
+            if (!domains.isEmpty()) {
+                reports = domains.stream()
+                        .map(this::buildDomainReport)
+                        .collect(Collectors.toList());
+            } else {
+                reports = buildReportsFromAccountScans(account);
+            }
 
             // Capa
             openPage();
@@ -117,17 +123,42 @@ public class ExecutivePdfReportService {
     // ── Coleta de dados ───────────────────────────────────────────────────────
 
     private DomainReport buildDomainReport(Domain domain) {
+        String host = domain.getHost();
         List<ScanRecord> records = scanRecordRepository
-                .findByHostOrderByScannedAtDesc(domain.getHost(), PageRequest.of(0, 5));
+                .findByHostOrderByScannedAtDesc(host, PageRequest.of(0, 5));
+
+        // Fallback: tenta com/sem "www." para cobrir registros gravados antes da normalização
+        if (records.isEmpty()) {
+            String alt = host.startsWith("www.") ? host.substring(4) : "www." + host;
+            records = scanRecordRepository.findByHostOrderByScannedAtDesc(alt, PageRequest.of(0, 5));
+        }
 
         if (records.isEmpty()) {
-            return new DomainReport(domain, null, null, null);
+            return new DomainReport(host, domain.isVerified(), null, null, null);
         }
 
         ScanRecord latest   = records.get(0);
         ScanRecord previous = records.size() > 1 ? records.get(1) : null;
         ScanResult result   = deserialize(latest);
-        return new DomainReport(domain, latest, result, previous);
+        return new DomainReport(host, domain.isVerified(), latest, result, previous);
+    }
+
+    /**
+     * Fallback quando não há domínios registrados:
+     * usa os scans mais recentes da conta (um por host distinto).
+     */
+    private List<DomainReport> buildReportsFromAccountScans(Account account) {
+        if (account == null) return List.of();
+        List<ScanRecord> latestPerHost = scanRecordRepository
+                .findLatestPerHostByAccount(account, PageRequest.of(0, 20));
+        return latestPerHost.stream().map(record -> {
+            // Busca scan anterior do mesmo host para comparação
+            List<ScanRecord> history = scanRecordRepository
+                    .findByHostOrderByScannedAtDesc(record.getHost(), PageRequest.of(0, 2));
+            ScanRecord previous = history.size() > 1 ? history.get(1) : null;
+            ScanResult result   = deserialize(record);
+            return new DomainReport(record.getHost(), false, record, result, previous);
+        }).collect(Collectors.toList());
     }
 
     private ScanResult deserialize(ScanRecord record) {
@@ -145,7 +176,7 @@ public class ExecutivePdfReportService {
                     || dr.result().getScore().getIssues() == null) continue;
             for (SecurityIssue issue : dr.result().getScore().getIssues()) {
                 if ("CRITICAL".equals(issue.getSeverity()) || "HIGH".equals(issue.getSeverity())) {
-                    rows.add(new IssueRow(dr.domain().getHost(), issue));
+                    rows.add(new IssueRow(dr.host(), issue));
                 }
             }
         }
@@ -192,7 +223,7 @@ public class ExecutivePdfReportService {
         // Stats row
         gap(16);
         long totalDomains    = reports.size();
-        long verifiedDomains = reports.stream().filter(dr -> dr.domain().isVerified()).count();
+        long verifiedDomains = reports.stream().filter(dr -> dr.verified()).count();
         long scannedDomains  = reports.stream().filter(dr -> dr.latest() != null).count();
 
         OptionalDouble avgScore = reports.stream()
@@ -271,10 +302,10 @@ public class ExecutivePdfReportService {
         // Header do domínio
         fill(M, cy - 32, CW, 32, BGDARK);
         fill(M, cy - 32, 4, 32, domainAccentColor(dr));
-        txt(dr.domain().getHost(), M + 12, cy - 12, bold, 12, WHITE);
+        txt(dr.host(), M + 12, cy - 12, bold, 12, WHITE);
 
-        String verBadge = dr.domain().isVerified() ? "✓ VERIFICADO" : "NÃO VERIFICADO";
-        float[] verColor = dr.domain().isVerified() ? ACCENT : MUTED;
+        String verBadge = dr.verified() ? "✓ VERIFICADO" : "NÃO VERIFICADO";
+        float[] verColor = dr.verified() ? ACCENT : MUTED;
         txt(verBadge, M + 12, cy - 26, bold, 8, verColor);
 
         if (dr.latest() != null) {
@@ -514,7 +545,8 @@ public class ExecutivePdfReportService {
     // ── Records internos ──────────────────────────────────────────────────────
 
     private record DomainReport(
-            Domain     domain,
+            String     host,       // hostname do domínio
+            boolean    verified,   // true se domínio foi verificado
             ScanRecord latest,
             ScanResult result,
             ScanRecord previous

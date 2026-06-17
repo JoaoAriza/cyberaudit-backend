@@ -83,21 +83,23 @@ public class ScheduledScanService {
 
     /**
      * Roda a cada minuto e dispara os scans cujo nextRun já passou.
-     * Execução é síncrona por design — evita sobrecarga de threads paralelas.
-     * Para produção com muitos agendamentos, evoluir para fila assíncrona.
+     *
+     * NÃO é @Transactional: scans HTTP podem durar minutos; manter uma transação
+     * aberta por todo esse tempo esgota o pool de conexões. A busca inicial e
+     * os saves pontuais são feitos via métodos @Transactional auxiliares.
      */
     @Scheduled(fixedDelay = 60_000)
-    @Transactional
     public void runDueScans() {
-        List<ScheduledScan> due = repo.findDue(LocalDateTime.now());
+        // Carrega scans devidos em transação curta (JOIN FETCH user+account)
+        List<ScheduledScan> due = loadDueScans();
         for (ScheduledScan scan : due) {
             try {
+                // Executa scan fora de qualquer transação — pode durar longos segundos
                 var result = orchestrator.execute(
                         scan.getHost(), scan.isActive(), scan.getUser(), true);
 
-                scan.setLastRun(LocalDateTime.now());
-                scan.setNextRun(calcNextRun(scan.getFrequency(), scan.getPreferredHour()));
-                repo.save(scan);
+                // Persiste nextRun e lastRun em transação curta separada
+                markSuccess(scan.getId(), calcNextRun(scan.getFrequency(), scan.getPreferredHour()));
 
                 if (scan.isNotifyEmail()) {
                     emailService.sendScanComplete(
@@ -110,10 +112,31 @@ public class ScheduledScanService {
                 System.err.println("[ScheduledScan] Falha ao executar scan para "
                         + scan.getHost() + ": " + e.getMessage());
                 // Avança nextRun para evitar retry imediato infinito
-                scan.setNextRun(LocalDateTime.now().plusMinutes(30));
-                repo.save(scan);
+                markRetry(scan.getId());
             }
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<ScheduledScan> loadDueScans() {
+        return repo.findDue(LocalDateTime.now());
+    }
+
+    @Transactional
+    public void markSuccess(UUID id, LocalDateTime nextRun) {
+        repo.findById(id).ifPresent(s -> {
+            s.setLastRun(LocalDateTime.now());
+            s.setNextRun(nextRun);
+            repo.save(s);
+        });
+    }
+
+    @Transactional
+    public void markRetry(UUID id) {
+        repo.findById(id).ifPresent(s -> {
+            s.setNextRun(LocalDateTime.now().plusMinutes(30));
+            repo.save(s);
+        });
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -42,4 +42,12 @@ public class ScanRecord {
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String resultJson;
+
+    /**
+     * Conta que originou o scan. Null para scans anônimos/guest.
+     * Usado para o relatório executivo quando não há domínios registrados.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "account_id")
+    private Account account;
 }

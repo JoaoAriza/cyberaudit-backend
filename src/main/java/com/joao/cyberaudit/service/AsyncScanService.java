@@ -4,6 +4,7 @@ import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.AsyncScanStatus;
 import com.joao.cyberaudit.model.AsyncScanStatus.State;
 import com.joao.cyberaudit.model.ScanResult;
+import com.joao.cyberaudit.repository.AppUserRepository;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -14,12 +15,16 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AsyncScanService {
 
     private final ConcurrentHashMap<String, AsyncScanStatus> statusMap = new ConcurrentHashMap<>();
-    private final ScanOrchestrator scanOrchestrator;
-    private final EmailService     emailService;
+    private final ScanOrchestrator  scanOrchestrator;
+    private final EmailService      emailService;
+    private final AppUserRepository appUserRepository;
 
-    public AsyncScanService(ScanOrchestrator scanOrchestrator, EmailService emailService) {
-        this.scanOrchestrator = scanOrchestrator;
-        this.emailService     = emailService;
+    public AsyncScanService(ScanOrchestrator scanOrchestrator,
+                            EmailService emailService,
+                            AppUserRepository appUserRepository) {
+        this.scanOrchestrator  = scanOrchestrator;
+        this.emailService      = emailService;
+        this.appUserRepository = appUserRepository;
     }
 
     public String submit(String url, boolean active, AppUser currentUser,
@@ -44,6 +49,15 @@ public class AsyncScanService {
                              AppUser currentUser, boolean refresh, boolean notify) {
         statusMap.put(scanId, new AsyncScanStatus(scanId, State.RUNNING, null, null));
         try {
+            // Re-fetch user with account eagerly loaded within this async thread's JPA session.
+            // The currentUser passed from the HTTP thread has a detached lazy proxy for account;
+            // calling getAccount() here would cause "pk is null" NPE (Hibernate detached proxy).
+            if (currentUser != null) {
+                currentUser = appUserRepository
+                        .findByEmailWithAccount(currentUser.getEmail())
+                        .orElse(currentUser);
+            }
+
             ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh);
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.DONE, result, null));
 

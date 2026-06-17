@@ -57,31 +57,82 @@ public class CrlfService {
             .build();
 
     /**
-     * Testa CRLF injection em todos os parâmetros da query string.
-     * Só executa em scan ativo quando há surface de input.
+     * Testa CRLF injection em modo ativo. Executa dois tipos de probe:
      *
-     * @param urlWithParams  URL completa com query string
-     * @return lista de findings (1 por parâmetro vulnerável)
+     * 1. Path injection — injeta payload diretamente no path da URL base
+     *    (ex: https://example.com/%0d%0aX-CyberAudit-Test:%20crlf-probe-7x3k).
+     *    Funciona para qualquer URL, com ou sem query string.
+     *
+     * 2. Query param injection — se a URL contém query string, injeta o payload
+     *    no valor de cada parâmetro individualmente.
+     *
+     * @param url URL completa (com ou sem query string)
+     * @return lista de findings (1 por vetor vulnerável encontrado)
      */
-    public List<CrlfFinding> scan(String urlWithParams) {
+    public List<CrlfFinding> scan(String url) {
         List<CrlfFinding> findings = new ArrayList<>();
-        if (urlWithParams == null || !urlWithParams.contains("?")) return findings;
+        if (url == null || url.isBlank()) return findings;
 
-        int q      = urlWithParams.indexOf('?');
-        String base  = urlWithParams.substring(0, q);
-        String query = urlWithParams.substring(q + 1);
-        String[] pairs = query.split("&");
+        // ── 1. Path injection ────────────────────────────────────────────────
+        CrlfFinding pathFinding = probePathInjection(url);
+        if (pathFinding != null) findings.add(pathFinding);
 
-        for (String pair : pairs) {
-            String[] kv  = pair.split("=", 2);
-            String   key = kv[0].trim();
-            if (key.isEmpty()) continue;
+        // ── 2. Query param injection (só se há parâmetros) ───────────────────
+        if (!findings.isEmpty()) return findings; // path já vulnerável, não precisa continuar
+        if (url.contains("?")) {
+            int q = url.indexOf('?');
+            String base  = url.substring(0, q);
+            String query = url.substring(q + 1);
+            String[] pairs = query.split("&");
 
-            CrlfFinding finding = probeParam(base, query, key, pairs);
-            if (finding != null) findings.add(finding);
+            for (String pair : pairs) {
+                String[] kv  = pair.split("=", 2);
+                String   key = kv[0].trim();
+                if (key.isEmpty()) continue;
+
+                CrlfFinding finding = probeParam(base, query, key, pairs);
+                if (finding != null) {
+                    findings.add(finding);
+                    break; // Um finding de parâmetro é suficiente para confirmar a vulnerabilidade
+                }
+            }
         }
 
         return findings;
+    }
+
+    /**
+     * Injeta payloads CRLF diretamente no path da URL.
+     * Testa ex: https://example.com/%0d%0aX-CyberAudit-Test:%20crlf-probe-7x3k
+     */
+    private CrlfFinding probePathInjection(String url) {
+        // Remove query string para injetar no path
+        String base = url.contains("?") ? url.substring(0, url.indexOf('?')) : url;
+        // Remove trailing slash para evitar duplo slash
+        if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+
+        for (String[] payloadEntry : PAYLOADS) {
+            String payload       = payloadEntry[0];
+            String injectionType = "PATH_" + payloadEntry[1];
+            String probeUrl      = base + "/" + payload;
+
+            try {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(probeUrl))
+                        .GET()
+                        .timeout(Duration.ofSeconds(8))
+                        .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                        .header("Accept", "text/html,*/*")
+                        .build();
+
+                HttpResponse<String> resp = client.send(req,
+                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+                CrlfFinding f = checkProbeInResponse(resp, "path", payload, injectionType);
+                if (f != null) return f;
+
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     private CrlfFinding probeParam(String base, String originalQuery,
@@ -105,42 +156,52 @@ public class CrlfService {
                 HttpResponse<String> resp = client.send(req,
                         HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
-                // Verifica se o header probe apareceu na resposta
-                // Headers HTTP são case-insensitive
-                String headerLower = PROBE_HEADER_NAME.toLowerCase(Locale.ROOT);
-                String injected = resp.headers().map().entrySet().stream()
-                        .filter(e -> e.getKey().toLowerCase(Locale.ROOT).equals(headerLower))
-                        .flatMap(e -> e.getValue().stream())
-                        .findFirst()
-                        .orElse(null);
-
-                if (injected != null && injected.toLowerCase(Locale.ROOT)
-                        .contains(PROBE_HEADER_VALUE.toLowerCase(Locale.ROOT))) {
-                    return CrlfFinding.builder()
-                            .parameter(paramName)
-                            .payload(payload)
-                            .injectionType(injectionType)
-                            .evidence(PROBE_HEADER_NAME + ": " + injected)
-                            .severity("HIGH")
-                            .build();
-                }
-
-                // Fallback: verifica reflexão do probe no body (alguns frameworks
-                // refletem headers injetados no corpo da resposta de erro)
-                String body = resp.body() == null ? "" : resp.body();
-                if (body.toLowerCase(Locale.ROOT).contains(PROBE_HEADER_VALUE.toLowerCase(Locale.ROOT))
-                        && body.toLowerCase(Locale.ROOT).contains(PROBE_HEADER_NAME.toLowerCase(Locale.ROOT))) {
-                    return CrlfFinding.builder()
-                            .parameter(paramName)
-                            .payload(payload)
-                            .injectionType(injectionType + "_BODY")
-                            .evidence("Header probe refletido no body da resposta")
-                            .severity("HIGH")
-                            .build();
-                }
+                CrlfFinding f = checkProbeInResponse(resp, paramName, payload, injectionType);
+                if (f != null) return f;
 
             } catch (Exception ignored) {}
         }
+        return null;
+    }
+
+    /**
+     * Verifica se o header probe injetado apareceu nos headers ou body da resposta.
+     */
+    private CrlfFinding checkProbeInResponse(HttpResponse<String> resp,
+                                              String parameter,
+                                              String payload,
+                                              String injectionType) {
+        String headerLower = PROBE_HEADER_NAME.toLowerCase(Locale.ROOT);
+        String injected = resp.headers().map().entrySet().stream()
+                .filter(e -> e.getKey().toLowerCase(Locale.ROOT).equals(headerLower))
+                .flatMap(e -> e.getValue().stream())
+                .findFirst()
+                .orElse(null);
+
+        if (injected != null && injected.toLowerCase(Locale.ROOT)
+                .contains(PROBE_HEADER_VALUE.toLowerCase(Locale.ROOT))) {
+            return CrlfFinding.builder()
+                    .parameter(parameter)
+                    .payload(payload)
+                    .injectionType(injectionType)
+                    .evidence(PROBE_HEADER_NAME + ": " + injected)
+                    .severity("HIGH")
+                    .build();
+        }
+
+        // Fallback: verifica reflexão do probe no body
+        String body = resp.body() == null ? "" : resp.body();
+        if (body.toLowerCase(Locale.ROOT).contains(PROBE_HEADER_VALUE.toLowerCase(Locale.ROOT))
+                && body.toLowerCase(Locale.ROOT).contains(PROBE_HEADER_NAME.toLowerCase(Locale.ROOT))) {
+            return CrlfFinding.builder()
+                    .parameter(parameter)
+                    .payload(payload)
+                    .injectionType(injectionType + "_BODY")
+                    .evidence("Header probe refletido no body da resposta")
+                    .severity("HIGH")
+                    .build();
+        }
+
         return null;
     }
 

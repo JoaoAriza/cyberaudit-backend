@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.ScanRecord;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.repository.ScanRecordRepository;
@@ -24,7 +25,13 @@ public class ScanHistoryService {
         this.objectMapper = objectMapper;
     }
 
+    /** Salva sem conta associada (scans anônimos/guest). */
     public void save(ScanResult result) {
+        save(result, null);
+    }
+
+    /** Salva com conta associada — permite relatório executivo por conta. */
+    public void save(ScanResult result, Account account) {
         try {
             String host = extractHost(result.getFinalUrl() != null
                     ? result.getFinalUrl() : result.getUrl());
@@ -37,6 +44,7 @@ public class ScanHistoryService {
                     .score(result.getScore().getScore())
                     .riskLevel(result.getScore().getRiskLevel())
                     .resultJson(json)
+                    .account(account)
                     .build();
             repository.save(record);
         } catch (Exception e) {
@@ -59,11 +67,25 @@ public class ScanHistoryService {
     }
 
     public List<ScanRecord> findByHost(String host, int limit) {
-        return repository.findByHostOrderByScannedAtDesc(host, PageRequest.of(0, limit));
+        // Normaliza: remove www. para busca primária
+        String normalized = host.startsWith("www.") ? host.substring(4) : host;
+        List<ScanRecord> records = repository.findByHostOrderByScannedAtDesc(
+                normalized, PageRequest.of(0, limit));
+        // Fallback para registros legados gravados com www.
+        if (records.isEmpty() && !host.startsWith("www.")) {
+            records = repository.findByHostOrderByScannedAtDesc(
+                    "www." + normalized, PageRequest.of(0, limit));
+        }
+        return records;
     }
 
     public List<ScanRecord> findRecent(int limit) {
         return repository.findAllByOrderByScannedAtDesc(PageRequest.of(0, limit));
+    }
+
+    /** Retorna os scans mais recentes de uma conta (apenas o mais recente por host). */
+    public List<ScanRecord> findRecentByAccount(Account account, int limit) {
+        return repository.findLatestPerHostByAccount(account, PageRequest.of(0, limit));
     }
 
     public Optional<ScanRecord> findById(UUID id) {
@@ -80,8 +102,19 @@ public class ScanHistoryService {
         });
     }
 
+    /**
+     * Extrai e normaliza o host de uma URL.
+     * Remove o prefixo "www." para garantir consistência com os hosts registrados
+     * em Domain (que o usuário normalmente cadastra sem "www.").
+     * Ex: "https://www.example.com/path" → "example.com"
+     */
     private String extractHost(String url) {
-        try { return URI.create(url).getHost(); }
-        catch (Exception e) { return url; }
+        try {
+            String h = URI.create(url).getHost();
+            if (h == null) return url;
+            return h.startsWith("www.") ? h.substring(4) : h;
+        } catch (Exception e) {
+            return url;
+        }
     }
 }

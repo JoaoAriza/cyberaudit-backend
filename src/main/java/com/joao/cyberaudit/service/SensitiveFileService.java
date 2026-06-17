@@ -81,30 +81,21 @@ public class SensitiveFileService {
 
             int status = resp.statusCode();
 
-            if (status == 404 || status == 410 || status >= 500) return null;
-            if (status == 301 || status == 302)                   return null;
+            // Só reporta status 200 — exposição real confirmada.
+            // 403/401 = bloqueio correto (não é vulnerabilidade — seria falso positivo).
+            // 301/302/404/410/5xx = arquivo inexistente ou inacessível.
+            if (status != 200) return null;
 
-            String exposure;
-            String preview = null;
+            String body = resp.body() == null ? "" : resp.body().trim();
+            String contentType = resp.headers()
+                    .firstValue("content-type").orElse("").toLowerCase();
 
-            if (status == 200) {
-                String body = resp.body() == null ? "" : resp.body().trim();
-                String contentType = resp.headers()
-                        .firstValue("content-type").orElse("").toLowerCase();
+            if (!isRealContent(target.path, body, contentType)) return null;
 
-                if (!isRealContent(target.path, body, contentType)) return null;
-
-                exposure = "EXPOSED";
-                preview  = body.length() > 150 ? body.substring(0, 150) + "..." : body;
-
-            } else if (status == 403) {
-                exposure = "PROTECTED";
-            } else {
-                return null;
-            }
+            String preview = body.length() > 150 ? body.substring(0, 150) + "..." : body;
 
             return new SensitiveFileFinding(
-                    target.path, status, exposure, preview, target.severity);
+                    target.path, status, "EXPOSED", preview, target.severity);
 
         } catch (Exception e) {
             return null;

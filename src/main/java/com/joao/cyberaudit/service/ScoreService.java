@@ -374,10 +374,12 @@ public class ScoreService {
                 score -= penalty;
                 notes.add("DNS Security (email spoofing risk "
                         + dnsSecurityResult.getEmailSpoofingRisk() + "): -" + penalty);
+                // Severidade da issue = nível de risco DNS (CRITICAL/HIGH/MEDIUM)
+                // Evita inconsistência entre o que o risco indica e o que a issue exibe
                 issues.add(new SecurityIssue(
                         "DNS_EMAIL_SPOOFING",
                         "Risco de email spoofing: " + dnsSecurityResult.getEmailSpoofingRisk(),
-                        penalty >= 15 ? "HIGH" : "MEDIUM",
+                        dnsSecurityResult.getEmailSpoofingRisk(),
                         dnsSecurityResult.getSummary(),
                         "Configure SPF com -all, DMARC com p=reject e DKIM em todos os seletores ativos."
                 ));

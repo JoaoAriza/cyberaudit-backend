@@ -317,12 +317,12 @@ public class ScanOrchestrator {
 
             if (!active) {
                 scanCacheService.put(cacheKey, passiveResult);
-                scanHistoryService.save(passiveResult);
+                Account account = currentUser != null ? currentUser.getAccount() : null;
+                scanHistoryService.save(passiveResult, account);
                 if (currentUser != null) {
                     auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
                             "passive — " + inputUrl + " — score=" + passiveResult.getScore().getScore());
-                    degradationNotificationService.checkAndNotify(passiveResult,
-                            currentUser.getAccount());
+                    degradationNotificationService.checkAndNotify(passiveResult, account);
                 }
                 return passiveResult;
             }
@@ -348,10 +348,9 @@ public class ScanOrchestrator {
                     ? CompletableFuture.supplyAsync(
                             () -> pathTraversalService.scan(target), activePool).exceptionally(e -> List.of())
                     : CompletableFuture.completedFuture(List.<PathTraversalFinding>of());
-            var crlfFuture = inputSurfaceDetected
-                    ? CompletableFuture.supplyAsync(
-                            () -> crlfService.scan(target), activePool).exceptionally(e -> List.of())
-                    : CompletableFuture.completedFuture(List.<CrlfFinding>of());
+            // CRLF roda SEMPRE em modo ativo — inclui path injection que não depende de parâmetros
+            var crlfFuture = CompletableFuture.supplyAsync(
+                    () -> crlfService.scan(target), activePool).exceptionally(e -> List.of());
             var ssrfFuture = inputSurfaceDetected
                     ? CompletableFuture.supplyAsync(
                             () -> ssrfService.scan(target), activePool).exceptionally(e -> List.of())
@@ -431,11 +430,12 @@ public class ScanOrchestrator {
                     .build();
 
             scanCacheService.put(cacheKey, result);
-            scanHistoryService.save(result);
+            Account account = currentUser != null ? currentUser.getAccount() : null;
+            scanHistoryService.save(result, account);
             if (currentUser != null) {
                 auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
                         "active — " + inputUrl + " — score=" + result.getScore().getScore());
-                degradationNotificationService.checkAndNotify(result, currentUser.getAccount());
+                degradationNotificationService.checkAndNotify(result, account);
             }
             return result;
 

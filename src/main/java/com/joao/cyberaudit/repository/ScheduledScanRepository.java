@@ -15,8 +15,12 @@ public interface ScheduledScanRepository extends JpaRepository<ScheduledScan, UU
 
     List<ScheduledScan> findByUserOrderByCreatedAtDesc(AppUser user);
 
-    /** Todos os agendamentos habilitados com nextRun <= agora (prontos para executar) */
-    @Query("SELECT s FROM ScheduledScan s WHERE s.enabled = true AND s.nextRun <= :now")
+    /**
+     * Todos os agendamentos habilitados com nextRun <= agora (prontos para executar).
+     * JOIN FETCH garante que user.account é carregado imediatamente — evita
+     * LazyInitializationException quando o executor sai do contexto transacional.
+     */
+    @Query("SELECT s FROM ScheduledScan s JOIN FETCH s.user u JOIN FETCH u.account WHERE s.enabled = true AND s.nextRun <= :now")
     List<ScheduledScan> findDue(@Param("now") LocalDateTime now);
 
     /** Exclusão de conta: remove todos os agendamentos do usuário. */
