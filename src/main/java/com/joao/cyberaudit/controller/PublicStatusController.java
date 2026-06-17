@@ -129,10 +129,10 @@ public class PublicStatusController {
 
     private String scoreToRisk(int score) {
         if (score < 0)  return "UNKNOWN";
-        if (score < 40) return "CRITICAL";
-        if (score < 60) return "HIGH";
-        if (score < 75) return "MEDIUM";
-        if (score < 90) return "LOW";
-        return "MINIMAL";
+        if (score < 20) return "CRITICAL";
+        if (score < 45) return "HIGH";
+        if (score < 70) return "MEDIUM";
+        if (score < 85) return "LOW";
+        return "SECURE";
     }
 }

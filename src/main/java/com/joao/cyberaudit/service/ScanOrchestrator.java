@@ -49,6 +49,7 @@ public class ScanOrchestrator {
     private final SourceMapService               sourceMapService;
     private final CrlfService                    crlfService;
     private final AuditService                   auditService;
+    private final DegradationNotificationService degradationNotificationService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -76,7 +77,8 @@ public class ScanOrchestrator {
             HostHeaderService hostHeaderService,
             SourceMapService sourceMapService,
             CrlfService crlfService,
-            AuditService auditService) {
+            AuditService auditService,
+            DegradationNotificationService degradationNotificationService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -111,8 +113,9 @@ public class ScanOrchestrator {
         this.ssrfService                 = ssrfService;
         this.hostHeaderService           = hostHeaderService;
         this.sourceMapService            = sourceMapService;
-        this.crlfService                 = crlfService;
-        this.auditService                = auditService;
+        this.crlfService                        = crlfService;
+        this.auditService                       = auditService;
+        this.degradationNotificationService     = degradationNotificationService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -318,6 +321,8 @@ public class ScanOrchestrator {
                 if (currentUser != null) {
                     auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
                             "passive — " + inputUrl + " — score=" + passiveResult.getScore().getScore());
+                    degradationNotificationService.checkAndNotify(passiveResult,
+                            currentUser.getAccount());
                 }
                 return passiveResult;
             }
@@ -430,6 +435,7 @@ public class ScanOrchestrator {
             if (currentUser != null) {
                 auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
                         "active — " + inputUrl + " — score=" + result.getScore().getScore());
+                degradationNotificationService.checkAndNotify(result, currentUser.getAccount());
             }
             return result;
 
