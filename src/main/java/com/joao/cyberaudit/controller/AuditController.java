@@ -13,6 +13,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,13 +31,19 @@ public class AuditController {
 
     /**
      * Retorna logs de auditoria paginados da conta do OWNER autenticado.
-     * Parâmetros: page (default 0), size (default 50, max 200).
+     *
+     * @param page default 0
+     * @param size default 50, max 200
+     * @param from data inicial no formato yyyy-MM-dd (opcional)
+     * @param to   data final   no formato yyyy-MM-dd (opcional)
      */
     @GetMapping("/audit-logs")
     public ResponseEntity<Map<String, Object>> listAuditLogs(
             @AuthenticationPrincipal AppUser caller,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
 
         if (caller.getRole() != Role.OWNER && caller.getRole() != Role.ADMIN) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a OWNER ou ADMIN.");
@@ -51,8 +59,22 @@ public class AuditController {
         }
 
         Pageable pageable = PageRequest.of(page, Math.min(size, 200));
-        Page<com.joao.cyberaudit.model.AuditLog> result =
-                auditLogRepository.findByAccountIdOrderByTimestampDesc(accountId, pageable);
+
+        Page<com.joao.cyberaudit.model.AuditLog> result;
+        if (from != null || to != null) {
+            LocalDateTime dtFrom = from != null
+                    ? LocalDate.parse(from).atStartOfDay()
+                    : LocalDateTime.MIN;
+            LocalDateTime dtTo = to != null
+                    ? LocalDate.parse(to).atTime(23, 59, 59)
+                    : LocalDateTime.MAX;
+            result = auditLogRepository
+                    .findByAccountIdAndTimestampBetweenOrderByTimestampDesc(
+                            accountId, dtFrom, dtTo, pageable);
+        } else {
+            result = auditLogRepository
+                    .findByAccountIdOrderByTimestampDesc(accountId, pageable);
+        }
 
         return ResponseEntity.ok(Map.of(
                 "logs", result.getContent().stream().map(AuditLogDto::from).toList(),

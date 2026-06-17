@@ -225,9 +225,18 @@ public class AdminController {
     /**
      * Gera e retorna um PDF executivo consolidado da conta.
      * Disponível para OWNER e ADMIN.
+     *
+     * @param scope  DOMAINS (padrão) | TEAM_SCANS | BOTH
+     * @param from   data inicial no formato yyyy-MM-dd (opcional)
+     * @param to     data final   no formato yyyy-MM-dd (opcional)
      */
     @GetMapping("/report/executive-pdf")
-    public ResponseEntity<byte[]> executivePdf(@AuthenticationPrincipal AppUser caller) {
+    public ResponseEntity<byte[]> executivePdf(
+            @AuthenticationPrincipal AppUser caller,
+            @RequestParam(defaultValue = "DOMAINS") String scope,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+
         if (caller.getRole() != Role.OWNER && caller.getRole() != Role.ADMIN) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Acesso restrito a OWNER ou ADMIN.");
@@ -238,10 +247,24 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
         }
 
-        List<Domain> domains = domainRepository.findByAccountOrderByCreatedAtDesc(account);
-        byte[] pdfBytes = pdfReportService.generate(account, domains);
+        ExecutivePdfReportService.ReportScope reportScope;
+        try {
+            reportScope = ExecutivePdfReportService.ReportScope.valueOf(scope.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            reportScope = ExecutivePdfReportService.ReportScope.DOMAINS;
+        }
 
-        String filename = "cyberaudit-report-" + LocalDate.now() + ".pdf";
+        LocalDate dateFrom = from != null ? LocalDate.parse(from) : null;
+        LocalDate dateTo   = to   != null ? LocalDate.parse(to)   : null;
+
+        List<Domain> domains = domainRepository.findByAccountOrderByCreatedAtDesc(account);
+        byte[] pdfBytes = pdfReportService.generate(account, domains, reportScope, dateFrom, dateTo);
+
+        String suffix = from != null && to != null ? "_" + from + "_a_" + to
+                      : from != null ? "_desde_" + from
+                      : to   != null ? "_ate_" + to
+                      : "";
+        String filename = "cyberaudit-report-" + scope.toLowerCase() + suffix + ".pdf";
 
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)

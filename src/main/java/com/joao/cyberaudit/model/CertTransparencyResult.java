@@ -2,12 +2,14 @@ package com.joao.cyberaudit.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.List;
 
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -27,8 +29,8 @@ public class CertTransparencyResult {
     private List<String> wildcardDomains;        // certs wildcard encontrados
     private List<CertEntry> recentCerts;         // certs emitidos nos últimos 30 dias
 
-    @Data
-    @Builder
+    @Getter @Setter
+@Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CertEntry {

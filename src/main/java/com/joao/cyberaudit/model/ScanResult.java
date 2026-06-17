@@ -2,25 +2,23 @@ package com.joao.cyberaudit.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.List;
 import java.util.Map;
 
-@Data
-@Builder
-@AllArgsConstructor
-@NoArgsConstructor
+@Getter @Setter @Builder @AllArgsConstructor @NoArgsConstructor
 public class ScanResult {
 
     private String url;
     private String finalUrl;
     private int    httpStatus;
 
-    private boolean         redirectsToHttps;
-    private SSLInfo         sslInfo;
-    private TlsDetails      tlsDetails;
+    private boolean    redirectsToHttps;
+    private SSLInfo    sslInfo;
+    private TlsDetails tlsDetails;
 
     private Map<String, String> headers;
     private boolean             serverVersionExposed;
@@ -45,19 +43,19 @@ public class ScanResult {
     private List<OpenRedirectFinding>     openRedirectFindings;
     private List<DirectoryListingFinding> directoryListingFindings;
 
-    private TechFingerprintResult          techFingerprint;
-    private List<CVEFinding>               cveFindings;
-    private List<ScanChange>               changes;
-    private List<SubdomainTakeoverFinding> subdomainTakeover;
-    private CertTransparencyResult         certTransparency;
-    private List<ApiDocsExposureFinding>   apiDocsExposure;
+    private TechFingerprintResult             techFingerprint;
+    private List<CVEFinding>                  cveFindings;
+    private List<ScanChange>                  changes;
+    private List<SubdomainTakeoverFinding>    subdomainTakeover;
+    private CertTransparencyResult            certTransparency;
+    private List<ApiDocsExposureFinding>      apiDocsExposure;
     private List<GraphQlIntrospectionFinding> graphQlIntrospection;
-    private List<JwtSecurityFinding>       jwtSecurity;
-    private List<PathTraversalFinding>     pathTraversal;
-    private List<SsrfFinding>             ssrfFindings;
-    private List<HostHeaderFinding>       hostHeaderFindings;
-    private List<SourceMapFinding>        sourceMapFindings;
-    private List<CrlfFinding>             crlfFindings;
+    private List<JwtSecurityFinding>          jwtSecurity;
+    private List<PathTraversalFinding>        pathTraversal;
+    private List<SsrfFinding>                ssrfFindings;
+    private List<HostHeaderFinding>           hostHeaderFindings;
+    private List<SourceMapFinding>            sourceMapFindings;
+    private List<CrlfFinding>                crlfFindings;
 
     private ScoreResult score;
 }

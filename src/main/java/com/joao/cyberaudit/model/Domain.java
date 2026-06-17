@@ -10,7 +10,8 @@ import java.util.UUID;
 @Table(name = "domains", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"account_id", "host"})
 })
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
+@Getter @Setter
+@Builder @NoArgsConstructor @AllArgsConstructor
 public class Domain {
 
     @Id

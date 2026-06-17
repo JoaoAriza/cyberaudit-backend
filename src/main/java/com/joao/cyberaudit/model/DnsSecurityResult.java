@@ -2,13 +2,13 @@ package com.joao.cyberaudit.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
+import java.util.List;
+
+@Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
 public class DnsSecurityResult {
 
     private boolean spfPresent;
@@ -17,26 +17,17 @@ public class DnsSecurityResult {
 
     private boolean dmarcPresent;
     private String  dmarcRecord;
-    private String dmarcPolicy;
+    private String  dmarcPolicy;
 
     private boolean dkimHintFound;
-    private String dkimSelector;
+    private String  dkimSelector;
 
     private boolean caaPresent;
-    private String caaRecord;
+    private String  caaRecord;
 
     private boolean mxPresent;
-    private java.util.List<String> mxRecords;
+    private List<String> mxRecords;
 
-    // ── Score e resumo ─────────────────────────────────────────────
-    /**
-     * Nível de risco de email spoofing:
-     * LOW      = SPF strong + DMARC reject
-     * MEDIUM   = SPF presente + DMARC weak/ausente
-     * HIGH     = SPF ausente ou fraco, sem DMARC
-     * CRITICAL = sem SPF e sem DMARC (domínio spoofável livremente)
-     */
     private String emailSpoofingRisk;
-
     private String summary;
 }

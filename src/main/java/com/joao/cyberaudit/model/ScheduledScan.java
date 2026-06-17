@@ -8,7 +8,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "scheduled_scans")
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
+@Getter @Setter
+@Builder @NoArgsConstructor @AllArgsConstructor
 public class ScheduledScan {
 
     @Id

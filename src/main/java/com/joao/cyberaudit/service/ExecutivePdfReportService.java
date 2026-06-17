@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.model.*;
+import com.joao.cyberaudit.repository.AuditLogRepository;
 import com.joao.cyberaudit.repository.ScanRecordRepository;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
@@ -10,9 +11,21 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
+import java.net.URI;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
+
+// AuditLog é importado via com.joao.cyberaudit.model.*
+
+/**
+ * Escopo do relatório executivo:
+ * DOMAINS   → apenas domínios cadastrados na conta
+ * TEAM_SCANS → apenas scans realizados pela equipe (vinculados à conta, sem domínio registrado)
+ * BOTH       → domínios cadastrados + scans adicionais da equipe
+ */
 
 /**
  * Gera um PDF executivo consolidado por conta:
@@ -59,17 +72,33 @@ public class ExecutivePdfReportService {
 
     // ── Dependências ──────────────────────────────────────────────────────────
     private final ScanRecordRepository scanRecordRepository;
+    private final AuditLogRepository   auditLogRepository;
     private final ObjectMapper         objectMapper;
 
     public ExecutivePdfReportService(ScanRecordRepository scanRecordRepository,
+                                     AuditLogRepository auditLogRepository,
                                      ObjectMapper objectMapper) {
         this.scanRecordRepository = scanRecordRepository;
+        this.auditLogRepository   = auditLogRepository;
         this.objectMapper         = objectMapper;
     }
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
-    public synchronized byte[] generate(Account account, List<Domain> domains) {
+    /**
+     * Gera o PDF com escopo e filtro de datas.
+     *
+     * @param scope    DOMAINS = apenas domínios cadastrados; TEAM_SCANS = todos os scans da conta;
+     *                 BOTH = domínios cadastrados + scans extras da equipe
+     * @param from     data inicial (null = sem limite)
+     * @param to       data final   (null = sem limite)
+     */
+    public synchronized byte[] generate(Account account, List<Domain> domains,
+                                        ReportScope scope, LocalDate from, LocalDate to) {
+        LocalDateTime dtFrom = from != null ? from.atStartOfDay()             : LocalDateTime.MIN;
+        LocalDateTime dtTo   = to   != null ? to.atTime(23, 59, 59)           : LocalDateTime.MAX;
+        boolean hasDateFilter = from != null || to != null;
+
         try {
             doc    = new PDDocument();
             bold   = PDType1Font.HELVETICA_BOLD;
@@ -78,38 +107,50 @@ public class ExecutivePdfReportService {
             pageNo = 0;
             cs     = null;
 
-            // Coleta último scan por domínio.
-            // Se não há domínios registrados, usa scans recentes vinculados à conta.
             List<DomainReport> reports;
-            if (!domains.isEmpty()) {
-                reports = domains.stream()
-                        .map(this::buildDomainReport)
+            if (scope == ReportScope.TEAM_SCANS) {
+                // Todos os scans da conta: account-linked (novos) + AuditLog (histórico)
+                reports = buildReportsFromAccountScans(account, dtFrom, dtTo);
+            } else if (scope == ReportScope.BOTH) {
+                // Domínios cadastrados + quaisquer scans extras da equipe
+                List<DomainReport> domainReports = domains.stream()
+                        .map(d -> buildDomainReport(d, dtFrom, dtTo))
                         .collect(Collectors.toList());
-            } else {
-                reports = buildReportsFromAccountScans(account);
+                Set<String> coveredHosts = domainReports.stream()
+                        .map(DomainReport::host).collect(Collectors.toSet());
+                List<DomainReport> teamReports = buildReportsFromAccountScans(account, dtFrom, dtTo)
+                        .stream()
+                        .filter(dr -> !coveredHosts.contains(dr.host()))
+                        .collect(Collectors.toList());
+                reports = new ArrayList<>(domainReports);
+                reports.addAll(teamReports);
+            } else { // DOMAINS: apenas domínios cadastrados (sem fallback)
+                reports = domains.stream()
+                        .map(d -> buildDomainReport(d, dtFrom, dtTo))
+                        .collect(Collectors.toList());
             }
 
-            // Capa
+            // Busca entradas do AuditLog para TEAM_SCANS (fonte de verdade = mesmo que o painel)
+            List<AuditLog> auditEntries = null;
+            if (scope == ReportScope.TEAM_SCANS && account.getId() != null) {
+                LocalDateTime safeFrom2 = dtFrom.isBefore(SQL_FROM) ? SQL_FROM : dtFrom;
+                LocalDateTime safeTo2   = dtTo.isAfter(LocalDateTime.now().plusDays(1))
+                                         ? LocalDateTime.now().plusDays(1) : dtTo;
+                auditEntries = hasDateFilter
+                        ? auditLogRepository.findTop500ByAccountIdAndTimestampBetweenOrderByTimestampDesc(
+                                account.getId(), safeFrom2, safeTo2)
+                        : auditLogRepository.findTop500ByAccountIdOrderByTimestampDesc(account.getId());
+            }
+
+            // Capa + tabela na mesma página (need() abre nova página se necessário)
             openPage();
-            coverPage(account, reports);
+            coverPage(account, reports, scope, from, to);
+            if (scope == ReportScope.TEAM_SCANS && auditEntries != null && !auditEntries.isEmpty()) {
+                auditLogTable(auditEntries);
+            } else if (!reports.isEmpty()) {
+                domainTable(reports, scope);
+            }
             closePage();
-
-            // Seção por domínio
-            if (!reports.isEmpty()) {
-                openPage();
-                for (DomainReport dr : reports) {
-                    domainBlock(dr);
-                }
-                closePage();
-            }
-
-            // Tabela consolidada de issues críticos/altos
-            List<IssueRow> critical = collectCritical(reports);
-            if (!critical.isEmpty()) {
-                openPage();
-                criticalTable(critical);
-                closePage();
-            }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
@@ -122,15 +163,22 @@ public class ExecutivePdfReportService {
 
     // ── Coleta de dados ───────────────────────────────────────────────────────
 
-    private DomainReport buildDomainReport(Domain domain) {
+    private DomainReport buildDomainReport(Domain domain, LocalDateTime from, LocalDateTime to) {
         String host = domain.getHost();
-        List<ScanRecord> records = scanRecordRepository
-                .findByHostOrderByScannedAtDesc(host, PageRequest.of(0, 5));
+        boolean hasFilter = !from.equals(LocalDateTime.MIN) || !to.equals(LocalDateTime.MAX);
+
+        List<ScanRecord> records = hasFilter
+                ? scanRecordRepository.findByHostAndScannedAtBetweenOrderByScannedAtDesc(
+                        host, from, to, PageRequest.of(0, 5))
+                : scanRecordRepository.findByHostOrderByScannedAtDesc(host, PageRequest.of(0, 5));
 
         // Fallback: tenta com/sem "www." para cobrir registros gravados antes da normalização
         if (records.isEmpty()) {
             String alt = host.startsWith("www.") ? host.substring(4) : "www." + host;
-            records = scanRecordRepository.findByHostOrderByScannedAtDesc(alt, PageRequest.of(0, 5));
+            records = hasFilter
+                    ? scanRecordRepository.findByHostAndScannedAtBetweenOrderByScannedAtDesc(
+                            alt, from, to, PageRequest.of(0, 5))
+                    : scanRecordRepository.findByHostOrderByScannedAtDesc(alt, PageRequest.of(0, 5));
         }
 
         if (records.isEmpty()) {
@@ -144,21 +192,103 @@ public class ExecutivePdfReportService {
     }
 
     /**
-     * Fallback quando não há domínios registrados:
-     * usa os scans mais recentes da conta (um por host distinto).
+     * Scans da equipe vinculados à conta (um por host distinto),
+     * opcionalmente filtrados por intervalo de datas.
+     *
+     * Estratégia em duas etapas:
+     * 1) Tenta via account_id (scans novos, pós-migração).
+     * 2) Se vazio, usa AuditLog SCAN_COMPLETED para descobrir os hosts
+     *    e busca ScanRecord por host (cobre dados pré-migração sem account_id).
      */
-    private List<DomainReport> buildReportsFromAccountScans(Account account) {
+    private List<DomainReport> buildReportsFromAccountScans(Account account,
+                                                            LocalDateTime from, LocalDateTime to) {
         if (account == null) return List.of();
-        List<ScanRecord> latestPerHost = scanRecordRepository
-                .findLatestPerHostByAccount(account, PageRequest.of(0, 20));
+        boolean hasFilter = !from.equals(LocalDateTime.MIN) || !to.equals(LocalDateTime.MAX);
+
+        // Fonte 1: ScanRecord com account_id preenchido (scans pós-migração)
+        List<ScanRecord> fromAccount = hasFilter
+                ? scanRecordRepository.findLatestPerHostByAccountBetween(
+                        account, from, to, PageRequest.of(0, 50))
+                : scanRecordRepository.findLatestPerHostByAccount(account, PageRequest.of(0, 50));
+
+        // Fonte 2: AuditLog (dados históricos sem account_id — pré-migração)
+        // Sempre mescla para não perder scans anteriores à adição do FK
+        Set<String> coveredHosts = fromAccount.stream()
+                .map(ScanRecord::getHost).collect(Collectors.toSet());
+        List<ScanRecord> fromAuditLog = account.getId() != null
+                ? buildFromAuditLog(account, from, to).stream()
+                        .filter(r -> !coveredHosts.contains(r.getHost()))
+                        .collect(Collectors.toList())
+                : List.of();
+
+        List<ScanRecord> latestPerHost = new ArrayList<>(fromAccount);
+        latestPerHost.addAll(fromAuditLog);
+
         return latestPerHost.stream().map(record -> {
-            // Busca scan anterior do mesmo host para comparação
-            List<ScanRecord> history = scanRecordRepository
-                    .findByHostOrderByScannedAtDesc(record.getHost(), PageRequest.of(0, 2));
+            List<ScanRecord> history = hasFilter
+                    ? scanRecordRepository.findByHostAndScannedAtBetweenOrderByScannedAtDesc(
+                            record.getHost(), from, to, PageRequest.of(0, 2))
+                    : scanRecordRepository.findByHostOrderByScannedAtDesc(
+                            record.getHost(), PageRequest.of(0, 2));
             ScanRecord previous = history.size() > 1 ? history.get(1) : null;
             ScanResult result   = deserialize(record);
             return new DomainReport(record.getHost(), false, record, result, previous);
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * Fallback para dados pré-migração: descobre hosts via AuditLog
+     * (SCAN_COMPLETED tem details = "{mode} — {url} — score={n}"),
+     * extrai o host de cada URL distinta e busca o scan mais recente.
+     */
+    // Datas seguras para SQL TIMESTAMP (evita overflow com LocalDateTime.MIN / .MAX)
+    private static final LocalDateTime SQL_FROM = LocalDateTime.of(2000, 1, 1, 0, 0);
+
+    private List<ScanRecord> buildFromAuditLog(Account account,
+                                               LocalDateTime from, LocalDateTime to) {
+        // LocalDateTime.MIN/MAX causam overflow no JDBC. Usa limites seguros.
+        LocalDateTime safeFrom = from.isBefore(SQL_FROM) ? SQL_FROM : from;
+        LocalDateTime safeTo   = to.isAfter(LocalDateTime.now().plusDays(1))
+                                 ? LocalDateTime.now().plusDays(1) : to;
+
+        List<AuditLog> auditEntries = auditLogRepository
+                .findScanCompletedByAccountBetween(
+                        account.getId(), AuditAction.SCAN_COMPLETED, safeFrom, safeTo);
+
+        // Extrai um ScanRecord por host distinto (o mais recente)
+        Map<String, ScanRecord> byHost = new LinkedHashMap<>();
+        for (AuditLog entry : auditEntries) {
+            String url = extractUrlFromDetails(entry.getDetails());
+            if (url == null) continue;
+            String host = extractHostFromUrl(url);
+            if (host == null || byHost.containsKey(host)) continue;
+            List<ScanRecord> recs = scanRecordRepository
+                    .findByHostOrderByScannedAtDesc(host, PageRequest.of(0, 1));
+            if (!recs.isEmpty()) {
+                byHost.put(host, recs.get(0));
+            }
+        }
+        return new ArrayList<>(byHost.values());
+    }
+
+    /**
+     * AuditLog.details para SCAN_COMPLETED: "passive — https://canva.com — score=75"
+     * Extrai a URL (segundo segmento separado por " — ").
+     */
+    private String extractUrlFromDetails(String details) {
+        if (details == null) return null;
+        String[] parts = details.split("\\s*—\\s*");
+        return parts.length >= 2 ? parts[1].trim() : null;
+    }
+
+    private String extractHostFromUrl(String url) {
+        try {
+            String h = URI.create(url).getHost();
+            if (h == null) return null;
+            return h.startsWith("www.") ? h.substring(4) : h;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private ScanResult deserialize(ScanRecord record) {
@@ -167,21 +297,6 @@ public class ExecutivePdfReportService {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private List<IssueRow> collectCritical(List<DomainReport> reports) {
-        List<IssueRow> rows = new ArrayList<>();
-        for (DomainReport dr : reports) {
-            if (dr.result() == null || dr.result().getScore() == null
-                    || dr.result().getScore().getIssues() == null) continue;
-            for (SecurityIssue issue : dr.result().getScore().getIssues()) {
-                if ("CRITICAL".equals(issue.getSeverity()) || "HIGH".equals(issue.getSeverity())) {
-                    rows.add(new IssueRow(dr.host(), issue));
-                }
-            }
-        }
-        rows.sort(Comparator.comparing(r -> severityOrder(r.issue().getSeverity())));
-        return rows;
     }
 
     private int severityOrder(String s) {
@@ -195,208 +310,295 @@ public class ExecutivePdfReportService {
 
     // ── Capa ─────────────────────────────────────────────────────────────────
 
-    private void coverPage(Account account, List<DomainReport> reports) throws IOException {
-        // Header bar
-        fill(0, PH - 110, PW, 110, NAVY);
-        fill(0, PH - 110, 5, 110, ACCENT);
-        txt("CYBERAUDIT", M + 10, PH - 38, bold, 24, ACCENT);
-        txt("Relatório Executivo de Segurança", M + 10, PH - 60, normal, 12, WHITE);
+    private void coverPage(Account account, List<DomainReport> reports,
+                           ReportScope scope, LocalDate from, LocalDate to) throws IOException {
+        // ── Header bar (compact: 80px) ────────────────────────────────────────
+        fill(0, PH - 80, PW, 80, NAVY);
+        fill(0, PH - 80, 5, 80, ACCENT);
+        txt("CYBERAUDIT", M + 10, PH - 24, bold, 22, ACCENT);
+        txt("Relatorio Executivo de Seguranca", M + 10, PH - 44, normal, 11, WHITE);
         String now = java.time.LocalDateTime.now().format(DT_FMT);
-        txtR("Gerado em " + now, PW - M, PH - 42, normal, 9, MUTED);
-        txtR("CONFIDENCIAL", PW - M, PH - 58, bold, 8, MUTED);
-        cy = PH - 130;
+        txtR("Gerado em " + now, PW - M, PH - 28, normal, 8, MUTED);
+        txtR("CONFIDENCIAL", PW - M, PH - 42, bold, 8, MUTED);
+        String scopeLabel = switch (scope) {
+            case TEAM_SCANS -> "Scans da Equipe";
+            case BOTH       -> "Dominios + Equipe";
+            default         -> "Dominios Cadastrados";
+        };
+        txtR(scopeLabel, PW - M, PH - 56, bold, 8, ACCENT);
 
-        // Account info box
-        gap(12);
-        fill(M, cy - 52, CW, 52, BGLIGHT);
-        strokeRect(M, cy - 52, CW, 52, BORDER);
-        fill(M, cy - 52, 4, 52, ACCENT);
-        txt(account.getDisplayName(), M + 16, cy - 18, bold, 14, TEXT);
-        txt("Conta " + account.getType().name() +
-            (account.getPlan() != null ? " · Plano " + account.getPlan().name() : ""),
-            M + 16, cy - 34, normal, 9, MUTED);
-        if (account.getCompanyName() != null) {
-            txt(account.getCompanyName(), M + 16, cy - 46, normal, 9, MUTED);
+        // Período do filtro
+        String periodoStr;
+        if (from != null && to != null) {
+            periodoStr = "Periodo: " + from.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+                       + " a " + to.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        } else if (from != null) {
+            periodoStr = "Periodo: a partir de " + from.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        } else if (to != null) {
+            periodoStr = "Periodo: ate " + to.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        } else {
+            periodoStr = "Periodo: todos os registros";
         }
-        cy -= 62;
+        txtR(periodoStr, PW - M, PH - 68, normal, 8, MUTED);
 
-        // Stats row
-        gap(16);
-        long totalDomains    = reports.size();
-        long verifiedDomains = reports.stream().filter(dr -> dr.verified()).count();
-        long scannedDomains  = reports.stream().filter(dr -> dr.latest() != null).count();
+        cy = PH - 92;
 
+        // ── Account info box (compact: 38px) ─────────────────────────────────
+        gap(6);
+        fill(M, cy - 38, CW, 38, BGLIGHT);
+        strokeRect(M, cy - 38, CW, 38, BORDER);
+        fill(M, cy - 38, 4, 38, ACCENT);
+        txt(account.getDisplayName(), M + 14, cy - 12, bold, 12, TEXT);
+        String accountMeta = "Conta " + account.getType().name()
+                + (account.getPlan() != null ? "  ·  Plano " + account.getPlan().name() : "")
+                + (account.getCompanyName() != null ? "  ·  " + account.getCompanyName() : "");
+        txt(accountMeta, M + 14, cy - 28, normal, 8, MUTED);
+        cy -= 44;
+
+        // ── Stats row (compact: 54px) ─────────────────────────────────────────
+        gap(8);
+        long totalDomains   = reports.size();
+        long scannedDomains = reports.stream().filter(dr -> dr.latest() != null).count();
         OptionalDouble avgScore = reports.stream()
                 .filter(dr -> dr.latest() != null)
                 .mapToInt(dr -> dr.latest().getScore())
                 .average();
-
         long criticalCount = reports.stream()
                 .filter(dr -> dr.result() != null && dr.result().getScore() != null
                         && dr.result().getScore().getIssues() != null)
                 .flatMap(dr -> dr.result().getScore().getIssues().stream())
-                .filter(i -> "CRITICAL".equals(i.getSeverity()))
-                .count();
+                .filter(i -> "CRITICAL".equals(i.getSeverity())).count();
+        long highCount = reports.stream()
+                .filter(dr -> dr.result() != null && dr.result().getScore() != null
+                        && dr.result().getScore().getIssues() != null)
+                .flatMap(dr -> dr.result().getScore().getIssues().stream())
+                .filter(i -> "HIGH".equals(i.getSeverity())).count();
 
         float boxW = (CW - 9) / 4f;
-        statBox(M,              cy, boxW, 72, String.valueOf(totalDomains),    "Domínios", null);
-        statBox(M + boxW + 3,   cy, boxW, 72, String.valueOf(verifiedDomains), "Verificados", ACCENT);
-        statBox(M + 2*(boxW+3), cy, boxW, 72,
-                avgScore.isPresent() ? String.valueOf((int)avgScore.getAsDouble()) : "—",
-                "Score Médio", scoreColor(avgScore.isPresent() ? (int)avgScore.getAsDouble() : -1));
-        statBox(M + 3*(boxW+3), cy, boxW, 72, String.valueOf(criticalCount), "Issues Críticos",
-                criticalCount > 0 ? CRIT : OK);
-        cy -= 82;
-
-        // Risk summary by domain
-        gap(20);
-        sectionTitle("RESUMO POR RISCO");
-        gap(6);
-
-        Map<String, Long> byRisk = reports.stream()
-                .filter(dr -> dr.latest() != null && dr.latest().getRiskLevel() != null)
-                .collect(Collectors.groupingBy(
-                        dr -> dr.latest().getRiskLevel().name(), Collectors.counting()));
-
-        float barY = cy;
-        float barTotalW = CW;
-        long total = reports.stream().filter(dr -> dr.latest() != null).count();
-
-        // Risk distribution bar
-        if (total > 0) {
-            float[] riskColors = CRIT;
-            float xOff = M;
-            for (String[] entry : new String[][]{
-                    {"CRITICAL", "Crítico"}, {"HIGH", "Alto"},
-                    {"MEDIUM", "Médio"}, {"LOW", "Baixo"}, {"MINIMAL", "Mínimo"}}) {
-                long count = byRisk.getOrDefault(entry[0], 0L);
-                if (count == 0) continue;
-                float segW = barTotalW * count / total;
-                float[] col = riskColor(entry[0]);
-                fill(xOff, barY - 20, segW, 20, col);
-                if (segW > 40) {
-                    txt(entry[1] + " (" + count + ")", xOff + 4, barY - 7, normal, 8, WHITE);
-                }
-                xOff += segW;
-            }
-            cy -= 28;
-        }
+        statBox(M,              cy, boxW, 54, String.valueOf(totalDomains),    "Alvos", null);
+        statBox(M + boxW + 3,   cy, boxW, 54, String.valueOf(scannedDomains), "Escaneados", ACCENT);
+        statBox(M + 2*(boxW+3), cy, boxW, 54,
+                avgScore.isPresent() ? String.valueOf((int)avgScore.getAsDouble()) : "-",
+                "Score Medio",
+                scoreColor(avgScore.isPresent() ? (int)avgScore.getAsDouble() : -1));
+        statBox(M + 3*(boxW+3), cy, boxW, 54,
+                criticalCount + " / " + highCount, "Criticos / Altos",
+                criticalCount > 0 ? CRIT : highCount > 0 ? HIGH_C : OK);
+        cy -= 60;
 
         if (scannedDomains == 0) {
-            gap(20);
-            txt("Nenhum domínio foi escaneado ainda. Execute scans nos domínios registrados para gerar dados.",
-                M, cy, normal, 10, MUTED);
+            gap(8);
+            String noDataMsg = scope == ReportScope.DOMAINS
+                    ? "Nenhum dominio registrado ou sem scans."
+                    : "Nenhum scan encontrado para esta conta no periodo selecionado.";
+            txt(noDataMsg, M, cy, normal, 9, MUTED);
             cy -= 14;
         }
+
+        gap(10); // separação antes da tabela
     }
 
-    // ── Bloco por domínio ─────────────────────────────────────────────────────
+    // ── Tabela de listagem (substitui blocos por domínio) ─────────────────────
 
-    private void domainBlock(DomainReport dr) throws IOException {
-        float blockH = dr.result() != null ? estimateDomainBlockH(dr) : 60;
-        need(blockH + 20);
+    private void domainTable(List<DomainReport> reports, ReportScope scope) throws IOException {
+        boolean showVerified = (scope == ReportScope.DOMAINS || scope == ReportScope.BOTH);
 
-        gap(14);
-        float startY = cy;
+        // Larguras das colunas
+        float cHost   = showVerified ? 145f : 165f;
+        float cScore  = 48f;
+        float cRisk   = 80f;
+        float cDate   = 112f;
+        float cMode   = 58f;
+        float cVer    = showVerified ? 62f : 0f;
+        // total ≈ 145+48+80+112+58+62 = 505 = CW ✓
 
-        // Header do domínio
-        fill(M, cy - 32, CW, 32, BGDARK);
-        fill(M, cy - 32, 4, 32, domainAccentColor(dr));
-        txt(dr.host(), M + 12, cy - 12, bold, 12, WHITE);
+        float[] xCols = {
+            M,
+            M + cHost,
+            M + cHost + cScore,
+            M + cHost + cScore + cRisk,
+            M + cHost + cScore + cRisk + cDate,
+            M + cHost + cScore + cRisk + cDate + cMode,
+        };
 
-        String verBadge = dr.verified() ? "✓ VERIFICADO" : "NÃO VERIFICADO";
-        float[] verColor = dr.verified() ? ACCENT : MUTED;
-        txt(verBadge, M + 12, cy - 26, bold, 8, verColor);
+        String titleLabel = switch (scope) {
+            case TEAM_SCANS -> "SCANS DA EQUIPE";
+            case BOTH       -> "DOMINIOS CADASTRADOS + SCANS DA EQUIPE";
+            default         -> "DOMINIOS CADASTRADOS";
+        };
+        sectionTitle(titleLabel);
+        gap(8);
 
-        if (dr.latest() != null) {
-            // Score grande
-            String scoreStr = String.valueOf(dr.latest().getScore());
-            float[] scoreCol = scoreColor(dr.latest().getScore());
-            txtR(scoreStr, PW - M - 60, cy - 8, bold, 22, scoreCol);
-            txtR("/ 100", PW - M - 8, cy - 8, normal, 10, MUTED);
+        float rowH = 20f;
 
-            String risk = dr.latest().getRiskLevel() != null
-                    ? dr.latest().getRiskLevel().name() : "—";
-            txtR(risk, PW - M - 8, cy - 24, bold, 9, riskColor(risk));
-
-            cy -= 38;
-
-            // Meta do scan
-            txt("Último scan: " + dr.latest().getScannedAt().format(DT_FMT) +
-                (dr.latest().isActiveMode() ? " (ativo)" : " (passivo)"),
-                M + 12, cy - 2, normal, 8, MUTED);
-
-            // Trend
-            if (dr.previous() != null) {
-                int delta = dr.latest().getScore() - dr.previous().getScore();
-                String trend = delta > 0 ? "▲ +" + delta : delta < 0 ? "▼ " + delta : "→ sem mudança";
-                float[] trendCol = delta > 0 ? OK : delta < 0 ? CRIT : MUTED;
-                txtR(trend, PW - M - 8, cy - 2, bold, 8, trendCol);
-            }
-            cy -= 12;
-
-            // Issues do domínio
-            if (dr.result() != null && dr.result().getScore() != null
-                    && dr.result().getScore().getIssues() != null) {
-                List<SecurityIssue> issues = dr.result().getScore().getIssues().stream()
-                        .sorted(Comparator.comparing(i -> severityOrder(i.getSeverity())))
-                        .limit(5)
-                        .toList();
-
-                if (!issues.isEmpty()) {
-                    gap(6);
-                    for (SecurityIssue issue : issues) {
-                        need(18);
-                        float[] col = severityColor(issue.getSeverity());
-                        fill(M + 12, cy - 14, 55, 14, col);
-                        txt(issue.getSeverity(), M + 14, cy - 4, bold, 7, WHITE);
-                        String title = truncate(issue.getTitle(), 70);
-                        txt(title, M + 74, cy - 4, normal, 9, TEXT);
-                        cy -= 16;
-                    }
-                }
-            }
-        } else {
-            cy -= 38;
-            txt("Nenhum scan realizado para este domínio.", M + 12, cy - 8, normal, 9, MUTED);
-            cy -= 18;
-        }
-
-        // Separador
-        gap(6);
-        fill(M, cy, CW, 0.5f, BORDER);
-    }
-
-    // ── Tabela de issues críticos/altos ───────────────────────────────────────
-
-    private void criticalTable(List<IssueRow> rows) throws IOException {
-        sectionTitle("FINDINGS CRÍTICOS E ALTOS — CONSOLIDADO");
-        gap(10);
-
-        // Cabeçalho da tabela
-        float[] cols = {M, M + 140, M + 280, M + 360};
-        float rowH = 18;
+        // Cabeçalho
         fill(M, cy - rowH, CW, rowH, BGDARK);
-        txt("Domínio",    cols[0] + 4, cy - 6, bold, 8, MUTED);
-        txt("Issue",      cols[1] + 4, cy - 6, bold, 8, MUTED);
-        txt("Severidade", cols[2] + 4, cy - 6, bold, 8, MUTED);
-        txt("Impacto",    cols[3] + 4, cy - 6, bold, 8, MUTED);
+        txt("HOST",         xCols[0] + 4, cy - 7, bold, 8, MUTED);
+        txt("SCORE",        xCols[1] + 4, cy - 7, bold, 8, MUTED);
+        txt("RISCO",        xCols[2] + 4, cy - 7, bold, 8, MUTED);
+        txt("ULTIMO SCAN",  xCols[3] + 4, cy - 7, bold, 8, MUTED);
+        txt("MODO",         xCols[4] + 4, cy - 7, bold, 8, MUTED);
+        if (showVerified) txt("STATUS", xCols[5] + 4, cy - 7, bold, 8, MUTED);
         cy -= rowH;
 
         boolean alt = false;
-        for (IssueRow row : rows) {
+        for (DomainReport dr : reports) {
             need(rowH + 2);
+
             if (alt) fill(M, cy - rowH, CW, rowH, BGLIGHT);
-            txt(truncate(row.host(), 22),           cols[0] + 4, cy - 6, mono,   7, TEXT);
-            txt(truncate(row.issue().getTitle(), 22),  cols[1] + 4, cy - 6, normal, 8, TEXT);
-            fill(cols[2] + 4, cy - 14, 62, 12, severityColor(row.issue().getSeverity()));
-            txt(row.issue().getSeverity(), cols[2] + 6, cy - 5, bold, 7, WHITE);
-            txt(truncate(row.issue().getImpact(), 26), cols[3] + 4, cy - 6, normal, 7, MUTED);
+
+            // HOST
+            txt(truncate(dr.host(), showVerified ? 22 : 26),
+                xCols[0] + 4, cy - 7, mono, 9, TEXT);
+
+            if (dr.latest() != null) {
+                // SCORE
+                float[] scoreCol = scoreColor(dr.latest().getScore());
+                String scoreStr  = String.valueOf(dr.latest().getScore());
+                fill(xCols[1] + 2, cy - rowH + 3, cScore - 6, rowH - 6, scoreCol);
+                txt(scoreStr,
+                    xCols[1] + 2 + (cScore - 6) / 2f - textWidth(scoreStr, bold, 9) / 2f,
+                    cy - 7, bold, 9, WHITE);
+
+                // RISCO
+                String risk = dr.latest().getRiskLevel() != null
+                        ? dr.latest().getRiskLevel().name() : "—";
+                txt(risk, xCols[2] + 4, cy - 7, bold, 8, riskColor(risk));
+
+                // DATA
+                txt(dr.latest().getScannedAt().format(D_FMT),
+                    xCols[3] + 4, cy - 7, normal, 8, TEXT);
+
+                // MODO
+                String modo    = dr.latest().isActiveMode() ? "ATIVO" : "PASSIVO";
+                float[] modCol = dr.latest().isActiveMode() ? ACCENT : MUTED;
+                txt(modo, xCols[4] + 4, cy - 7, bold, 8, modCol);
+            } else {
+                txt("—", xCols[1] + 4, cy - 7, normal, 8, MUTED);
+                txt("—", xCols[2] + 4, cy - 7, normal, 8, MUTED);
+                txt("Sem scan", xCols[3] + 4, cy - 7, normal, 8, MUTED);
+                txt("—", xCols[4] + 4, cy - 7, normal, 8, MUTED);
+            }
+
+            // VERIFICADO
+            if (showVerified) {
+                if (dr.verified()) {
+                    txt("Verificado", xCols[5] + 4, cy - 7, bold, 8, ACCENT);
+                } else {
+                    txt("Pendente", xCols[5] + 4, cy - 7, normal, 8, MUTED);
+                }
+            }
+
+            // Linha separadora
             fill(M, cy - rowH, CW, 0.3f, BORDER);
             cy -= rowH;
             alt = !alt;
         }
     }
+
+    // ── Tabela de AuditLog (TEAM_SCANS — colunas iguais ao painel) ───────────
+
+    private void auditLogTable(List<AuditLog> entries) throws IOException {
+        sectionTitle("LOG DE ATIVIDADES");
+        gap(4);
+
+        // Larguras (total = CW = 505)
+        // DATA/HORA | USUARIO | ACAO | DETALHES | IP
+        float cDate    = 86f;
+        float cUser    = 88f;
+        float cAction  = 90f;
+        float cDetails = 186f;
+        float cIp      = 55f;
+        // 86+88+90+186+55 = 505 ✓
+
+        float[] x = {
+            M,
+            M + cDate,
+            M + cDate + cUser,
+            M + cDate + cUser + cAction,
+            M + cDate + cUser + cAction + cDetails,
+        };
+
+        float rowH = 16f;
+        // Baseline para texto de 7pt visualmente centrado em rowH=16
+        // centro visual = cy - rowH/2 = cy - 8 ; offset baseline = centro - capHeight/2 ≈ -5
+        float tY = rowH / 2f + 3f; // = 11 → texto baseline em cy - 11
+
+        // Cabeçalho
+        fill(M, cy - rowH, CW, rowH, BGDARK);
+        txt("DATA/HORA",  x[0] + 3, cy - tY, bold, 7, MUTED);
+        txt("USUARIO",    x[1] + 3, cy - tY, bold, 7, MUTED);
+        txt("ACAO",       x[2] + 3, cy - tY, bold, 7, MUTED);
+        txt("DETALHES",   x[3] + 3, cy - tY, bold, 7, MUTED);
+        txt("IP",         x[4] + 3, cy - tY, bold, 7, MUTED);
+        cy -= rowH;
+
+        boolean alt = false;
+        for (AuditLog entry : entries) {
+            need(rowH + 1);
+
+            if (alt) fill(M, cy - rowH, CW, rowH, BGLIGHT);
+
+            float ty = cy - tY; // baseline Y para esta linha
+
+            // DATA/HORA
+            txt(entry.getTimestamp().format(DT_FMT), x[0] + 3, ty, normal, 7, TEXT);
+
+            // USUÁRIO — linha única: nome ou email
+            String user = entry.getUserName() != null
+                    ? truncate(entry.getUserName(), 13)
+                    : (entry.getUserEmail() != null ? truncate(entry.getUserEmail(), 15) : "-");
+            txt(user, x[1] + 3, ty, normal, 7, TEXT);
+
+            // AÇÃO — texto simples sem badge
+            txt(truncate(actionLabel(entry.getAction()), 16), x[2] + 3, ty, normal, 7, TEXT);
+
+            // DETALHES — sanitizado (Helvetica Type1 não suporta em-dash)
+            String det = sanitize(entry.getDetails());
+            txt(truncate(det, 38), x[3] + 3, ty, normal, 7, TEXT);
+
+            // IP
+            String ip = entry.getIpAddress() != null
+                    ? truncate(sanitize(entry.getIpAddress()), 18) : "-";
+            txt(ip, x[4] + 3, ty, mono, 6, MUTED);
+
+            // Separador
+            fill(M, cy - rowH, CW, 0.3f, BORDER);
+            cy -= rowH;
+            alt = !alt;
+        }
+    }
+
+    /** Substitui caracteres fora do WinAnsi (Latin-1) por equivalentes ASCII. */
+    private String sanitize(String s) {
+        if (s == null) return "-";
+        return s.replace('—', '-')  // em-dash
+                .replace('–', '-')  // en-dash
+                .replace('‒', '-')  // figure dash
+                .replace('‘', '\'').replace('’', '\'')
+                .replace('“', '"').replace('”', '"')
+                .replace('…', '.'); // ellipsis
+    }
+
+    private String actionLabel(AuditAction action) {
+        if (action == null) return "—";
+        return switch (action) {
+            case SCAN_COMPLETED      -> "Scan concluido";
+            case SCAN_STARTED        -> "Scan iniciado";
+            case LOGIN_SUCCESS       -> "Login";
+            case LOGIN_FAILED        -> "Falha de login";
+            case LOGIN_2FA_VERIFIED  -> "2FA verificado";
+            case USER_INVITED        -> "Convite";
+            case USER_ROLE_CHANGED   -> "Role alterado";
+            case USER_DEACTIVATED    -> "Desativado";
+            case USER_REACTIVATED    -> "Reativado";
+            case DOMAIN_ADDED        -> "Dominio adicionado";
+            case DOMAIN_VERIFIED     -> "Dominio verificado";
+            case DOMAIN_REMOVED      -> "Dominio removido";
+            default                  -> action.name().replace("_", " ").toLowerCase();
+        };
+    }
+
 
     // ── Helpers de layout ─────────────────────────────────────────────────────
 
@@ -405,10 +607,11 @@ public class ExecutivePdfReportService {
         fill(x, y - h, w, h, BGLIGHT);
         strokeRect(x, y - h, w, h, BORDER);
         float[] col = valueColor != null ? valueColor : TEXT;
-        txt(value, x + w / 2f - textWidth(value, bold, 26) / 2f,
-            y - h / 2f + 8, bold, 26, col);
+        // Valor centrado verticalmente, label rente ao fundo
+        txt(value, x + w / 2f - textWidth(value, bold, 20) / 2f,
+            y - h / 2f + 6, bold, 20, col);
         txt(label, x + w / 2f - textWidth(label, normal, 8) / 2f,
-            y - h + 12, normal, 8, MUTED);
+            y - h + 10, normal, 8, MUTED);
     }
 
     private void sectionTitle(String title) throws IOException {
@@ -417,21 +620,6 @@ public class ExecutivePdfReportService {
         fill(M, cy - 20, 3, 20, ACCENT);
         txt(title, M + 10, cy - 7, bold, 9, ACCENT);
         cy -= 22;
-    }
-
-    private float estimateDomainBlockH(DomainReport dr) {
-        int issues = 0;
-        if (dr.result() != null && dr.result().getScore() != null
-                && dr.result().getScore().getIssues() != null) {
-            issues = Math.min(5, dr.result().getScore().getIssues().size());
-        }
-        return 70 + issues * 17f;
-    }
-
-    private float[] domainAccentColor(DomainReport dr) {
-        if (dr.latest() == null) return MUTED;
-        if (dr.latest().getRiskLevel() == null) return MUTED;
-        return riskColor(dr.latest().getRiskLevel().name());
     }
 
     private void gap(float h) { cy -= h; }
@@ -503,14 +691,6 @@ public class ExecutivePdfReportService {
         txt(text, rightX - w, y, font, size, rgb);
     }
 
-    private String sanitize(String s) {
-        if (s == null) return "";
-        return s.chars()
-                .filter(c -> c >= 32 && c < 127)
-                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
-                .toString();
-    }
-
     // ── Cor helpers ───────────────────────────────────────────────────────────
 
     private float[] scoreColor(int score) {
@@ -542,7 +722,9 @@ public class ExecutivePdfReportService {
         };
     }
 
-    // ── Records internos ──────────────────────────────────────────────────────
+    // ── Records e enums internos ──────────────────────────────────────────────
+
+    public enum ReportScope { DOMAINS, TEAM_SCANS, BOTH }
 
     private record DomainReport(
             String     host,       // hostname do domínio
@@ -552,5 +734,4 @@ public class ExecutivePdfReportService {
             ScanRecord previous
     ) {}
 
-    private record IssueRow(String host, SecurityIssue issue) {}
 }

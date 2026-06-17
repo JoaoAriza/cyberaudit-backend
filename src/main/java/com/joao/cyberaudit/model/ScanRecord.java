@@ -3,8 +3,9 @@ package com.joao.cyberaudit.model;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -14,10 +15,7 @@ import java.util.UUID;
         @Index(name = "idx_scan_host", columnList = "host"),
         @Index(name = "idx_scan_scanned_at", columnList = "scanned_at")
 })
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
+@Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
 public class ScanRecord {
 
     @Id
@@ -43,10 +41,6 @@ public class ScanRecord {
     @Column(columnDefinition = "TEXT", nullable = false)
     private String resultJson;
 
-    /**
-     * Conta que originou o scan. Null para scans anônimos/guest.
-     * Usado para o relatório executivo quando não há domínios registrados.
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_id")
     private Account account;

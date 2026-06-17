@@ -3,15 +3,17 @@ package com.joao.cyberaudit.model;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
 @Table(name = "invites")
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
+@Getter @Setter
+@Builder @NoArgsConstructor @AllArgsConstructor
 public class Invite {
 
     @Id

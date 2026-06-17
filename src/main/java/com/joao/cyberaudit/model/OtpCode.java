@@ -3,8 +3,9 @@ package com.joao.cyberaudit.model;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -17,7 +18,8 @@ import java.util.UUID;
 @Table(name = "otp_codes", indexes = {
         @Index(name = "idx_otp_user_id", columnList = "user_id")
 })
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
+@Getter @Setter
+@Builder @NoArgsConstructor @AllArgsConstructor
 public class OtpCode {
 
     @Id

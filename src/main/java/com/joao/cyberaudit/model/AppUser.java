@@ -3,8 +3,9 @@ package com.joao.cyberaudit.model;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -16,7 +17,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "app_users")
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
+@Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
 public class AppUser implements UserDetails {
 
     @Id
@@ -53,19 +54,12 @@ public class AppUser implements UserDetails {
     @JoinColumn(name = "invited_by")
     private AppUser invitedBy;
 
-    // ── LGPD ─────────────────────────────────────────────────────────────────
-
-    /** Usuário aceitou explicitamente os Termos de Uso e Política de Privacidade. */
     @Builder.Default
     @Column(nullable = false)
     private boolean termsAccepted = false;
 
-    /** Data/hora do aceite dos termos. */
     private LocalDateTime termsAcceptedAt;
 
-    // ── 2FA ──────────────────────────────────────────────────────────────────
-
-    /** Segredo TOTP base32, presente somente quando TOTP está ativado. */
     private String totpSecret;
 
     @Builder.Default

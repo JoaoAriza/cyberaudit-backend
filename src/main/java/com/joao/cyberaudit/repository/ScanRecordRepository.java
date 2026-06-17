@@ -41,4 +41,31 @@ public interface ScanRecordRepository extends JpaRepository<ScanRecord, UUID> {
         ORDER BY s.scannedAt DESC
         """)
     List<ScanRecord> findLatestPerHostByAccount(@Param("account") Account account, Pageable pageable);
+
+    /**
+     * Retorna o scan mais recente de cada host da conta dentro de um intervalo de datas.
+     */
+    @Query("""
+        SELECT s FROM ScanRecord s
+        WHERE s.account = :account
+          AND s.scannedAt >= :from
+          AND s.scannedAt <= :to
+          AND s.scannedAt = (
+              SELECT MAX(s2.scannedAt) FROM ScanRecord s2
+              WHERE s2.account = :account
+                AND s2.host = s.host
+                AND s2.scannedAt >= :from
+                AND s2.scannedAt <= :to
+          )
+        ORDER BY s.scannedAt DESC
+        """)
+    List<ScanRecord> findLatestPerHostByAccountBetween(
+            @Param("account") Account account,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            Pageable pageable);
+
+    /** Scans de um host dentro de um intervalo de datas. */
+    List<ScanRecord> findByHostAndScannedAtBetweenOrderByScannedAtDesc(
+            String host, LocalDateTime from, LocalDateTime to, Pageable pageable);
 }
