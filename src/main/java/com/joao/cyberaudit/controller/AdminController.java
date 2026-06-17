@@ -25,6 +25,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HexFormat;
 
 @RestController
 @RequestMapping("/admin")
@@ -185,6 +186,40 @@ public class AdminController {
         accountRepository.save(account);
         auditService.log(caller, AuditAction.REQUIRE_2FA_CHANGED, "require2fa=" + require);
         return ResponseEntity.ok(Map.of("require2fa", require));
+    }
+
+    /**
+     * Ativa, desativa ou regenera o token da página de status pública.
+     * Body: { "enabled": true } para ativar/regenerar, { "enabled": false } para desativar.
+     * Apenas OWNER.
+     */
+    @PostMapping("/account/status-page")
+    public ResponseEntity<Map<String, Object>> toggleStatusPage(
+            @RequestBody Map<String, Boolean> body,
+            @AuthenticationPrincipal AppUser caller) {
+
+        requireOwner(caller);
+        Account account = caller.getAccount();
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
+        }
+
+        boolean enabled = Boolean.TRUE.equals(body.get("enabled"));
+        if (enabled) {
+            // Gera token de 32 bytes (64 chars hex)
+            byte[] bytes = new byte[32];
+            new java.security.SecureRandom().nextBytes(bytes);
+            String token = HexFormat.of().formatHex(bytes);
+            account.setPublicStatusToken(token);
+        } else {
+            account.setPublicStatusToken(null);
+        }
+        accountRepository.save(account);
+
+        return ResponseEntity.ok(Map.of(
+                "enabled", enabled,
+                "token", account.getPublicStatusToken() != null ? account.getPublicStatusToken() : ""
+        ));
     }
 
     /**

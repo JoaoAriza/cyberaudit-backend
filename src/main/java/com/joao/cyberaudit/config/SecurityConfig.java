@@ -56,6 +56,9 @@ public class SecurityConfig {
                         .requestMatchers("/badge/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
 
+                        // ── Página de status pública (sem auth) ───────────────────────
+                        .requestMatchers(HttpMethod.GET, "/public/status/**").permitAll()
+
                         // ── Scan passivo e async: público ──────────────────────────
                         .requestMatchers(HttpMethod.GET,  "/scan").permitAll()
                         .requestMatchers(HttpMethod.POST, "/scan/async").permitAll()

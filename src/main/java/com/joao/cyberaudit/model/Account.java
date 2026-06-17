@@ -51,4 +51,11 @@ public class Account {
     @Builder.Default
     @Column(nullable = false)
     private boolean require2fa = false;
+
+    /**
+     * Token único para a página de status pública.
+     * Null = página desativada. Gerado pelo OWNER via AdminPanel.
+     */
+    @Column(unique = true, length = 64)
+    private String publicStatusToken;
 }

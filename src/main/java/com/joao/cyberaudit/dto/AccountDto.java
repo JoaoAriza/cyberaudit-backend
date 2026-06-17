@@ -31,6 +31,9 @@ public class AccountDto {
     private boolean changesModuleAllowed;
     private boolean historyChartAllowed;
 
+    /** Token para a página de status pública — null = desativada */
+    private String publicStatusToken;
+
     /** Constrói a partir da Account (usa plano da conta sem bypass de role). */
     public static AccountDto from(Account a) {
         return from(a, null);
@@ -62,6 +65,7 @@ public class AccountDto {
         dto.setPdfExportAllowed(usedPlan.pdfExportAllowed);
         dto.setChangesModuleAllowed(usedPlan.changesModuleAllowed);
         dto.setHistoryChartAllowed(usedPlan.historyChartAllowed);
+        dto.setPublicStatusToken(a.getPublicStatusToken());
         return dto;
     }
 }
