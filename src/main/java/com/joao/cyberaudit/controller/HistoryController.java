@@ -1,10 +1,12 @@
 package com.joao.cyberaudit.controller;
 
+import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.model.ScanSummary;
 import com.joao.cyberaudit.service.ScanHistoryService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -62,6 +64,17 @@ public class HistoryController {
         return historyService.getResult(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Último scan por domínio para a conta do usuário autenticado.
+     * Usado na aba "Visão Geral" do Histórico.
+     */
+    @GetMapping("/overview")
+    public List<ScanSummary> overview(@AuthenticationPrincipal AppUser caller) {
+        if (caller == null || caller.getAccount() == null) return List.of();
+        return historyService.findLatestPerHost(caller.getAccount(), 50)
+                .stream().map(ScanSummary::from).toList();
     }
 
     private ScanOrigin parseOrigin(String origin) {

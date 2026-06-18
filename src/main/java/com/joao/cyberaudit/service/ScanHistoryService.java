@@ -91,6 +91,11 @@ public class ScanHistoryService {
         return findByHost(host, limit, null);
     }
 
+    /** Último scan por host para uma conta (para Visão Geral). */
+    public List<ScanRecord> findLatestPerHost(Account account, int limit) {
+        return repository.findLatestPerHostByAccount(account, PageRequest.of(0, limit));
+    }
+
     /** Busca scans de um host em um intervalo de datas (para gráfico intraday). */
     public List<ScanRecord> findByHostBetween(String host, LocalDateTime from, LocalDateTime to) {
         String normalized = host.startsWith("www.") ? host.substring(4) : host;

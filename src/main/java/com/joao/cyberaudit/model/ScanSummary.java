@@ -16,6 +16,7 @@ public class ScanSummary {
     private boolean activeMode;
     private int score;
     private RiskLevel riskLevel;
+    private ScanOrigin origin;
 
     public static ScanSummary from(ScanRecord record) {
         return new ScanSummary(
@@ -25,7 +26,8 @@ public class ScanSummary {
                 record.getScannedAt(),
                 record.isActiveMode(),
                 record.getScore(),
-                record.getRiskLevel()
+                record.getRiskLevel(),
+                record.getOrigin() != null ? record.getOrigin() : ScanOrigin.MANUAL
         );
     }
 }
