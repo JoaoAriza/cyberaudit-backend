@@ -31,17 +31,18 @@ public class AuditService {
 
     /**
      * Registra uma ação de um usuário autenticado (sucesso implícito).
+     * Nunca lança exceção — o log nunca deve interromper o fluxo de scan.
      */
     public void log(AppUser user, AuditAction action, String details) {
-        log(
-                user.getAccount() != null ? user.getAccount().getId() : null,
-                user.getId(),
-                user.getEmail(),
-                user.getName(),
-                action,
-                details,
-                true
-        );
+        try {
+            UUID accountId = null;
+            try { accountId = user.getAccount() != null ? user.getAccount().getId() : null; }
+            catch (Exception ignored) { /* lazy proxy detached — accountId permanece null */ }
+
+            log(accountId, user.getId(), user.getEmail(), user.getName(), action, details, true);
+        } catch (Exception ignored) {
+            // log failure must never break the main request
+        }
     }
 
     /**

@@ -400,7 +400,10 @@ public class ScanChangeDetector {
 
     private boolean isStrongerDmarc(String cur, String prev) {
         Map<String, Integer> strength = Map.of("reject", 3, "quarantine", 2, "none", 1);
-        return strength.getOrDefault(cur, 0) > strength.getOrDefault(prev, 0);
+        // Map.of() imutável não aceita chave null — normalizar antes do lookup
+        int curScore  = cur  != null ? strength.getOrDefault(cur.toLowerCase(),  0) : 0;
+        int prevScore = prev != null ? strength.getOrDefault(prev.toLowerCase(), 0) : 0;
+        return curScore > prevScore;
     }
 
     private int riskLevel(String risk) {

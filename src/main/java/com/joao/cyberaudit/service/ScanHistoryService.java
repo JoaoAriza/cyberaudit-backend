@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.model.Account;
+import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScanRecord;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.repository.ScanRecordRepository;
@@ -25,16 +26,25 @@ public class ScanHistoryService {
         this.objectMapper = objectMapper;
     }
 
-    /** Salva sem conta associada (scans anônimos/guest). */
     public void save(ScanResult result) {
-        save(result, null);
+        save(result, null, ScanOrigin.MANUAL);
     }
 
-    /** Salva com conta associada — permite relatório executivo por conta. */
     public void save(ScanResult result, Account account) {
+        save(result, account, ScanOrigin.MANUAL);
+    }
+
+    public void save(ScanResult result, Account account, ScanOrigin origin) {
         try {
-            String host = extractHost(result.getFinalUrl() != null
+            String rawHost = extractHost(result.getFinalUrl() != null
                     ? result.getFinalUrl() : result.getUrl());
+            // Normaliza: remove www. — queries sempre usam o domínio raiz
+            String host = (rawHost != null && rawHost.startsWith("www."))
+                    ? rawHost.substring(4) : rawHost;
+            if (host == null || host.isBlank()) {
+                System.err.println("[ScanHistoryService] Host nulo, ignorando save para: " + result.getUrl());
+                return;
+            }
             String json = objectMapper.writeValueAsString(result);
             ScanRecord record = ScanRecord.builder()
                     .url(result.getUrl())
@@ -45,6 +55,7 @@ public class ScanHistoryService {
                     .riskLevel(result.getScore().getRiskLevel())
                     .resultJson(json)
                     .account(account)
+                    .origin(origin)
                     .build();
             repository.save(record);
         } catch (Exception e) {
@@ -52,69 +63,64 @@ public class ScanHistoryService {
         }
     }
 
-    /**
-     * Retorna o resultado do scan mais recente para um host no mesmo modo (ativo/passivo).
-     * Usado pelo ScanChangeDetector para comparar com o scan atual.
-     *
-     * Busca os 10 scans mais recentes e filtra por activeMode em memória —
-     * evita adicionar método ao repository.
-     */
     public Optional<ScanResult> findLastResult(String host, boolean activeMode) {
-        return findByHost(host, 10).stream()
+        return findByHost(host, 10, null).stream()
                 .filter(r -> r.isActiveMode() == activeMode)
                 .findFirst()
                 .flatMap(r -> getResult(r.getId()));
     }
 
-    public List<ScanRecord> findByHost(String host, int limit) {
-        // Normaliza: remove www. para busca primária
+    /** Busca scans de um host, filtrando opcionalmente por origin. */
+    public List<ScanRecord> findByHost(String host, int limit, ScanOrigin origin) {
         String normalized = host.startsWith("www.") ? host.substring(4) : host;
-        List<ScanRecord> records = repository.findByHostOrderByScannedAtDesc(
-                normalized, PageRequest.of(0, limit));
+        PageRequest page  = PageRequest.of(0, limit);
+        List<ScanRecord> records = (origin != null)
+                ? repository.findByHostAndOriginOrderByScannedAtDesc(normalized, origin, page)
+                : repository.findByHostOrderByScannedAtDesc(normalized, page);
         // Fallback para registros legados gravados com www.
-        if (records.isEmpty() && !host.startsWith("www.")) {
-            records = repository.findByHostOrderByScannedAtDesc(
-                    "www." + normalized, PageRequest.of(0, limit));
+        if (records.isEmpty()) {
+            records = (origin != null)
+                    ? repository.findByHostAndOriginOrderByScannedAtDesc("www." + normalized, origin, page)
+                    : repository.findByHostOrderByScannedAtDesc("www." + normalized, page);
         }
         return records;
+    }
+
+    /** Compatibilidade — sem filtro de origin. */
+    public List<ScanRecord> findByHost(String host, int limit) {
+        return findByHost(host, limit, null);
     }
 
     public List<ScanRecord> findRecent(int limit) {
         return repository.findAllByOrderByScannedAtDesc(PageRequest.of(0, limit));
     }
 
-    /** Retorna os scans mais recentes de uma conta (apenas o mais recente por host). */
-    public List<ScanRecord> findRecentByAccount(Account account, int limit) {
-        return repository.findLatestPerHostByAccount(account, PageRequest.of(0, limit));
-    }
-
-    public Optional<ScanRecord> findById(UUID id) {
-        return repository.findById(id);
+    public List<ScanRecord> findRecentByOrigin(int limit, ScanOrigin origin) {
+        return repository.findAllByOriginOrderByScannedAtDesc(origin, PageRequest.of(0, limit));
     }
 
     public Optional<ScanResult> getResult(UUID id) {
-        return findById(id).flatMap(record -> {
+        return repository.findById(id).flatMap(r -> {
             try {
-                return Optional.of(objectMapper.readValue(record.getResultJson(), ScanResult.class));
+                return Optional.of(objectMapper.readValue(r.getResultJson(), ScanResult.class));
             } catch (Exception e) {
+                System.err.println("[ScanHistoryService] Falha ao desserializar scan " + id + ": " + e.getMessage());
                 return Optional.empty();
             }
         });
     }
 
-    /**
-     * Extrai e normaliza o host de uma URL.
-     * Remove o prefixo "www." para garantir consistência com os hosts registrados
-     * em Domain (que o usuário normalmente cadastra sem "www.").
-     * Ex: "https://www.example.com/path" → "example.com"
-     */
+    public Optional<ScanRecord> findRecordById(UUID id) {
+        return repository.findById(id);
+    }
+
     private String extractHost(String url) {
+        if (url == null || url.isBlank()) return null;
         try {
             String h = URI.create(url).getHost();
-            if (h == null) return url;
-            return h.startsWith("www.") ? h.substring(4) : h;
+            return (h != null && !h.isBlank()) ? h : null;
         } catch (Exception e) {
-            return url;
+            return null;
         }
     }
 }

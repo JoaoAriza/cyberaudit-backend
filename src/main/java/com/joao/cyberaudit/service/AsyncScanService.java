@@ -35,7 +35,6 @@ public class AsyncScanService {
         return scanId;
     }
 
-    /** Overload sem notify para compatibilidade (chamadas internas sem notificação) */
     public String submit(String url, boolean active, AppUser currentUser, boolean refresh) {
         return submit(url, active, currentUser, refresh, false);
     }
@@ -49,27 +48,30 @@ public class AsyncScanService {
                              AppUser currentUser, boolean refresh, boolean notify) {
         statusMap.put(scanId, new AsyncScanStatus(scanId, State.RUNNING, null, null));
         try {
-            // Re-fetch user with account eagerly loaded within this async thread's JPA session.
-            // The currentUser passed from the HTTP thread has a detached lazy proxy for account;
-            // calling getAccount() here would cause "pk is null" NPE (Hibernate detached proxy).
+            // Re-fetch user WITH eager account (JOIN FETCH) in the async thread's own JPA session.
+            // The principal from Spring Security is a detached entity — its lazy account proxy
+            // cannot be initialized outside the original session. findByEmailWithAccount uses
+            // LEFT JOIN FETCH u.account to avoid LazyInitializationException / NPE on pk.
             if (currentUser != null) {
                 currentUser = appUserRepository
                         .findByEmailWithAccount(currentUser.getEmail())
-                        .orElse(currentUser);
+                        .orElse(null);
             }
 
             ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh);
+
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.DONE, result, null));
 
-            // Notificação por email — só se solicitado e usuário autenticado
-            if (notify && currentUser != null) {
+            if (notify && currentUser != null && result != null) {
                 emailService.sendScanComplete(
                         currentUser.getEmail(),
                         currentUser.getName(),
                         result);
             }
         } catch (Exception e) {
-            statusMap.put(scanId, new AsyncScanStatus(scanId, State.ERROR, null, e.getMessage()));
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            statusMap.put(scanId, new AsyncScanStatus(scanId, State.ERROR, null,
+                    "Erro ao executar scan: " + msg));
         }
     }
 }

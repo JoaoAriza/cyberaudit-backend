@@ -119,6 +119,10 @@ public class ScanOrchestrator {
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
+        return execute(url, active, currentUser, refresh, ScanOrigin.MANUAL);
+    }
+
+    public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh, ScanOrigin origin) {
         String inputUrl = normalizeUrl(url);
         String cacheKey = buildCacheKey(inputUrl, active);
 
@@ -318,7 +322,7 @@ public class ScanOrchestrator {
             if (!active) {
                 scanCacheService.put(cacheKey, passiveResult);
                 Account account = currentUser != null ? currentUser.getAccount() : null;
-                scanHistoryService.save(passiveResult, account);
+                scanHistoryService.save(passiveResult, account, origin);
                 if (currentUser != null) {
                     auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
                             "passive — " + inputUrl + " — score=" + passiveResult.getScore().getScore());
@@ -431,7 +435,7 @@ public class ScanOrchestrator {
 
             scanCacheService.put(cacheKey, result);
             Account account = currentUser != null ? currentUser.getAccount() : null;
-            scanHistoryService.save(result, account);
+            scanHistoryService.save(result, account, origin);
             if (currentUser != null) {
                 auditService.log(currentUser, AuditAction.SCAN_COMPLETED,
                         "active — " + inputUrl + " — score=" + result.getScore().getScore());

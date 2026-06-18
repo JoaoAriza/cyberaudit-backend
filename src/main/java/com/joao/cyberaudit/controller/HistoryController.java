@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.controller;
 
+import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.model.ScanSummary;
 import com.joao.cyberaudit.service.ScanHistoryService;
@@ -19,16 +20,26 @@ public class HistoryController {
         this.historyService = historyService;
     }
 
+    /**
+     * Scans recentes. origin=MANUAL|SCHEDULED (opcional, default: todos)
+     */
     @GetMapping("/recent")
-    public List<ScanSummary> recent() {
-        return historyService.findRecent(20).stream()
-                .map(ScanSummary::from)
-                .toList();
+    public List<ScanSummary> recent(@RequestParam(required = false) String origin) {
+        ScanOrigin o = parseOrigin(origin);
+        var records = (o != null)
+                ? historyService.findRecentByOrigin(20, o)
+                : historyService.findRecent(20);
+        return records.stream().map(ScanSummary::from).toList();
     }
 
+    /**
+     * Scans de um host. origin=MANUAL|SCHEDULED (opcional, default: todos)
+     */
     @GetMapping("/{host}")
-    public List<ScanSummary> byHost(@PathVariable String host) {
-        return historyService.findByHost(host, 50).stream()
+    public List<ScanSummary> byHost(@PathVariable String host,
+                                     @RequestParam(required = false) String origin) {
+        ScanOrigin o = parseOrigin(origin);
+        return historyService.findByHost(host, 50, o).stream()
                 .map(ScanSummary::from)
                 .toList();
     }
@@ -38,5 +49,11 @@ public class HistoryController {
         return historyService.getResult(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    private ScanOrigin parseOrigin(String origin) {
+        if (origin == null || origin.isBlank()) return null;
+        try { return ScanOrigin.valueOf(origin.toUpperCase()); }
+        catch (IllegalArgumentException e) { return null; }
     }
 }

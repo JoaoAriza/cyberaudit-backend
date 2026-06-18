@@ -3,6 +3,7 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.dto.ScheduledScanDto;
 import com.joao.cyberaudit.dto.ScheduledScanRequest;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScheduledScan;
 import com.joao.cyberaudit.model.ScheduledScan.Frequency;
 import com.joao.cyberaudit.repository.ScheduledScanRepository;
@@ -96,7 +97,7 @@ public class ScheduledScanService {
             try {
                 // Executa scan fora de qualquer transação — pode durar longos segundos
                 var result = orchestrator.execute(
-                        scan.getHost(), scan.isActive(), scan.getUser(), true);
+                        scan.getHost(), scan.isActive(), scan.getUser(), true, ScanOrigin.SCHEDULED);
 
                 // Persiste nextRun e lastRun em transação curta separada
                 markSuccess(scan.getId(), calcNextRun(scan.getFrequency(), scan.getPreferredHour()));

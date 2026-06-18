@@ -44,4 +44,10 @@ public class ScanRecord {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_id")
     private Account account;
+
+    /** Origem do scan: MANUAL (via Scanner UI) ou SCHEDULED (agendamento automático). */
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "VARCHAR(20) DEFAULT 'MANUAL'")
+    @Builder.Default
+    private ScanOrigin origin = ScanOrigin.MANUAL;
 }

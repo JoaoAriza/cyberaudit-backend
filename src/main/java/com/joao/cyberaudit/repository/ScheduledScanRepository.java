@@ -3,7 +3,6 @@ package com.joao.cyberaudit.repository;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.ScheduledScan;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -15,6 +14,8 @@ public interface ScheduledScanRepository extends JpaRepository<ScheduledScan, UU
 
     List<ScheduledScan> findByUserOrderByCreatedAtDesc(AppUser user);
 
+    void deleteByUser(AppUser user);
+
     /**
      * Todos os agendamentos habilitados com nextRun <= agora (prontos para executar).
      * JOIN FETCH garante que user.account é carregado imediatamente — evita
@@ -22,9 +23,4 @@ public interface ScheduledScanRepository extends JpaRepository<ScheduledScan, UU
      */
     @Query("SELECT s FROM ScheduledScan s JOIN FETCH s.user u JOIN FETCH u.account WHERE s.enabled = true AND s.nextRun <= :now")
     List<ScheduledScan> findDue(@Param("now") LocalDateTime now);
-
-    /** Exclusão de conta: remove todos os agendamentos do usuário. */
-    @Modifying
-    @Query("DELETE FROM ScheduledScan s WHERE s.user = :user")
-    void deleteByUser(@Param("user") AppUser user);
 }
