@@ -7,6 +7,7 @@ import com.joao.cyberaudit.service.ScanHistoryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,10 +35,22 @@ public class HistoryController {
 
     /**
      * Scans de um host. origin=MANUAL|SCHEDULED (opcional, default: todos)
+     * from/to: filtro de data ISO (YYYY-MM-DD) para gráfico intraday
      */
     @GetMapping("/{host}")
     public List<ScanSummary> byHost(@PathVariable String host,
-                                     @RequestParam(required = false) String origin) {
+                                     @RequestParam(required = false) String origin,
+                                     @RequestParam(required = false) String from,
+                                     @RequestParam(required = false) String to) {
+        if (from != null && to != null) {
+            LocalDate fromDate = LocalDate.parse(from);
+            LocalDate toDate   = LocalDate.parse(to);
+            return historyService.findByHostBetween(
+                    host,
+                    fromDate.atStartOfDay(),
+                    toDate.plusDays(1).atStartOfDay()
+            ).stream().map(ScanSummary::from).toList();
+        }
         ScanOrigin o = parseOrigin(origin);
         return historyService.findByHost(host, 50, o).stream()
                 .map(ScanSummary::from)

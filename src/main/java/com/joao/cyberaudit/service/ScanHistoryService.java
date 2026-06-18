@@ -91,6 +91,17 @@ public class ScanHistoryService {
         return findByHost(host, limit, null);
     }
 
+    /** Busca scans de um host em um intervalo de datas (para gráfico intraday). */
+    public List<ScanRecord> findByHostBetween(String host, LocalDateTime from, LocalDateTime to) {
+        String normalized = host.startsWith("www.") ? host.substring(4) : host;
+        PageRequest page  = PageRequest.of(0, 200);
+        List<ScanRecord> records = repository.findByHostAndScannedAtBetweenOrderByScannedAtDesc(normalized, from, to, page);
+        if (records.isEmpty()) {
+            records = repository.findByHostAndScannedAtBetweenOrderByScannedAtDesc("www." + normalized, from, to, page);
+        }
+        return records;
+    }
+
     public List<ScanRecord> findRecent(int limit) {
         return repository.findAllByOrderByScannedAtDesc(PageRequest.of(0, limit));
     }
