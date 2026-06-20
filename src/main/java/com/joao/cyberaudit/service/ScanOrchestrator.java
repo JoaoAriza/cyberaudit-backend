@@ -50,6 +50,7 @@ public class ScanOrchestrator {
     private final CrlfService                    crlfService;
     private final AuditService                   auditService;
     private final DegradationNotificationService degradationNotificationService;
+    private final ComplianceMappingService        complianceMappingService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -78,7 +79,8 @@ public class ScanOrchestrator {
             SourceMapService sourceMapService,
             CrlfService crlfService,
             AuditService auditService,
-            DegradationNotificationService degradationNotificationService) {
+            DegradationNotificationService degradationNotificationService,
+            ComplianceMappingService complianceMappingService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -116,6 +118,7 @@ public class ScanOrchestrator {
         this.crlfService                        = crlfService;
         this.auditService                       = auditService;
         this.degradationNotificationService     = degradationNotificationService;
+        this.complianceMappingService           = complianceMappingService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -303,6 +306,9 @@ public class ScanOrchestrator {
                     .score(passiveScore)
                     .build();
 
+            // Compliance gerado após montagem do passiveResult (necessita do objeto completo)
+            passiveResult.setCompliance(complianceMappingService.generate(passiveResult));
+
             // ── Fase 3: ownership check ────────────────────────────────────────
             if (active) {
                 boolean needsOwnership  = domainProtectionService.requiresOwnershipForActiveScan(passiveResult);
@@ -432,6 +438,8 @@ public class ScanOrchestrator {
                             previousScan))
                     .score(score)
                     .build();
+
+            result.setCompliance(complianceMappingService.generate(result));
 
             scanCacheService.put(cacheKey, result);
             Account account = currentUser != null ? currentUser.getAccount() : null;

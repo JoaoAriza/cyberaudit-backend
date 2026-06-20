@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.model;
 
+import com.joao.cyberaudit.dto.ComplianceReport;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -58,4 +59,7 @@ public class ScanResult {
     private List<CrlfFinding>                crlfFindings;
 
     private ScoreResult score;
+
+    /** Mapeamento de conformidade LGPD / ISO 27001:2022 — computado pelo orchestrator */
+    private ComplianceReport compliance;
 }
