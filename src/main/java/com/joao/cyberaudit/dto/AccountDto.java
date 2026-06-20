@@ -27,6 +27,8 @@ public class AccountDto {
     private int     dailyScanLimit;
     private int     scheduledScanLimit;
     private boolean activeScanAllowed;
+    /** true = PRO INDIVIDUAL — scan ativo permitido apenas em domínios verificados */
+    private boolean activeScanOnVerifiedOnly;
     private boolean pdfExportAllowed;
     private boolean changesModuleAllowed;
     private boolean historyChartAllowed;
@@ -59,9 +61,15 @@ public class AccountDto {
         dto.setCnpj(a.getCnpj() != null ? CnpjUtil.format(a.getCnpj()) : null);
         dto.setRequire2fa(a.isRequire2fa());
         // limites calculados do plano efetivo (pode ser ENTERPRISE para OWNER/ADMIN)
+        boolean isCompany = a.getType() == AccountType.COMPANY;
+        // PRO pode fazer active scan em domínios verificados; COMPANY/ENTERPRISE pode em qualquer
+        boolean canActiveScan = usedPlan.activeScanAllowed || usedPlan == Plan.PRO;
+        boolean verifiedOnly  = usedPlan == Plan.PRO && !isCompany;
+
         dto.setDailyScanLimit(usedPlan.dailyScanLimit);
         dto.setScheduledScanLimit(usedPlan.scheduledScanLimit);
-        dto.setActiveScanAllowed(usedPlan.activeScanAllowed);
+        dto.setActiveScanAllowed(canActiveScan);
+        dto.setActiveScanOnVerifiedOnly(verifiedOnly);
         dto.setPdfExportAllowed(usedPlan.pdfExportAllowed);
         dto.setChangesModuleAllowed(usedPlan.changesModuleAllowed);
         dto.setHistoryChartAllowed(usedPlan.historyChartAllowed);

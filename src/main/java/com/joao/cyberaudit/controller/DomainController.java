@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.dto.DomainDto;
+import com.joao.cyberaudit.dto.SubdomainInfo;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.AuditAction;
 import com.joao.cyberaudit.service.AuditService;
@@ -67,5 +68,20 @@ public class DomainController {
         DomainDto result = domainService.verify(id, user);
         auditService.log(user, AuditAction.DOMAIN_VERIFIED, result.getHost());
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Enumera subdomínios via Certificate Transparency + DNS probe.
+     * Requer: domínio verificado + conta EMPRESA (ou OWNER/ADMIN).
+     * Pode demorar 20-60s dependendo da quantidade de subdomínios.
+     */
+    @PostMapping("/{id}/enumerate")
+    public ResponseEntity<List<SubdomainInfo>> enumerate(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal AppUser user) {
+
+        List<SubdomainInfo> results = domainService.enumerate(id, user);
+        auditService.log(user, AuditAction.DOMAIN_VERIFIED, "enumerate:id=" + id + " found=" + results.size());
+        return ResponseEntity.ok(results);
     }
 }

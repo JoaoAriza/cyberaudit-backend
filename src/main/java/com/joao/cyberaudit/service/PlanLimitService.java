@@ -1,9 +1,11 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.Account;
+import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.model.Role;
+import com.joao.cyberaudit.repository.DomainRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Service
 public class PlanLimitService {
+
+    private final DomainRepository domainRepository;
+
+    public PlanLimitService(DomainRepository domainRepository) {
+        this.domainRepository = domainRepository;
+    }
 
     /** "accountId:date" → scans executados hoje */
     private final ConcurrentHashMap<String, AtomicInteger> dailyCounts = new ConcurrentHashMap<>();
@@ -78,12 +86,83 @@ public class PlanLimitService {
         }
     }
 
-    /** Verifica se o plano permite scan ativo. Lança 402 se não permitido. */
-    public void checkActiveScan(AppUser user) {
-        if (!effectivePlan(user).activeScanAllowed) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "Scan ativo requer plano ENTERPRISE.");
+    /**
+     * Verifica se o usuário pode executar scan ativo no host-alvo.
+     *
+     * Regras:
+     *  OWNER / ADMIN  → sempre permitido (qualquer domínio)
+     *  COMPANY        → permitido (qualquer domínio cadastrado e verificado ou não)
+     *  PRO (PERSONAL) → permitido APENAS se o host (ou seu domínio pai) está verificado na conta
+     *  FREE           → bloqueado
+     */
+    public void checkActiveScan(AppUser user, String targetHost) {
+        if (user == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Scan ativo requer autenticação.");
         }
+
+        // OWNER / ADMIN — acesso total
+        if (user.getRole() == Role.OWNER || user.getRole() == Role.ADMIN) return;
+
+        Account account = user.getAccount();
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    "Conta não encontrada.");
+        }
+
+        // EMPRESA (COMPANY) — acesso total
+        if (account.getType() == AccountType.COMPANY) return;
+
+        // PESSOAL FREE — bloqueado
+        Plan plan = effectivePlan(account);
+        if (plan == Plan.FREE) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    "Scan ativo requer plano PRO ou superior.");
+        }
+
+        // PESSOAL PRO — apenas domínios verificados na conta
+        if (targetHost == null || targetHost.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Host inválido para scan ativo.");
+        }
+
+        String host = normalizeHost(targetHost);
+
+        // Verifica se o próprio host ou o domínio pai está verificado
+        boolean allowed = isVerifiedForAccount(account, host)
+                || isVerifiedForAccount(account, parentDomain(host));
+
+        if (!allowed) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Scan ativo em modo PESSOAL só é permitido em domínios verificados na sua conta. "
+                    + "Acesse Domínios, cadastre e verifique \"" + host + "\" ou faça upgrade para conta Empresa.");
+        }
+    }
+
+    /** Mantido para compatibilidade — chama a versão com host. */
+    public void checkActiveScan(AppUser user) {
+        checkActiveScan(user, null);
+    }
+
+    private boolean isVerifiedForAccount(Account account, String host) {
+        if (host == null || host.isBlank()) return false;
+        return domainRepository.existsByAccountAndHostAndVerifiedTrue(account, host);
+    }
+
+    private String normalizeHost(String raw) {
+        if (raw == null) return "";
+        return raw.trim()
+                  .replaceFirst("^https?://", "")
+                  .split("/")[0]
+                  .toLowerCase();
+    }
+
+    /** Retorna o domínio pai (ex: "api.empresa.com.br" → "empresa.com.br"). */
+    private String parentDomain(String host) {
+        if (host == null) return "";
+        int dot = host.indexOf('.');
+        if (dot < 0 || dot == host.lastIndexOf('.')) return host; // já é raiz
+        return host.substring(dot + 1);
     }
 
     /** Verifica se o plano permite exportação de PDF. Lança 402 se não permitido. */

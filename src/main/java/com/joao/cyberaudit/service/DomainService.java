@@ -1,8 +1,11 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.dto.DomainDto;
+import com.joao.cyberaudit.dto.SubdomainInfo;
+import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Domain;
+import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.DomainRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -16,13 +19,16 @@ import java.util.UUID;
 @Service
 public class DomainService {
 
-    private final DomainRepository         domainRepository;
-    private final DomainProtectionService  domainProtectionService;
+    private final DomainRepository              domainRepository;
+    private final DomainProtectionService       domainProtectionService;
+    private final SubdomainEnumerationService   subdomainEnumerationService;
 
     public DomainService(DomainRepository domainRepository,
-                         DomainProtectionService domainProtectionService) {
-        this.domainRepository        = domainRepository;
-        this.domainProtectionService = domainProtectionService;
+                         DomainProtectionService domainProtectionService,
+                         SubdomainEnumerationService subdomainEnumerationService) {
+        this.domainRepository             = domainRepository;
+        this.domainProtectionService      = domainProtectionService;
+        this.subdomainEnumerationService  = subdomainEnumerationService;
     }
 
     // ── Listagem ──────────────────────────────────────────────────────────────
@@ -84,6 +90,29 @@ public class DomainService {
         domain.setVerifiedAt(LocalDateTime.now());
         return DomainDto.from(domainRepository.save(domain),
                 domainProtectionService.generateVerificationToken(domain.getHost()));
+    }
+
+    // ── Enumeração de subdomínios (EMPRESA) ───────────────────────────────────
+
+    public List<SubdomainInfo> enumerate(UUID domainId, AppUser user) {
+        requireAccount(user);
+
+        // Apenas COMPANY ou OWNER/ADMIN
+        boolean isAdmin = user.getRole() == Role.OWNER || user.getRole() == Role.ADMIN;
+        boolean isCompany = user.getAccount().getType() == AccountType.COMPANY;
+        if (!isAdmin && !isCompany) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Enumeração de subdomínios está disponível apenas para contas Empresa.");
+        }
+
+        Domain domain = getOwned(domainId, user);
+
+        if (!domain.isVerified()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Verifique a propriedade do domínio antes de enumerar subdomínios.");
+        }
+
+        return subdomainEnumerationService.enumerate(domain.getHost());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

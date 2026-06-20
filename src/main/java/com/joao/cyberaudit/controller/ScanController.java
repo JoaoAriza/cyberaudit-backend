@@ -60,7 +60,7 @@ public class ScanController {
         if (currentUser == null) {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
         } else {
-            if (active) planLimitService.checkActiveScan(currentUser);
+            if (active) planLimitService.checkActiveScan(currentUser, url);
             planLimitService.checkAndIncrementDailyScan(currentUser);
         }
         return scanOrchestrator.execute(url, active, currentUser, false);
@@ -145,7 +145,7 @@ public class ScanController {
         if (currentUser == null) {
             guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
         } else {
-            if (active) planLimitService.checkActiveScan(currentUser);
+            if (active) planLimitService.checkActiveScan(currentUser, url);
             planLimitService.checkAndIncrementDailyScan(currentUser);
         }
 
