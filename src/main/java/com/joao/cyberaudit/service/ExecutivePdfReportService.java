@@ -18,8 +18,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
-// AuditLog é importado via com.joao.cyberaudit.model.*
-
 /**
  * Escopo do relatório executivo:
  * DOMAINS   → apenas domínios cadastrados na conta
@@ -130,24 +128,10 @@ public class ExecutivePdfReportService {
                         .collect(Collectors.toList());
             }
 
-            // Busca entradas do AuditLog para TEAM_SCANS (fonte de verdade = mesmo que o painel)
-            List<AuditLog> auditEntries = null;
-            if (scope == ReportScope.TEAM_SCANS && account.getId() != null) {
-                LocalDateTime safeFrom2 = dtFrom.isBefore(SQL_FROM) ? SQL_FROM : dtFrom;
-                LocalDateTime safeTo2   = dtTo.isAfter(LocalDateTime.now().plusDays(1))
-                                         ? LocalDateTime.now().plusDays(1) : dtTo;
-                auditEntries = hasDateFilter
-                        ? auditLogRepository.findTop500ByAccountIdAndTimestampBetweenOrderByTimestampDesc(
-                                account.getId(), safeFrom2, safeTo2)
-                        : auditLogRepository.findTop500ByAccountIdOrderByTimestampDesc(account.getId());
-            }
-
             // Capa + tabela na mesma página (need() abre nova página se necessário)
             openPage();
             coverPage(account, reports, scope, from, to);
-            if (scope == ReportScope.TEAM_SCANS && auditEntries != null && !auditEntries.isEmpty()) {
-                auditLogTable(auditEntries);
-            } else if (!reports.isEmpty()) {
+            if (!reports.isEmpty()) {
                 domainTable(reports, scope);
             }
             closePage();
@@ -496,79 +480,6 @@ public class ExecutivePdfReportService {
         }
     }
 
-    // ── Tabela de AuditLog (TEAM_SCANS — colunas iguais ao painel) ───────────
-
-    private void auditLogTable(List<AuditLog> entries) throws IOException {
-        sectionTitle("LOG DE ATIVIDADES");
-        gap(4);
-
-        // Larguras (total = CW = 505)
-        // DATA/HORA | USUARIO | ACAO | DETALHES | IP
-        float cDate    = 86f;
-        float cUser    = 88f;
-        float cAction  = 90f;
-        float cDetails = 186f;
-        float cIp      = 55f;
-        // 86+88+90+186+55 = 505 ✓
-
-        float[] x = {
-            M,
-            M + cDate,
-            M + cDate + cUser,
-            M + cDate + cUser + cAction,
-            M + cDate + cUser + cAction + cDetails,
-        };
-
-        float rowH = 16f;
-        // Baseline para texto de 7pt visualmente centrado em rowH=16
-        // centro visual = cy - rowH/2 = cy - 8 ; offset baseline = centro - capHeight/2 ≈ -5
-        float tY = rowH / 2f + 3f; // = 11 → texto baseline em cy - 11
-
-        // Cabeçalho
-        fill(M, cy - rowH, CW, rowH, BGDARK);
-        txt("DATA/HORA",  x[0] + 3, cy - tY, bold, 7, MUTED);
-        txt("USUARIO",    x[1] + 3, cy - tY, bold, 7, MUTED);
-        txt("ACAO",       x[2] + 3, cy - tY, bold, 7, MUTED);
-        txt("DETALHES",   x[3] + 3, cy - tY, bold, 7, MUTED);
-        txt("IP",         x[4] + 3, cy - tY, bold, 7, MUTED);
-        cy -= rowH;
-
-        boolean alt = false;
-        for (AuditLog entry : entries) {
-            need(rowH + 1);
-
-            if (alt) fill(M, cy - rowH, CW, rowH, BGLIGHT);
-
-            float ty = cy - tY; // baseline Y para esta linha
-
-            // DATA/HORA
-            txt(entry.getTimestamp().format(DT_FMT), x[0] + 3, ty, normal, 7, TEXT);
-
-            // USUÁRIO — linha única: nome ou email
-            String user = entry.getUserName() != null
-                    ? truncate(entry.getUserName(), 13)
-                    : (entry.getUserEmail() != null ? truncate(entry.getUserEmail(), 15) : "-");
-            txt(user, x[1] + 3, ty, normal, 7, TEXT);
-
-            // AÇÃO — texto simples sem badge
-            txt(truncate(actionLabel(entry.getAction()), 16), x[2] + 3, ty, normal, 7, TEXT);
-
-            // DETALHES — sanitizado (Helvetica Type1 não suporta em-dash)
-            String det = sanitize(entry.getDetails());
-            txt(truncate(det, 38), x[3] + 3, ty, normal, 7, TEXT);
-
-            // IP
-            String ip = entry.getIpAddress() != null
-                    ? truncate(sanitize(entry.getIpAddress()), 18) : "-";
-            txt(ip, x[4] + 3, ty, mono, 6, MUTED);
-
-            // Separador
-            fill(M, cy - rowH, CW, 0.3f, BORDER);
-            cy -= rowH;
-            alt = !alt;
-        }
-    }
-
     /** Substitui caracteres fora do WinAnsi (Latin-1) por equivalentes ASCII. */
     private String sanitize(String s) {
         if (s == null) return "-";
@@ -579,26 +490,6 @@ public class ExecutivePdfReportService {
                 .replace('“', '"').replace('”', '"')
                 .replace('…', '.'); // ellipsis
     }
-
-    private String actionLabel(AuditAction action) {
-        if (action == null) return "—";
-        return switch (action) {
-            case SCAN_COMPLETED      -> "Scan concluido";
-            case SCAN_STARTED        -> "Scan iniciado";
-            case LOGIN_SUCCESS       -> "Login";
-            case LOGIN_FAILED        -> "Falha de login";
-            case LOGIN_2FA_VERIFIED  -> "2FA verificado";
-            case USER_INVITED        -> "Convite";
-            case USER_ROLE_CHANGED   -> "Role alterado";
-            case USER_DEACTIVATED    -> "Desativado";
-            case USER_REACTIVATED    -> "Reativado";
-            case DOMAIN_ADDED        -> "Dominio adicionado";
-            case DOMAIN_VERIFIED     -> "Dominio verificado";
-            case DOMAIN_REMOVED      -> "Dominio removido";
-            default                  -> action.name().replace("_", " ").toLowerCase();
-        };
-    }
-
 
     // ── Helpers de layout ─────────────────────────────────────────────────────
 
