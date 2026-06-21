@@ -64,9 +64,7 @@ public class ComplianceMappingService {
             if (ssl != null && !ssl.isValid())
                 findings.add("Certificado TLS inválido ou expirado");
             if (tls != null && tls.isWeakProtocol())
-                findings.add("Protocolo TLS fraco detectado (" + tls.getProtocol() + ")");
-            if (tls != null && tls.isWeakCipher())
-                findings.add("Cipher suite fraca em uso");
+                findings.add("Protocolo TLS fraco detectado (" + tls.getNegotiatedProtocol() + ")");
             if (!r.isRedirectsToHttps())
                 findings.add("Site não redireciona HTTP → HTTPS");
             if (hasHeaderMissing(r, "Strict-Transport-Security"))
@@ -201,7 +199,7 @@ public class ComplianceMappingService {
                 findings.add("Portas abertas: " + String.join(", ", ports));
             }
             CorsResult cors = r.getCorsResult();
-            if (cors != null && cors.isMisconfigured())
+            if (cors != null && (cors.isWildcardOrigin() || cors.isReflectsOrigin()))
                 findings.add("CORS mal configurado — permite origens arbitrárias");
             items.add(item("A.8.20", "Segurança de redes",
                     "As redes e os dispositivos de rede devem ser protegidos, gerenciados e controlados para "
@@ -218,8 +216,11 @@ public class ComplianceMappingService {
                 findings.add("Certificado TLS inválido ou expirado");
             if (tls != null && tls.isWeakProtocol())
                 findings.add("TLS 1.0/1.1 ativo — protocolos obsoletos e inseguros");
-            if (tls != null && tls.isWeakCipher())
-                findings.add("Cipher suites fracas em uso (ex: RC4, DES, 3DES)");
+            if (tls != null && tls.getCipherSuite() != null) {
+                String cs = tls.getCipherSuite().toUpperCase();
+                if (cs.contains("RC4") || cs.contains("DES") || cs.contains("3DES") || cs.contains("NULL"))
+                    findings.add("Cipher suite fraca em uso: " + tls.getCipherSuite());
+            }
             items.add(item("A.8.21", "Segurança de serviços de rede",
                     "Os mecanismos de segurança, níveis de serviço e requisitos de gerenciamento de todos os "
                     + "serviços de rede devem ser identificados, implementados e monitorados.",

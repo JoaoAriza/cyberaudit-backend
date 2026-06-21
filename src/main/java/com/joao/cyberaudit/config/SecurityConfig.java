@@ -1,8 +1,10 @@
 package com.joao.cyberaudit.config;
 
+import com.joao.cyberaudit.security.ApiKeyAuthFilter;
 import com.joao.cyberaudit.security.JwtAuthFilter;
 import com.joao.cyberaudit.security.JwtUtil;
 import com.joao.cyberaudit.security.UserDetailsServiceImpl;
+import com.joao.cyberaudit.service.ApiKeyService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -14,7 +16,6 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -25,11 +26,17 @@ public class SecurityConfig {
 
     private final JwtUtil               jwtUtil;
     private final UserDetailsServiceImpl userDetailsServiceImpl;
+    private final ApiKeyService          apiKeyService;
+    private final PasswordEncoder        passwordEncoder;
 
     public SecurityConfig(JwtUtil jwtUtil,
-                          UserDetailsServiceImpl userDetailsServiceImpl) {
+                          UserDetailsServiceImpl userDetailsServiceImpl,
+                          ApiKeyService apiKeyService,
+                          PasswordEncoder passwordEncoder) {
         this.jwtUtil               = jwtUtil;
         this.userDetailsServiceImpl = userDetailsServiceImpl;
+        this.apiKeyService          = apiKeyService;
+        this.passwordEncoder        = passwordEncoder;
     }
 
     /**
@@ -43,6 +50,11 @@ public class SecurityConfig {
     }
 
     @Bean
+    public ApiKeyAuthFilter apiKeyAuthFilter() {
+        return new ApiKeyAuthFilter(apiKeyService);
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -52,11 +64,10 @@ public class SecurityConfig {
 
                         // ── Públicos sem auth ──────────────────────────────────────
                         .requestMatchers("/auth/**").permitAll()
-                        // /auth/** já cobre setup-status, mas explicitando para clareza
                         .requestMatchers("/badge/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
 
-                        // ── Página de status pública (sem auth) ───────────────────────
+                        // ── Página de status pública (sem auth) ───────────────────
                         .requestMatchers(HttpMethod.GET, "/public/status/**").permitAll()
 
                         // ── Scan passivo e async: público ──────────────────────────
@@ -71,6 +82,12 @@ public class SecurityConfig {
                         // ── Scan autenticado ───────────────────────────────────────
                         .requestMatchers(HttpMethod.GET, "/scan/report/pdf").authenticated()
                         .requestMatchers("/scan/verify-token").authenticated()
+
+                        // ── CI/CD gate — autenticado via X-Api-Key ─────────────────
+                        .requestMatchers(HttpMethod.GET, "/api-keys/ci").authenticated()
+
+                        // ── API Keys CRUD ──────────────────────────────────────────
+                        .requestMatchers("/api-keys/**").authenticated()
 
                         // ── Histórico ──────────────────────────────────────────────
                         .requestMatchers("/history/**").authenticated()
@@ -89,21 +106,18 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
+                // ApiKeyAuthFilter antes do JWT — assim X-Api-Key é processado primeiro
+                .addFilterBefore(apiKeyAuthFilter(), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
-    @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
         provider.setUserDetailsService(userDetailsServiceImpl);
-        provider.setPasswordEncoder(passwordEncoder());
+        provider.setPasswordEncoder(passwordEncoder);
         return provider;
     }
 
