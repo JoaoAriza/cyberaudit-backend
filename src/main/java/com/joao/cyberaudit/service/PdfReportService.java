@@ -5,12 +5,14 @@ import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.*;
 import org.apache.pdfbox.pdmodel.graphics.color.*;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Base64;
 import java.util.stream.Collectors;
 
 @Service
@@ -46,10 +48,45 @@ public class PdfReportService {
     private int   pageNo;
     private PDType1Font bold, normal, mono;
 
+    // Branding per-call (reset a cada generatePdf)
+    private float[]  brandAccent;   // cor de destaque (padrão = ACCENT)
+    private String   brandName;     // nome no header (padrão = "CYBERAUDIT")
+    private byte[]   brandLogoBytes;// logo decodificado (null = sem logo)
+
     // ── Entry point ───────────────────────────────────────────────────────────
 
+    /** Gera PDF sem branding (scan de convidado ou usuário sem conta EMPRESA). */
     public byte[] generatePdf(ScanResult r, String ignored) {
+        return generatePdf(r, ignored, null);
+    }
+
+    /** Gera PDF com branding da conta, se configurado. */
+    public byte[] generatePdf(ScanResult r, String ignored, Account account) {
         try {
+            // ── Inicializa branding ──────────────────────────────────────────
+            brandAccent    = ACCENT;
+            brandName      = "CYBERAUDIT";
+            brandLogoBytes = null;
+
+            if (account != null) {
+                if (account.getBrandColor() != null)
+                    brandAccent = hexToRgb(account.getBrandColor());
+                if (account.getBrandReportName() != null
+                        && !account.getBrandReportName().isBlank())
+                    brandName = account.getBrandReportName().toUpperCase();
+                if (account.getBrandLogoBase64() != null
+                        && !account.getBrandLogoBase64().isBlank()) {
+                    try {
+                        String b64 = account.getBrandLogoBase64();
+                        // Remove prefixo "data:image/...;base64," se presente
+                        if (b64.contains(",")) b64 = b64.substring(b64.indexOf(',') + 1);
+                        brandLogoBytes = Base64.getDecoder().decode(b64);
+                    } catch (Exception ignored2) {
+                        brandLogoBytes = null;
+                    }
+                }
+            }
+
             doc    = new PDDocument();
             bold   = PDType1Font.HELVETICA_BOLD;
             normal = PDType1Font.HELVETICA;
@@ -144,9 +181,11 @@ public class PdfReportService {
     }
 
     private void closePage() throws IOException {
-        // Footer line
         fill(M, 28, CW, 0.5f, BORDER);
-        txt("CyberAudit Security Report  —  Confidential", M, 18, normal, 7, MUTED);
+        String footerLeft = brandName.equals("CYBERAUDIT")
+                ? "CyberAudit Security Report  —  Confidential"
+                : brandName + " Security Report  —  Powered by CyberAudit  —  Confidential";
+        txt(footerLeft, M, 18, normal, 7, MUTED);
         txtR("Page " + pageNo, PW - M, 18, normal, 7, MUTED);
         cs.close();
     }
@@ -162,12 +201,30 @@ public class PdfReportService {
 
     private void coverHeader(ScanResult r) throws IOException {
         fill(0, PH - 85, PW, 85, NAVY);
-        fill(0, PH - 85, 4,  85, ACCENT);
-        txt("CYBERAUDIT", M + 8, PH - 34, bold, 22, ACCENT);
+        fill(0, PH - 85, 4,  85, brandAccent);
+
+        // ── Logo da empresa (canto direito) ──────────────────────────────────
+        if (brandLogoBytes != null) {
+            try {
+                PDImageXObject logo = PDImageXObject.createFromByteArray(doc, brandLogoBytes, "logo");
+                float maxH = 50f;
+                float maxW = 120f;
+                float scale = Math.min(maxW / logo.getWidth(), maxH / logo.getHeight());
+                float lw = logo.getWidth()  * scale;
+                float lh = logo.getHeight() * scale;
+                cs.drawImage(logo, PW - M - lw, PH - 85 + (85 - lh) / 2f, lw, lh);
+            } catch (Exception ignored) { /* logo inválido — ignora */ }
+        }
+
+        // ── Nome e subtítulo ──────────────────────────────────────────────────
+        txt(brandName, M + 8, PH - 34, bold, 22, brandAccent);
         txt("Web Security Report", M + 8, PH - 52, normal, 11, WHITE);
+
+        // ── Data e confidencial ───────────────────────────────────────────────
         String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
-        txtR("Generated: " + date, PW - M, PH - 38, normal, 8, MUTED);
-        txtR("CONFIDENTIAL", PW - M, PH - 52, bold, 7, MUTED);
+        float rightX = brandLogoBytes != null ? PW - M - 130 : PW - M;
+        txtR("Generated: " + date, rightX, PH - 38, normal, 8, MUTED);
+        txtR("CONFIDENTIAL", rightX, PH - 52, bold, 7, MUTED);
         cy = PH - 100;
     }
 
@@ -1017,5 +1074,21 @@ public class PdfReportService {
             case "CRITICAL" -> new float[]{0.98f, 0.91f, 0.91f};
             default         -> BGLIGHT;
         };
+    }
+
+    /**
+     * Converte cor hex (#RRGGBB) para array float[3] no range 0-1.
+     * Retorna ACCENT padrão se o formato for inválido.
+     */
+    private float[] hexToRgb(String hex) {
+        try {
+            String h = hex.startsWith("#") ? hex.substring(1) : hex;
+            int r = Integer.parseInt(h.substring(0, 2), 16);
+            int g = Integer.parseInt(h.substring(2, 4), 16);
+            int b = Integer.parseInt(h.substring(4, 6), 16);
+            return new float[]{ r / 255f, g / 255f, b / 255f };
+        } catch (Exception e) {
+            return ACCENT;
+        }
     }
 }

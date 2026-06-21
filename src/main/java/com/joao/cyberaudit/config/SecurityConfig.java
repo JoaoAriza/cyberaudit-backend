@@ -96,6 +96,9 @@ public class SecurityConfig {
                         // ── Domínios ───────────────────────────────────────────────
                         .requestMatchers("/domains/**").authenticated()
 
+                        // ── Account (branding etc.) ───────────────────────────────
+                        .requestMatchers("/account/**").authenticated()
+
                         // ── Dados pessoais (LGPD) ─────────────────────────────────
                         .requestMatchers("/user/**").authenticated()
 

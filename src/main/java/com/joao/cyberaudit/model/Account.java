@@ -60,4 +60,18 @@ public class Account {
      */
     @Column(unique = true, length = 64)
     private String publicStatusToken;
+
+    // ── Branding (S16 — Branded PDF Reports) ─────────────────────────────────
+
+    /** Logo da empresa em Base64 (PNG/JPG). Exibido no cabeçalho do PDF. */
+    @Column(columnDefinition = "TEXT")
+    private String brandLogoBase64;
+
+    /** Cor primária da marca em hex (ex: "#00D3A3"). Usada no cabeçalho do PDF. */
+    @Column(length = 7)
+    private String brandColor;
+
+    /** Nome a exibir no PDF em vez de "CYBERAUDIT" (ex: "ACMECORP SECURITY"). */
+    @Column(length = 100)
+    private String brandReportName;
 }

@@ -97,7 +97,8 @@ public class ScanController {
         }
 
         ScanResult result = status.getResult();
-        byte[] pdf = pdfReportService.generatePdf(result, reportService.generateReport(result));
+        byte[] pdf = pdfReportService.generatePdf(
+                result, reportService.generateReport(result), currentUser.getAccount());
 
         String filename = "cyberaudit-" + (result.getUrl() != null
                 ? result.getUrl().replaceAll("[^a-zA-Z0-9]", "-") : "report") + ".pdf";
@@ -122,7 +123,8 @@ public class ScanController {
         planLimitService.checkPdfExport(currentUser);
         checkRateLimit(request, currentUser);
         ScanResult result = scanOrchestrator.execute(url, active, currentUser, false);
-        return pdfReportService.generatePdf(result, reportService.generateReport(result));
+        return pdfReportService.generatePdf(
+                result, reportService.generateReport(result), currentUser.getAccount());
     }
 
     // ── Scan assíncrono ───────────────────────────────────────────────────────
