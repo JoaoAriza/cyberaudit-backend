@@ -68,6 +68,15 @@ public class AuthController {
         return ResponseEntity.ok(authService.login(req));
     }
 
+    /**
+     * Auto-registro público: cria conta FREE + usuário OWNER e retorna JWT.
+     * Não requer autenticação prévia.
+     */
+    @PostMapping("/register")
+    public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(req));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<?> me() {
         var auth = SecurityContextHolder.getContext().getAuthentication();

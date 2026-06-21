@@ -118,6 +118,95 @@ public class AuthService {
         return new AuthResponse(token, UserDto.from(user, planLimitService));
     }
 
+    // ── Auto-registro ─────────────────────────────────────────────────────────
+
+    /**
+     * Cria uma nova conta (plan FREE) e seu usuário OWNER via auto-registro público.
+     * Retorna JWT → auto-login imediato.
+     */
+    @Transactional
+    public AuthResponse register(RegisterRequest req) {
+        // Validações básicas
+        if (!req.isTermsAccepted()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "É necessário aceitar os Termos de Uso e Política de Privacidade.");
+        }
+        if (req.getName() == null || req.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome é obrigatório.");
+        }
+        if (req.getEmail() == null || req.getEmail().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório.");
+        }
+        if (req.getPassword() == null || req.getPassword().length() < 8) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Senha deve ter pelo menos 8 caracteres.");
+        }
+
+        String email = req.getEmail().toLowerCase().trim();
+
+        if (userRepository.findByEmail(email).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Email já cadastrado. Faça login ou use outro endereço.");
+        }
+
+        // Cria conta e usuário
+        Account account = buildAccountFromRegister(req);
+        accountRepository.save(account);
+
+        AppUser user = AppUser.builder()
+                .name(req.getName().trim())
+                .email(email)
+                .passwordHash(passwordEncoder.encode(req.getPassword()))
+                .role(Role.OWNER)
+                .active(true)
+                .createdAt(LocalDateTime.now())
+                .account(account)
+                .termsAccepted(true)
+                .termsAcceptedAt(LocalDateTime.now())
+                .build();
+
+        userRepository.save(user);
+        auditService.log(user, AuditAction.LOGIN_SUCCESS, "auto-register");
+
+        String token = jwtUtil.generateToken(user);
+        return new AuthResponse(token, UserDto.from(user, planLimitService));
+    }
+
+    private Account buildAccountFromRegister(RegisterRequest req) {
+        Account.AccountBuilder builder = Account.builder()
+                .type(req.getAccountType() != null ? req.getAccountType() : AccountType.PERSONAL)
+                .plan(Plan.FREE)
+                .country(req.getCountry())
+                .createdAt(LocalDateTime.now());
+
+        if (req.getAccountType() == AccountType.COMPANY) {
+            String rawCnpj = req.getCnpj();
+            if (rawCnpj == null || rawCnpj.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "CNPJ é obrigatório para contas empresa.");
+            }
+            if (!CnpjUtil.isValid(rawCnpj)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "CNPJ inválido: " + rawCnpj);
+            }
+            builder
+                    .displayName(req.getCompanyName() != null
+                            ? req.getCompanyName() : req.getName())
+                    .companyName(req.getCompanyName())
+                    .companyDomain(req.getCompanyDomain())
+                    .companySize(req.getCompanySize())
+                    .cnpj(CnpjUtil.strip(rawCnpj));
+        } else {
+            builder
+                    .displayName(req.getName().trim())
+                    .fullName(req.getName().trim())
+                    .profession(req.getProfession())
+                    .website(req.getWebsite());
+        }
+
+        return builder.build();
+    }
+
     private Account buildAccount(SetupRequest req) {
         Account.AccountBuilder builder = Account.builder()
                 .type(req.getAccountType())
