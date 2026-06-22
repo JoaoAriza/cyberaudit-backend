@@ -431,9 +431,13 @@ public class ScoreService {
 
         // ═══════════════════════════════════════════════════════
         // 17. CVE Correlation — apenas CVSS >= 7.0 (HIGH/CRITICAL)
-        // Penalidade por tier de severidade: 1 desconto por tier,
-        // independente de quantos CVEs existam naquele tier.
-        // Máx: CRITICAL(-15) + HIGH(-10) = -25 pts.
+        // POTENCIAL: a correlação parte da versão reportada no banner. Distros
+        // frequentemente fazem backport da correção sem alterar o número da versão,
+        // então estes achados podem ser falso positivo. Por isso:
+        //  - penalidade reduzida (CRITICAL -10, HIGH -6; máx -16, era -25);
+        //  - severidade da issue rebaixada um tier (não força risco alto por achado
+        //    não confirmado via o severity override);
+        //  - rótulo "[Potencial]" + disclaimer pedindo confirmação da versão exata.
         // ═══════════════════════════════════════════════════════
         if (cveFindings != null && !cveFindings.isEmpty()) {
             int cvePenaltyTotal = 0;
@@ -448,26 +452,28 @@ public class ScoreService {
 
                 // Desconta pontos apenas na primeira ocorrência de cada tier
                 if (chargedTiers.add(tier)) {
-                    int penalty = tier.equals("CRITICAL") ? 15 : 10;
+                    int penalty = tier.equals("CRITICAL") ? 10 : 6;
                     cvePenaltyTotal += penalty;
-                    notes.add("CVE tier " + tier + " detectado: -" + penalty);
+                    notes.add("CVE potencial tier " + tier + " detectado: -" + penalty);
                 }
 
-                String recommendation = "Atualizar " + cve.getAffectedSoftware()
-                        + " para uma versão sem esta vulnerabilidade conhecida."
+                String recommendation = "Confirme a versão exata de " + cve.getAffectedSoftware()
+                        + " antes de agir — a detecção parte da versão reportada no banner e pode ser"
+                        + " falso positivo se o fornecedor/distro aplicou backport da correção sem mudar"
+                        + " o número da versão. Se confirmada, atualize para uma versão não afetada."
                         + (cve.getReferenceUrl() != null ? " Ref: " + cve.getReferenceUrl() : "");
 
                 issues.add(new SecurityIssue(
                         "CVE_" + cve.getCveId().replace("-", "_"),
-                        cve.getCveId() + " — " + cve.getAffectedSoftware()
+                        "[Potencial] " + cve.getCveId() + " — " + cve.getAffectedSoftware()
                                 + " (CVSS " + String.format("%.1f", cve.getCvssScore()) + ")",
-                        cve.getSeverity(),
+                        downgradeOneTier(cve.getSeverity()),
                         cve.getDescription(),
                         recommendation
                 ));
             }
 
-            score -= cvePenaltyTotal;  // máx -25 pts (CRITICAL + HIGH)
+            score -= cvePenaltyTotal;  // máx -16 pts (CRITICAL + HIGH, potencial)
         }
 
         // Path Traversal penalty — CRITICAL: -15 pts por finding, cap -20
@@ -618,6 +624,20 @@ public class ScoreService {
         }
 
         return new ScoreResult(score, risk, notes, issues);
+    }
+
+    /**
+     * Rebaixa a severidade em um tier. Usado para achados POTENCIAIS (ex: CVE por
+     * versão de banner) — evita que um achado não confirmado force o risco global
+     * para cima via o severity override.
+     */
+    private String downgradeOneTier(String severity) {
+        return switch (severity == null ? "" : severity.toUpperCase()) {
+            case "CRITICAL" -> "HIGH";
+            case "HIGH"     -> "MEDIUM";
+            case "MEDIUM"   -> "LOW";
+            default          -> "LOW";
+        };
     }
 
     // ── Header scoring ────────────────────────────────────

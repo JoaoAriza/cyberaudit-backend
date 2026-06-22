@@ -320,7 +320,10 @@ public class ReportService {
                     .sorted((a, b) -> Double.compare(b.getCvssScore(), a.getCvssScore()))
                     .toList();
             if (!highRisk.isEmpty()) {
-                s.append("== CVE Correlation (CVSS >= 7.0) ==\n");
+                s.append("== CVE Correlation (CVSS >= 7.0) — POTENCIAL ==\n");
+                s.append("   Correlação baseada na versão reportada no banner. Pode ser falso\n");
+                s.append("   positivo se houve backport da correção sem mudar o número da versão.\n");
+                s.append("   Confirme a versão exata antes de agir.\n");
                 for (CVEFinding cve : highRisk) {
                     s.append("\n  [").append(cve.getSeverity()).append("] ")
                             .append(cve.getCveId())

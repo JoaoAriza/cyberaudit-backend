@@ -440,7 +440,13 @@ public class PdfReportService {
                 .filter(c -> c.getCvssScore() >= 7.0)
                 .sorted((a, b) -> Double.compare(b.getCvssScore(), a.getCvssScore()))
                 .collect(Collectors.toList());
-        secHead("CVE CORRELATION  —  " + cves.size() + " vulnerability(ies)  (CVSS >= 7.0)");
+        secHead("CVE CORRELATION  —  " + cves.size() + " potential finding(s)  (CVSS >= 7.0)");
+        need(LH * 2);
+        float ny = wrapTxt(s("Potential: correlation based on the reported banner version - may be a "
+                        + "false positive if the vendor backported the fix without changing the "
+                        + "version number. Confirm the exact version before acting."),
+                M + 8, cy, normal, 7, MUTED, CW - 16);
+        cy = ny - 6;
         for (CVEFinding c : cves) cveRow(c);
         cy -= 6;
     }
