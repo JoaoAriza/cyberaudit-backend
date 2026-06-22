@@ -39,8 +39,10 @@ public class HostHeaderFinding {
     private String evidence;
 
     /**
-     * "HIGH" — reflexão direta pode levar a password-reset poisoning,
-     * cache poisoning, open redirect via Host, SSRF via Host.
+     * "HIGH"  — reflexão em Location ou Set-Cookie: vetor explorável
+     *           (password-reset/cache poisoning, domain poisoning).
+     * "LOW"   — reflexão apenas no body: informativo, geralmente benigno
+     *           (canonical/og:url). Não penaliza o score.
      */
     private String severity;
 }

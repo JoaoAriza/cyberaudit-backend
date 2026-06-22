@@ -484,11 +484,18 @@ public class ScoreService {
             notes.add("SSRF (" + ssrfFindings.size() + " param(s)): -" + ssrfPenalty);
         }
 
-        // Host Header Injection penalty — HIGH: -10 pts per finding, cap -15
+        // Host Header Injection penalty — só vetores exploráveis (HIGH/CRITICAL):
+        // Location/Set-Cookie. Reflexão só-no-body é LOW (informativa) e NÃO penaliza —
+        // é FP comum (canonical/og:url), antes custava -10 indevidamente.
         if (hostHeaderFindings != null && !hostHeaderFindings.isEmpty()) {
-            int hhPenalty = Math.min(hostHeaderFindings.size() * 10, 15);
-            score -= hhPenalty;
-            notes.add("Host Header Injection (" + hostHeaderFindings.size() + " header(s)): -" + hhPenalty);
+            long exploitable = hostHeaderFindings.stream()
+                    .filter(h -> "HIGH".equals(h.getSeverity()) || "CRITICAL".equals(h.getSeverity()))
+                    .count();
+            if (exploitable > 0) {
+                int hhPenalty = (int) Math.min(exploitable * 10, 15);
+                score -= hhPenalty;
+                notes.add("Host Header Injection (" + exploitable + " vetor(es) explorável(is)): -" + hhPenalty);
+            }
         }
 
         // Source Map / Debug Exposure penalty

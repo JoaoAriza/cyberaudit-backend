@@ -111,7 +111,12 @@ public class HostHeaderService {
                 }
             }
 
-            // 3. Reflexão no body HTML
+            // 3. Reflexão no body HTML — INFORMATIVO (LOW), não explorável por si só.
+            // Refletir o Host no body é comuníssimo e geralmente benigno: <link rel="canonical">,
+            // og:url, URLs absolutas montadas a partir do Host. Não é, por si, Host Header
+            // Injection. Mantemos como sinal de baixa severidade (não penaliza o score),
+            // útil só como pista para validação manual. Os vetores realmente exploráveis
+            // são Location (cache/redirect poisoning) e Set-Cookie (domain poisoning), acima.
             int idx = lower.indexOf(probe);
             if (idx >= 0) {
                 int start = Math.max(0, idx - 20);
@@ -122,8 +127,8 @@ public class HostHeaderService {
                         .injectedHeader(headerName)
                         .injectedValue(PROBE_VALUE)
                         .reflectionPoint("BODY")
-                        .evidence(snippet)
-                        .severity("HIGH")
+                        .evidence("Reflexão no body (informativo, requer validação manual): " + snippet)
+                        .severity("LOW")
                         .build();
             }
 
