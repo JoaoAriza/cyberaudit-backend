@@ -108,9 +108,27 @@ public class DnsSecurityService {
 
     private void analyzeSpf(String host,
                             DnsSecurityResult.DnsSecurityResultBuilder b) {
+        // SPF é propriedade do domínio organizacional (apex). Ao escanear um
+        // subdomínio (ex: www.site.com), o SPF normalmente está no apex (site.com).
+        // Espelha o fallback do DMARC: tenta o host, depois o domínio pai.
+        if (querySpf(host, b)) return;
+
+        String parent = parentDomain(host);
+        if (parent != null && !parent.equals(host)) {
+            querySpf(parent, b);
+        }
+        // querySpf marca MISSING se nada for encontrado
+    }
+
+    /**
+     * Consulta SPF no domínio dado e popula o builder.
+     * @return true se um registro v=spf1 válido foi encontrado
+     */
+    private boolean querySpf(String domain,
+                             DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup(host, Type.TXT).run();
-            if (records == null) { b.spfPresent(false).spfPolicy("MISSING"); return; }
+            org.xbill.DNS.Record[] records = new Lookup(domain, Type.TXT).run();
+            if (records == null) { b.spfPresent(false).spfPolicy("MISSING"); return false; }
 
             for (org.xbill.DNS.Record r : records) {
                 if (!(r instanceof TXTRecord txt)) continue;
@@ -126,11 +144,13 @@ public class DnsSecurityService {
                 else if (content.contains("~all")) b.spfPolicy("MEDIUM");
                 else if (content.contains("+all") || content.contains("?all")) b.spfPolicy("WEAK");
                 else                               b.spfPolicy("MEDIUM");
-                return;
+                return true;
             }
             b.spfPresent(false).spfPolicy("MISSING");
+            return false;
         } catch (Exception e) {
             b.spfPresent(false).spfPolicy("MISSING");
+            return false;
         }
     }
 
@@ -206,16 +226,29 @@ public class DnsSecurityService {
 
     private void analyzeDkim(String host,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
-        // Cap de 20 threads — lista pode ter 40+ seletores mas DNS é rápido
-        int poolSize = Math.min(DKIM_SELECTORS.size(), 20);
+        // Probe os seletores no host E no apex (mesmo motivo de SPF/MX): DKIM costuma
+        // estar publicado em selector._domainkey.<apex>. Combina os dois domínios em
+        // um único batch paralelo para não dobrar a latência.
+        List<String> domains = new ArrayList<>();
+        domains.add(host);
+        String parent = parentDomain(host);
+        if (parent != null && !parent.equals(host)) domains.add(parent);
+
+        List<String[]> probes = new ArrayList<>();   // {selector, domain}
+        for (String domain : domains)
+            for (String selector : DKIM_SELECTORS)
+                probes.add(new String[]{ selector, domain });
+
+        // Cap de 20 threads — DNS é rápido e os lookups rodam em paralelo
+        int poolSize = Math.min(Math.max(probes.size(), 1), 20);
         ExecutorService pool = Executors.newFixedThreadPool(poolSize);
         try {
-            List<CompletableFuture<String>> futures = DKIM_SELECTORS.stream()
-                    .map(selector -> CompletableFuture.supplyAsync(() -> {
+            List<CompletableFuture<String>> futures = probes.stream()
+                    .map(p -> CompletableFuture.supplyAsync(() -> {
                         try {
                             org.xbill.DNS.Record[] records =
-                                    new Lookup(selector + "._domainkey." + host, Type.TXT).run();
-                            return (records != null && records.length > 0) ? selector : null;
+                                    new Lookup(p[0] + "._domainkey." + p[1], Type.TXT).run();
+                            return (records != null && records.length > 0) ? p[0] : null;
                         } catch (Exception e) { return null; }
                     }, pool))
                     .toList();
@@ -262,11 +295,27 @@ public class DnsSecurityService {
 
     private void analyzeMx(String host,
                            DnsSecurityResult.DnsSecurityResultBuilder b) {
+        // MX normalmente fica no apex. Mesmo fallback de SPF/DMARC para não reportar
+        // "sem MX" (e elevar o risco indevidamente) quando se escaneia um subdomínio.
+        if (queryMx(host, b)) return;
+
+        String parent = parentDomain(host);
+        if (parent != null && !parent.equals(host)) {
+            queryMx(parent, b);
+        }
+    }
+
+    /**
+     * Consulta MX no domínio dado e popula o builder.
+     * @return true se ao menos um registro MX foi encontrado
+     */
+    private boolean queryMx(String domain,
+                            DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup(host, Type.MX).run();
+            org.xbill.DNS.Record[] records = new Lookup(domain, Type.MX).run();
             if (records == null || records.length == 0) {
                 b.mxPresent(false).mxRecords(List.of());
-                return;
+                return false;
             }
             List<String> mx = new ArrayList<>();
             for (org.xbill.DNS.Record r : records) {
@@ -274,8 +323,10 @@ public class DnsSecurityService {
                     mx.add(mxr.getPriority() + " " + mxr.getTarget());
             }
             b.mxPresent(true).mxRecords(mx);
+            return true;
         } catch (Exception e) {
             b.mxPresent(false).mxRecords(List.of());
+            return false;
         }
     }
 
