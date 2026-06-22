@@ -127,6 +127,9 @@ public class ScanOrchestrator {
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh, ScanOrigin origin) {
         String inputUrl = normalizeUrl(url);
+        // Anti-SSRF: bloqueia alvos internos/privados antes de qualquer request
+        // (cobre fetch, port scan e demais módulos, pois todos rodam dentro deste execute()).
+        SsrfGuard.validate(inputUrl);
         String cacheKey = buildCacheKey(inputUrl, active);
 
         if (!refresh) {

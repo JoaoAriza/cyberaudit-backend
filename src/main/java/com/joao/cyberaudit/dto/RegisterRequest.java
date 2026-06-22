@@ -14,8 +14,8 @@ public class RegisterRequest {
     private String email;
     private String password;
 
-    /** PERSONAL (padrão) ou COMPANY. */
-    private AccountType accountType = AccountType.PERSONAL;
+    /** INDIVIDUAL (padrão) ou COMPANY. */
+    private AccountType accountType = AccountType.INDIVIDUAL;
 
     // ── Campos empresa (obrigatórios se accountType == COMPANY) ───────────────
     private String companyName;

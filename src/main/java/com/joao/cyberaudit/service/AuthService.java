@@ -174,7 +174,7 @@ public class AuthService {
 
     private Account buildAccountFromRegister(RegisterRequest req) {
         Account.AccountBuilder builder = Account.builder()
-                .type(req.getAccountType() != null ? req.getAccountType() : AccountType.PERSONAL)
+                .type(req.getAccountType() != null ? req.getAccountType() : AccountType.INDIVIDUAL)
                 .plan(Plan.FREE)
                 .country(req.getCountry())
                 .createdAt(LocalDateTime.now());
