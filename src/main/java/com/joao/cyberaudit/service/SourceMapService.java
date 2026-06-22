@@ -43,23 +43,44 @@ public class SourceMapService {
 
     /**
      * Endpoints de debug/profiler de frameworks web.
+     *
+     * Cada entrada carrega marcadores específicos da ferramenta (lowercase) usados
+     * para confirmar a exposição. Anti-FP: SPAs respondem 200 + index.html para
+     * qualquer rota, então sem um marcador real o achado é descartado.
+     * Os arquivos (.env / config.json) têm markers vazios — validados por formato
+     * em confirmsDebugContent().
      */
-    private static final List<String[]> DEBUG_ENDPOINTS = List.of(
-            new String[]{ "/_profiler",               "Symfony Profiler exposto" },
-            new String[]{ "/_profiler/phpinfo",        "Symfony phpinfo exposto" },
-            new String[]{ "/debug/default/view",       "Yii2 Debug Toolbar exposto" },
-            new String[]{ "/__debugbar/open",          "Laravel Debugbar exposto" },
-            new String[]{ "/console",                  "Console interativo exposto" },
-            new String[]{ "/telescope",                "Laravel Telescope exposto" },
-            new String[]{ "/horizon",                  "Laravel Horizon exposto" },
-            new String[]{ "/phpinfo.php",              "phpinfo() exposto" },
-            new String[]{ "/info.php",                 "phpinfo() exposto" },
-            new String[]{ "/server-info",              "Informação de servidor exposta" },
-            new String[]{ "/.env",                     "Arquivo .env exposto" },
-            new String[]{ "/config.json",              "Arquivo de config JSON exposto" },
-            new String[]{ "/app/config.json",          "Arquivo de config da aplicação exposto" },
-            new String[]{ "/rails/info/properties",    "Rails info exposto" },
-            new String[]{ "/rails/info/routes",        "Rails routes exposto" }
+    private static final List<DebugTarget> DEBUG_ENDPOINTS = List.of(
+            new DebugTarget("/_profiler",            "Symfony Profiler exposto",
+                    List.of("sf-toolbar", "symfony profiler", "sf-profiler", "/_profiler/")),
+            new DebugTarget("/_profiler/phpinfo",    "Symfony phpinfo exposto",
+                    List.of("php version", "phpinfo()", "zend engine")),
+            new DebugTarget("/debug/default/view",   "Yii2 Debug Toolbar exposto",
+                    List.of("yii debugger", "/debug/default/")),
+            new DebugTarget("/__debugbar/open",      "Laravel Debugbar exposto",
+                    List.of("debugbar", "\"__meta\"", "\"php\":")),
+            new DebugTarget("/console",              "Console interativo exposto",
+                    List.of("werkzeug", "h2 console", "interactive console", "wsgi")),
+            new DebugTarget("/telescope",            "Laravel Telescope exposto",
+                    List.of("/vendor/telescope", "window.telescope", "laravel telescope")),
+            new DebugTarget("/horizon",              "Laravel Horizon exposto",
+                    List.of("/vendor/horizon", "window.horizon", "laravel horizon")),
+            new DebugTarget("/phpinfo.php",          "phpinfo() exposto",
+                    List.of("php version", "phpinfo()", "zend engine")),
+            new DebugTarget("/info.php",             "phpinfo() exposto",
+                    List.of("php version", "phpinfo()", "zend engine")),
+            new DebugTarget("/server-info",          "Informação de servidor exposta",
+                    List.of("apache server information", "server settings")),
+            new DebugTarget("/.env",                 "Arquivo .env exposto",
+                    List.of()),
+            new DebugTarget("/config.json",          "Arquivo de config JSON exposto",
+                    List.of()),
+            new DebugTarget("/app/config.json",      "Arquivo de config da aplicação exposto",
+                    List.of()),
+            new DebugTarget("/rails/info/properties","Rails info exposto",
+                    List.of("ruby version", "rails version", "rack version")),
+            new DebugTarget("/rails/info/routes",    "Rails routes exposto",
+                    List.of("controller#action", "uri pattern"))
     );
 
     /**
@@ -111,8 +132,8 @@ public class SourceMapService {
         }
 
         // 4. Debug endpoints de outros frameworks
-        for (String[] entry : DEBUG_ENDPOINTS) {
-            SourceMapFinding f = probeEndpoint(base + entry[0], "DEBUG_ENDPOINT", "MEDIUM", entry[1]);
+        for (DebugTarget entry : DEBUG_ENDPOINTS) {
+            SourceMapFinding f = probeDebugEndpoint(base + entry.path(), entry);
             if (f != null) findings.add(f);
         }
 
@@ -222,9 +243,9 @@ public class SourceMapService {
             String body  = resp.body() == null ? "" : resp.body();
             String lower = body.toLowerCase(Locale.ROOT);
 
-            // Anti-FP: deve ter conteúdo relevante — não apenas uma página 200 genérica
+            // Anti-FP: deve ter conteúdo relevante — não apenas uma página 200 genérica.
+            // Debug endpoints usam probeDebugEndpoint() com markers próprios; aqui só Actuator.
             boolean confirmed = false;
-
             if ("ACTUATOR".equals(type)) {
                 for (String marker : ACTUATOR_MARKERS) {
                     if (lower.contains(marker.toLowerCase(Locale.ROOT))) {
@@ -232,9 +253,6 @@ public class SourceMapService {
                         break;
                     }
                 }
-            } else {
-                // Debug endpoints — 200 com conteúdo > 100 bytes é suficiente
-                confirmed = body.length() > 100;
             }
 
             if (!confirmed) return null;
@@ -248,6 +266,72 @@ public class SourceMapService {
 
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /**
+     * Sonda um endpoint de debug exigindo confirmação por marcador/formato.
+     * Substitui a heurística antiga (body.length() > 100), que gerava falso
+     * positivo em SPAs — qualquer rota respondia 200 + index.html.
+     */
+    private SourceMapFinding probeDebugEndpoint(String url, DebugTarget target) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .GET()
+                    .timeout(Duration.ofSeconds(8))
+                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("Accept", "application/json,text/html,*/*")
+                    .build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+            int status = resp.statusCode();
+            if (status != 200 && status != 206) return null;
+
+            String body  = resp.body() == null ? "" : resp.body();
+            String lower = body.toLowerCase(Locale.ROOT);
+            String contentType = resp.headers()
+                    .firstValue("content-type").orElse("").toLowerCase(Locale.ROOT);
+
+            if (!confirmsDebugContent(target, body, lower, contentType)) return null;
+
+            return SourceMapFinding.builder()
+                    .type("DEBUG_ENDPOINT")
+                    .url(url)
+                    .evidence(target.description() + " (HTTP " + status + ")")
+                    .severity("MEDIUM")
+                    .build();
+
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    /**
+     * Confirma se o corpo corresponde de fato à ferramenta de debug esperada.
+     * - Arquivos (.env / config.json): validação por formato (não-HTML + shape).
+     * - Demais: exige ao menos um marcador específico da ferramenta.
+     * Sem confirmação → provável SPA fallback → descartar (preferimos FN a FP).
+     */
+    private boolean confirmsDebugContent(DebugTarget t, String body, String lower, String contentType) {
+        boolean isHtml = lower.contains("<!doctype html") || lower.contains("<html");
+
+        if (t.path().endsWith(".env")) {
+            if (isHtml || body.isBlank()) return false;          // SPA fallback / vazio
+            return body.contains("=") && (
+                    lower.contains("app_")     || lower.contains("db_")  ||
+                    lower.contains("secret")   || lower.contains("key")  ||
+                    lower.contains("password") || lower.contains("token"));
+        }
+        if (t.path().endsWith("config.json")) {
+            if (isHtml) return false;                            // SPA fallback
+            String trimmed = body.trim();
+            boolean json = contentType.contains("application/json")
+                    || trimmed.startsWith("{") || trimmed.startsWith("[");
+            return json && trimmed.length() > 2;                 // não apenas "{}" / "[]"
+        }
+
+        for (String marker : t.markers()) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -299,4 +383,7 @@ public class SourceMapService {
         if (s == null) return "";
         return s.length() > max ? s.substring(0, max) + "..." : s;
     }
+
+    /** Endpoint de debug com marcadores de confirmação específicos da ferramenta. */
+    private record DebugTarget(String path, String description, List<String> markers) {}
 }
