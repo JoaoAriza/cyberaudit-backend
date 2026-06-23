@@ -62,7 +62,7 @@ public class HttpFetchService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(6)) // era 10s
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Origin", origin)
                     .build();
 
@@ -84,7 +84,7 @@ public class HttpFetchService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(httpUrl))
                     .GET()
                     .timeout(Duration.ofSeconds(5)) // era 8s
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "*/*")
                     .build();
 
@@ -102,7 +102,7 @@ public class HttpFetchService {
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .GET()
                 .timeout(Duration.ofSeconds(8))
-                .header("User-Agent", "CyberAuditScanner/1.0")
+                .header("User-Agent", ScannerHttp.USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .build();
         return clientFollow.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

@@ -230,7 +230,7 @@ public class WafDetectionService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(4))
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
             return client.send(req, HttpResponse.BodyHandlers.discarding());
         } catch (Exception e) { return null; }
@@ -246,7 +246,7 @@ public class WafDetectionService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(4)) // ← era 8
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
             return resp.statusCode();

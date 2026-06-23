@@ -68,7 +68,7 @@ public class HttpMethodService {
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                     .method(method, HttpRequest.BodyPublishers.noBody())
                     .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "CyberAuditScanner/1.0");
+                    .header("User-Agent", ScannerHttp.USER_AGENT);
 
             HttpResponse<Void> resp = client.send(
                     builder.build(), HttpResponse.BodyHandlers.discarding());

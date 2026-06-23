@@ -92,7 +92,7 @@ public class OpenRedirectService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(testUrl))
                     .GET()
                     .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
 
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());

@@ -138,7 +138,7 @@ public class SubdomainTakeoverService {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create("https://" + subdomain))
                     .GET().timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "CyberAuditScanner/1.0").build();
+                    .header("User-Agent", ScannerHttp.USER_AGENT).build();
 
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             String body = resp.body() != null ? resp.body() : "";

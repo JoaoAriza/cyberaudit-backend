@@ -154,7 +154,7 @@ public class TechFingerprintService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(targetUrl))
                     .GET()
                     .timeout(Duration.ofSeconds(10))
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "text/html")
                     .build();
 
@@ -302,7 +302,7 @@ public class TechFingerprintService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .method("HEAD", HttpRequest.BodyPublishers.noBody())
                     .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
             return resp.headers().map();

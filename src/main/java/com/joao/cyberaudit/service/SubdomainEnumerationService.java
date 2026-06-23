@@ -136,7 +136,7 @@ public class SubdomainEnumerationService {
                         .uri(URI.create(scheme + "://" + host + "/"))
                         .method("HEAD", HttpRequest.BodyPublishers.noBody())
                         .timeout(Duration.ofSeconds(PROBE_TIMEOUT))
-                        .header("User-Agent", "CyberAuditScanner/1.0")
+                        .header("User-Agent", ScannerHttp.USER_AGENT)
                         .build();
 
                 HttpResponse<Void> resp = httpClient.send(req,

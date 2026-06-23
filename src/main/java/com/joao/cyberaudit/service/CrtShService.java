@@ -103,7 +103,7 @@ public class CrtShService {
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "CyberAuditScanner/1.0");
+            conn.setRequestProperty("User-Agent", ScannerHttp.USER_AGENT);
             conn.setRequestProperty("Accept",     "application/json");
             conn.setConnectTimeout(CONNECT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
@@ -151,7 +151,7 @@ public class CrtShService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(15))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept",     "application/json")
                     .build();
 

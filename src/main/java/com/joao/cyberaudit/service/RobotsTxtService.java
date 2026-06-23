@@ -78,7 +78,7 @@ public class RobotsTxtService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(8))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return null;

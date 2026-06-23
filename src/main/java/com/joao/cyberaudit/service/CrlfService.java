@@ -120,7 +120,7 @@ public class CrlfService {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(probeUrl))
                         .GET()
                         .timeout(Duration.ofSeconds(8))
-                        .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                        .header("User-Agent", ScannerHttp.USER_AGENT)
                         .header("Accept", "text/html,*/*")
                         .build();
 
@@ -149,7 +149,7 @@ public class CrlfService {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                         .GET()
                         .timeout(Duration.ofSeconds(8))
-                        .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                        .header("User-Agent", ScannerHttp.USER_AGENT)
                         .header("Accept", "text/html,*/*")
                         .build();
 

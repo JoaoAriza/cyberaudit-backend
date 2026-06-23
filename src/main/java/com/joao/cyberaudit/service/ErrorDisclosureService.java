@@ -35,7 +35,7 @@ public class ErrorDisclosureService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(mutated))
                     .GET()
                     .timeout(Duration.ofSeconds(12))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,/;q=0.8")
                     .build();
 

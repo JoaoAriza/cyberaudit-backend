@@ -43,7 +43,7 @@ public class SecurityTxtService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(5))
-                    .header("User-Agent", "CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
 
             HttpResponse<String> resp = client.send(

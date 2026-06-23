@@ -80,7 +80,7 @@ public class ApiDocsExposureService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "text/html,application/json,application/yaml,*/*")
                     .build();
 

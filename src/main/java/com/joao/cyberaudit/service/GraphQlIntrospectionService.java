@@ -90,7 +90,7 @@ public class GraphQlIntrospectionService {
                     .POST(HttpRequest.BodyPublishers.ofString(INTROSPECTION_QUERY))
                     .timeout(Duration.ofSeconds(8))
                     .header("Content-Type", "application/json")
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "application/json")
                     .build();
 
@@ -126,7 +126,7 @@ public class GraphQlIntrospectionService {
             HttpRequest getReq = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "text/html,application/xhtml+xml,*/*")
                     .build();
 

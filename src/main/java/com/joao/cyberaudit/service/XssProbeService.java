@@ -45,7 +45,7 @@ public class XssProbeService {
             HttpRequest req = HttpRequest.newBuilder(URI.create(mutatedUrl))
                     .GET()
                     .timeout(Duration.ofSeconds(12))
-                    .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "text/html,application/xhtml+xml")
                     .build();
 

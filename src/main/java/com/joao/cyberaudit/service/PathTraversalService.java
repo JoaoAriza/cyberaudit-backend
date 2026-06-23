@@ -117,7 +117,7 @@ public class PathTraversalService {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                         .GET()
                         .timeout(Duration.ofSeconds(10))
-                        .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
+                        .header("User-Agent", ScannerHttp.USER_AGENT)
                         .header("Accept", "text/html,text/plain,*/*")
                         .build();
 
