@@ -31,8 +31,10 @@ public class WafDetectionService {
         WafDetectionResult.WafDetectionResultBuilder b = WafDetectionResult.builder();
 
         try {
-            // Passo 1 — headers da resposta normal
-            Map<String, List<String>> normalHeaders = fetchHeaders(targetUrl);
+            // Passo 1 — resposta normal (headers + status como baseline)
+            HttpResponse<Void> baseline = fetchResponse(targetUrl);
+            Map<String, List<String>> normalHeaders = baseline != null ? baseline.headers().map() : null;
+            int baselineCode = baseline != null ? baseline.statusCode() : -1;
             WafMatch headerMatch = detectFromHeaders(normalHeaders);
 
             if (headerMatch != null) {
@@ -62,22 +64,37 @@ public class WafDetectionService {
                 }
             }
 
-            // Passo 3 — probe com payload malicioso
-            String probeUrl  = targetUrl + WAF_PROBES.get(0);
-            int    probeCode = fetchStatusCode(probeUrl);
+            // Passo 3 — diferencial: payload malicioso vs requisições benignas.
+            // Um 403/406 só é sinal de WAF se for ESPECÍFICO do payload. Comparamos com
+            // o baseline (root sem query) e um controle benigno (query string inócua). Se
+            // as benignas também são bloqueadas, o 403 não vem de inspeção de payload —
+            // é auth, bloqueio de UA, geo-block ou erro genérico → NÃO é WAF.
+            int    benignCode = fetchStatusCode(targetUrl + "?q=hello123");
+            String probeUrl   = targetUrl + WAF_PROBES.get(0);
+            int    probeCode  = fetchStatusCode(probeUrl);
+
+            boolean baselineAllowed = isAllowed(baselineCode) && isAllowed(benignCode);
+            boolean payloadBlocked  = probeCode == 403 || probeCode == 406;
 
             String probeResponse;
-            if (probeCode == 403 || probeCode == 406 ||
-                    probeCode == 429 || probeCode == 503) {
+            if (payloadBlocked && baselineAllowed) {
                 probeResponse = "BLOCKED";
                 if (headerMatch == null) {
-                    // Payload bloqueado sem header identificador — WAF sem fingerprint exposto
+                    // Bloqueio específico do payload, sem header identificador —
+                    // WAF sem fingerprint exposto.
                     b.detected(true)
                             .category("WAF")
                             .confidence("MEDIUM")
-                            .evidence("Payload bloqueado com HTTP " + probeCode);
+                            .evidence("Payload malicioso bloqueado (HTTP " + probeCode
+                                    + ") enquanto requisições benignas passaram (HTTP "
+                                    + baselineCode + "/" + benignCode + ")");
                 }
-            } else if (probeCode >= 200 && probeCode < 500) {
+            } else if (probeCode == 403 || probeCode == 406
+                    || probeCode == 429 || probeCode == 503) {
+                // Bloqueio/erro não específico do payload (baseline também afetado ou
+                // status ambíguo de rate-limit/indisponibilidade) → não é evidência de WAF.
+                probeResponse = "INCONCLUSIVE";
+            } else if (probeCode >= 200 && probeCode < 400) {
                 probeResponse = "PASSED";
             } else {
                 probeResponse = "UNKNOWN";
@@ -208,16 +225,20 @@ public class WafDetectionService {
         return null;
     }
 
-    private Map<String, List<String>> fetchHeaders(String url) {
+    private HttpResponse<Void> fetchResponse(String url) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
-                    .timeout(Duration.ofSeconds(4)) // ← era 8
+                    .timeout(Duration.ofSeconds(4))
                     .header("User-Agent", "Mozilla/5.0 CyberAuditScanner/1.0")
                     .build();
-            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
-            return resp.headers().map();
+            return client.send(req, HttpResponse.BodyHandlers.discarding());
         } catch (Exception e) { return null; }
+    }
+
+    /** Considera "permitido" status 2xx/3xx — usado para o controle benigno do diferencial. */
+    private boolean isAllowed(int code) {
+        return code >= 200 && code < 400;
     }
 
     private int fetchStatusCode(String url) {
