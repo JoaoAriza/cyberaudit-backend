@@ -7,12 +7,15 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class HttpFetchService {
@@ -29,15 +32,24 @@ public class HttpFetchService {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
+    // CSP entregue via <meta http-equiv="Content-Security-Policy" content="...">.
+    // Dois padrões para cobrir as duas ordens de atributos (http-equiv antes ou depois de content).
+    // O delimitador do content é capturado em group(1) e fechado por backreference \1 — assim
+    // o valor (group(2)) pode conter o outro tipo de aspas, que é o caso na CSP ('self', 'none').
+    private static final Pattern META_CSP = Pattern.compile(
+            "<meta[^>]+http-equiv\\s*=\\s*[\"']content-security-policy[\"'][^>]*content\\s*=\\s*([\"'])(.*?)\\1",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern META_CSP_CONTENT_FIRST = Pattern.compile(
+            "<meta[^>]+content\\s*=\\s*([\"'])(.*?)\\1[^>]*http-equiv\\s*=\\s*[\"']content-security-policy[\"']",
+            Pattern.CASE_INSENSITIVE);
+
     public HttpFetchResult fetchHeaders(String url) {
         try {
             URI uri = URI.create(url);
-            HttpResponse<Void> headResp = sendHead(uri);
-
-            if (headResp.statusCode() == 405 || headResp.statusCode() == 501) {
-                return buildResult(sendGet(uri));
-            }
-            return buildResult(headResp);
+            // GET (não HEAD): muitos servidores definem headers de segurança e Set-Cookie
+            // apenas no GET, e a CSP pode ser entregue via <meta http-equiv> no HTML —
+            // ambos invisíveis a um HEAD. O corpo é lido para extrair a meta CSP.
+            return buildResult(sendGet(uri));
 
         } catch (Exception e) {
             return new HttpFetchResult(0, url, Map.of(), List.of(),
@@ -86,26 +98,17 @@ public class HttpFetchService {
         }
     }
 
-    private HttpResponse<Void> sendHead(URI uri) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .method("HEAD", HttpRequest.BodyPublishers.noBody())
-                .timeout(Duration.ofSeconds(6)) // era 10s
-                .header("User-Agent", "CyberAuditScanner/1.0")
-                .build();
-        return clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
-    }
-
-    private HttpResponse<Void> sendGet(URI uri) throws Exception {
+    private HttpResponse<String> sendGet(URI uri) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .GET()
-                .timeout(Duration.ofSeconds(8)) // era 12s
+                .timeout(Duration.ofSeconds(8))
                 .header("User-Agent", "CyberAuditScanner/1.0")
-                .header("Accept", "*/*")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .build();
-        return clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
+        return clientFollow.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
-    private HttpFetchResult buildResult(HttpResponse<Void> resp) {
+    private HttpFetchResult buildResult(HttpResponse<String> resp) {
         int status = resp.statusCode();
         String finalUrl = resp.uri().toString();
 
@@ -115,10 +118,31 @@ public class HttpFetchService {
             normalized.put(k.toLowerCase(Locale.ROOT), v.get(0));
         });
 
+        // CSP via <meta http-equiv>: se não veio como header, extrai do HTML. É o
+        // equivalente funcional do header para a maioria das diretivas (default-src,
+        // script-src, etc.) e SPAs frequentemente entregam a CSP assim. Sem isto, a CSP
+        // era marcada como MISSING (falso positivo) mesmo quando presente na página.
+        if (!normalized.containsKey("content-security-policy")) {
+            String metaCsp = extractMetaCsp(resp.body());
+            if (metaCsp != null && !metaCsp.isBlank()) {
+                normalized.put("content-security-policy", metaCsp.trim());
+            }
+        }
+
         List<String> rawSetCookies = resp.headers().allValues("set-cookie");
         if (rawSetCookies == null) rawSetCookies = Collections.emptyList();
 
         return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null);
+    }
+
+    /** Extrai a CSP de uma tag &lt;meta http-equiv="Content-Security-Policy"&gt; no HTML. */
+    private String extractMetaCsp(String body) {
+        if (body == null || body.isBlank()) return null;
+        Matcher m = META_CSP.matcher(body);
+        if (m.find()) return m.group(2);
+        m = META_CSP_CONTENT_FIRST.matcher(body);
+        if (m.find()) return m.group(2);
+        return null;
     }
 
     private URI resolveRedirect(URI base, String location) {
