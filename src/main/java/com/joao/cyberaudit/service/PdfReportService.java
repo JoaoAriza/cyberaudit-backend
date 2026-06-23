@@ -110,6 +110,8 @@ public class PdfReportService {
     }
 
     private void renderSections(ScanResult r) throws IOException {
+        // 0. Aviso de resultado parcial (módulos que não concluíram)
+        partialResultSection(r);
         // 1. Issues (critical first)
         if (hasIssues(r)) issuesSection(r);
         // 2. CVE dedicated
@@ -592,6 +594,28 @@ public class PdfReportService {
             kv("SameSite", cf.getSameSite());
             if (cf.getIssues() != null && !cf.getIssues().isBlank()) kv("Issues", cf.getIssues());
             cy -= 5;
+        }
+        cy -= 6;
+    }
+
+    private void partialResultSection(ScanResult r) throws IOException {
+        if (r.getModuleStatus() == null) return;
+        List<String> degraded = r.getModuleStatus().entrySet().stream()
+                .filter(e -> "TIMEOUT".equals(e.getValue()) || "ERROR".equals(e.getValue()))
+                .map(e -> e.getKey() + " (" + e.getValue() + ")")
+                .collect(Collectors.toList());
+        if (degraded.isEmpty()) return;
+
+        secHead("PARTIAL RESULT  —  " + degraded.size() + " check(s) not completed");
+        need(LH * 2);
+        float y = wrapTxt(s("These checks did not complete (timeout/error). Absence of findings "
+                + "in these modules does NOT mean absence of risk."),
+                M + 8, cy, normal, 8, MUTED, CW - 16);
+        cy = y - LH;
+        for (String d : degraded) {
+            need(LH);
+            txt(s("- " + d), M + 14, cy, normal, 9, TEXT);
+            cy -= LH;
         }
         cy -= 6;
     }

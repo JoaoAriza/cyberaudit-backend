@@ -201,6 +201,8 @@ public class ScanOrchestrator {
         ExecutorService passivePool = Executors.newFixedThreadPool(8);
         // Status por módulo — distingue "verificado" de "não concluído" (ver moduleState).
         Map<String, String> moduleStatus = new LinkedHashMap<>();
+        // Fetch principal já rodou na fase 1: erro aqui = headers não verificados (vide ScoreService).
+        moduleStatus.put("HTTP fetch / headers", fetch.getError() != null ? "ERROR" : "OK");
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
                             () -> robotsTxtService.findSensitivePaths(target), passivePool)

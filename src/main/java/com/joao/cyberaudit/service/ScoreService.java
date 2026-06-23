@@ -121,8 +121,18 @@ public class ScoreService {
             if (status == null) continue;
 
             if (header.equalsIgnoreCase("error")) {
-                score -= 15;
-                notes.add("Erro ao buscar headers: -15");
+                // Fetch falhou: NENHUM header de segurança pôde ser verificado. Antes isto
+                // custava só -15 e pulava todas as penalidades de header (HSTS/CSP/etc, ~-38) —
+                // então um timeout dava nota MELHOR que a análise real de um site inseguro.
+                // Cobramos uma penalidade representativa de "headers não verificados" e
+                // registramos como issue, sem fingir que as proteções estão presentes.
+                score -= 35;
+                notes.add("Headers de segurança não verificados (falha ao buscar a página): -35");
+                issues.add(new SecurityIssue("HEADERS_UNVERIFIED",
+                        "Headers de segurança não verificados", "MEDIUM",
+                        "A página não respondeu, então nenhum header de segurança pôde ser avaliado. "
+                        + "O resultado é parcial e não confirma a presença de proteções.",
+                        "Verifique se o site está acessível (DNS, firewall, disponibilidade) e refaça o scan."));
                 continue;
             }
 
