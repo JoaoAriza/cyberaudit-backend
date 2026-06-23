@@ -6,6 +6,7 @@ import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -198,6 +199,8 @@ public class ScanOrchestrator {
 
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
         ExecutorService passivePool = Executors.newFixedThreadPool(8);
+        // Status por módulo — distingue "verificado" de "não concluído" (ver moduleState).
+        Map<String, String> moduleStatus = new LinkedHashMap<>();
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
                             () -> robotsTxtService.findSensitivePaths(target), passivePool)
@@ -246,6 +249,21 @@ public class ScanOrchestrator {
 
             fingerprintPool.shutdownNow();
 
+            // ── Status dos módulos passivos ───────────────────────────────────
+            moduleStatus.put("robots.txt",          moduleState(robotsFuture));
+            moduleStatus.put("security.txt",        moduleState(secTxtFuture));
+            moduleStatus.put("DNS / email auth",    moduleState(dnsFuture));
+            moduleStatus.put("HTTP methods",        moduleState(methodsFuture));
+            moduleStatus.put("Directory listing",   moduleState(dirListFuture));
+            moduleStatus.put("Subdomain takeover",  moduleState(takeoverFuture));
+            moduleStatus.put("Source maps / debug", moduleState(sourceMapFuture));
+            moduleStatus.put("Host header",         moduleState(hostHeaderFuture));
+            moduleStatus.put("API docs",            moduleState(apiDocsFuture));
+            moduleStatus.put("GraphQL",             moduleState(graphQlFuture));
+            moduleStatus.put("Cert Transparency",   moduleState(certTransFuture));
+            moduleStatus.put("Tech fingerprint",    moduleState(fingerprintFuture));
+            moduleStatus.put("CVE correlation",     moduleState(cveFuture));
+
             List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
             List<DirectoryListingFinding> directoryListingFindings = dirListFuture.getNow(List.of());
@@ -272,6 +290,8 @@ public class ScanOrchestrator {
                     cveFindings, apiDocsExposure, graphQlIntrospection, jwtSecurity,
                     List.of(), List.of(), hostHeaderFindings, sourceMapFindings, List.of()
             );
+
+            appendDegradedNote(passiveScore, moduleStatus);
 
             // ── Monta resultado passivo ────────────────────────────────────────
             ScanResult passiveResult = ScanResult.builder()
@@ -306,6 +326,7 @@ public class ScanOrchestrator {
                                     serverVersionExposed, dangerousHttpMethods, List.of(),
                                     dnsSecurityResult, null, techFingerprint, List.of()),
                             previousScan))                             // ← change detection
+                    .moduleStatus(moduleStatus)
                     .score(passiveScore)
                     .build();
 
@@ -381,6 +402,24 @@ public class ScanOrchestrator {
 
             activePool.shutdownNow();
 
+            // ── Status dos módulos ativos ─────────────────────────────────────
+            // Probes dependentes de superfície de input (query params): SKIPPED quando ausentes.
+            moduleStatus.put("CORS",                moduleState(corsFuture));
+            moduleStatus.put("Sensitive files",     moduleState(filesFuture));
+            moduleStatus.put("WAF",                 moduleState(wafFuture));
+            moduleStatus.put("Open redirect",       moduleState(redirectFuture));
+            moduleStatus.put("CRLF injection",      moduleState(crlfFuture));
+            moduleStatus.put("Port scan",
+                    (host != null && !host.isBlank()) ? moduleState(portFuture) : "SKIPPED");
+            moduleStatus.put("Reflected XSS",
+                    inputSurfaceDetected ? moduleState(xssFuture) : "SKIPPED");
+            moduleStatus.put("DB error disclosure",
+                    inputSurfaceDetected ? moduleState(dbFuture) : "SKIPPED");
+            moduleStatus.put("Path traversal",
+                    inputSurfaceDetected ? moduleState(pathTraversalFuture) : "SKIPPED");
+            moduleStatus.put("SSRF",
+                    inputSurfaceDetected ? moduleState(ssrfFuture) : "SKIPPED");
+
             CorsResult                 corsResult            = corsFuture.getNow(null);
             List<SensitiveFileFinding> sensitiveFiles        = filesFuture.getNow(List.of());
             WafDetectionResult         wafDetectionResult    = wafFuture.getNow(null);
@@ -404,6 +443,8 @@ public class ScanOrchestrator {
                     apiDocsExposure, graphQlIntrospection, jwtSecurity,
                     pathTraversal, ssrfFindings, hostHeaderFindings, sourceMapFindings, crlfFindings
             );
+
+            appendDegradedNote(score, moduleStatus);
 
             ScanResult result = ScanResult.builder()
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
@@ -439,6 +480,7 @@ public class ScanOrchestrator {
                                     serverVersionExposed, dangerousHttpMethods, openPorts,
                                     dnsSecurityResult, wafDetectionResult, techFingerprint, sensitiveFiles),
                             previousScan))
+                    .moduleStatus(moduleStatus)
                     .score(score)
                     .build();
 
@@ -486,6 +528,32 @@ public class ScanOrchestrator {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Estado de um módulo: completou dentro do orçamento da fase (sucesso ou fallback
+     * via exceptionally) = "OK"; não completou a tempo = "TIMEOUT" (não verificado —
+     * não tratar como "seguro"). SKIPPED é atribuído à parte para probes condicionais.
+     */
+    private static String moduleState(CompletableFuture<?> f) {
+        return f.isDone() ? "OK" : "TIMEOUT";
+    }
+
+    /**
+     * Anexa uma nota de transparência ao score quando algum módulo não concluiu.
+     * Não penaliza pontos — não é justo descontar pela nossa própria falha de coleta —
+     * mas deixa explícito que o resultado é parcial.
+     */
+    private static void appendDegradedNote(ScoreResult score, Map<String, String> moduleStatus) {
+        if (score == null || score.getNotes() == null) return;
+        long degraded = moduleStatus.values().stream()
+                .filter(s -> "TIMEOUT".equals(s) || "ERROR".equals(s))
+                .count();
+        if (degraded > 0) {
+            score.getNotes().add("⚠ Resultado parcial: " + degraded + " verificação(ões) "
+                    + "não concluída(s) (timeout). A ausência de achados nesses módulos NÃO "
+                    + "significa ausência de risco.");
+        }
+    }
 
     private String normalizeUrl(String url) {
         String u = url.trim();

@@ -60,6 +60,13 @@ public class ScanResult {
 
     private ScoreResult score;
 
+    /**
+     * Status de execução por módulo: nome → "OK" | "TIMEOUT" | "SKIPPED".
+     * Distingue "verificado e sem achado" de "não conseguiu verificar" — sem isto,
+     * um módulo que deu timeout parecia "seguro" (ausência de achado tratada como OK).
+     */
+    private Map<String, String> moduleStatus;
+
     /** Mapeamento de conformidade LGPD / ISO 27001:2022 — computado pelo orchestrator */
     private ComplianceReport compliance;
 }

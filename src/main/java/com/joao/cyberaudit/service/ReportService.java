@@ -22,6 +22,20 @@ public class ReportService {
                 .append("/100 (").append(r.getScore().getRiskLevel()).append(")\n\n");
         s.append("Scan type:    ").append(r.isActiveMode() ? "ACTIVE" : "PASSIVE").append("\n");
 
+        // ── Resultado parcial (módulos que não concluíram) ─
+        if (r.getModuleStatus() != null) {
+            List<String> degraded = r.getModuleStatus().entrySet().stream()
+                    .filter(e -> "TIMEOUT".equals(e.getValue()) || "ERROR".equals(e.getValue()))
+                    .map(e -> e.getKey() + " (" + e.getValue() + ")")
+                    .toList();
+            if (!degraded.isEmpty()) {
+                s.append("\n== PARTIAL RESULT — checks not completed ==\n");
+                s.append("Estas verificações não concluíram (timeout/erro). A ausência de\n");
+                s.append("achados nesses módulos NÃO significa ausência de risco:\n");
+                for (String d : degraded) s.append("  - ").append(d).append("\n");
+            }
+        }
+        s.append("\n");
 
         // ── Transport Security ─────────────────────────────
         s.append("== Transport Security ==\n");
