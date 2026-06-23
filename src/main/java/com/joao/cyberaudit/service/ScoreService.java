@@ -226,7 +226,11 @@ public class ScoreService {
         // ═══════════════════════════════════════════
         if (openPorts != null && !openPorts.isEmpty() && activeMode) {
             int portPenalty = 0;
+            int riskyCount  = 0;
             for (PortFinding p : openPorts) {
+                // 80/443 abertos são esperados (servir HTTP/HTTPS) — não penalizar.
+                // "HTTP não redireciona p/ HTTPS" já é tratado na seção 3, sem double-dip.
+                if (p.getPort() == 80 || p.getPort() == 443) continue;
                 int penalty = switch (p.getSeverity()) {
                     case "CRITICAL" -> 15;
                     case "HIGH" -> 10;
@@ -234,12 +238,14 @@ public class ScoreService {
                     default -> 2;
                 };
                 portPenalty += penalty;
+                riskyCount++;
             }
-            portPenalty = Math.min(portPenalty, 30);
-            score -= portPenalty;
-            notes.add("Portas de risco abertas (" + openPorts.size() + "): -" + portPenalty);
-
-            score = Math.max(0, score);
+            if (portPenalty > 0) {
+                portPenalty = Math.min(portPenalty, 30);
+                score -= portPenalty;
+                notes.add("Portas de risco abertas (" + riskyCount + "): -" + portPenalty);
+                score = Math.max(0, score);
+            }
         }
 
         // ═══════════════════════════════════════════
