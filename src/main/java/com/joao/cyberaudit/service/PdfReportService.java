@@ -474,7 +474,9 @@ public class PdfReportService {
     }
 
     private void headersSection(ScanResult r) throws IOException {
-        secHead("SECURITY HEADERS");
+        secHead(r.getAnalyzedHost() != null && !r.getAnalyzedHost().isBlank()
+                ? "SECURITY HEADERS  —  " + r.getAnalyzedHost()
+                : "SECURITY HEADERS");
         kv("Server version exposed", o(r.isServerVersionExposed()), r.isServerVersionExposed() ? CRIT : OK);
         for (Map.Entry<String, String> e : r.getHeaders().entrySet()) {
             kv(e.getKey(), e.getValue());

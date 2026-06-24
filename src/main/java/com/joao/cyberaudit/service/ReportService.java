@@ -57,7 +57,10 @@ public class ReportService {
         s.append("\n");
 
         // ── Security Headers ───────────────────────────────
-        s.append("== Security Headers ==\n");
+        s.append("== Security Headers");
+        if (r.getAnalyzedHost() != null && !r.getAnalyzedHost().isBlank())
+            s.append(" (host: ").append(r.getAnalyzedHost()).append(")");
+        s.append(" ==\n");
         if (r.getHeaders() != null && !r.getHeaders().isEmpty()) {
             r.getHeaders().forEach((k, v) ->
                     s.append(String.format("  %-35s %s%n", k, v)));

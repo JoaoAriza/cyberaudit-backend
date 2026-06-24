@@ -175,6 +175,10 @@ public class ScanOrchestrator {
         }
 
         String  target               = fetch.getFinalUrl() != null ? fetch.getFinalUrl() : analysisUrl;
+        // Host de onde os headers vieram de fato (após redirects) — explicitado no resultado
+        // para deixar claro "de qual host são estes headers" (vs. subdomínios de API).
+        String  analyzedHost         = extractHostSafe(target);
+        if (analyzedHost == null) analyzedHost = host;
         boolean inputSurfaceDetected = errorDisclosureService.hasQueryParams(target);
         List<CookieFinding> cookieIssues = cookieSecurityService.analyze(fetch.getRawSetCookies());
         // JWT analysis: passivo, usa cookies ja obtidos — sem request adicional
@@ -298,6 +302,7 @@ public class ScanOrchestrator {
             // ── Monta resultado passivo ────────────────────────────────────────
             ScanResult passiveResult = ScanResult.builder()
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
+                    .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
                     .redirectsToHttps(redirectsToHttps)
                     .sslInfo(sslInfo).tlsDetails(tlsDetails)
@@ -450,6 +455,7 @@ public class ScanOrchestrator {
 
             ScanResult result = ScanResult.builder()
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
+                    .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
                     .redirectsToHttps(redirectsToHttps)
                     .sslInfo(sslInfo).tlsDetails(tlsDetails)

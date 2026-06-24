@@ -17,6 +17,13 @@ public class ScanResult {
     private String finalUrl;
     private int    httpStatus;
 
+    /**
+     * Host cujos headers de resposta foram efetivamente analisados (após redirects).
+     * Explicita "de qual host são estes headers" — evita confundir com headers de
+     * subdomínios de API (ex: server.exemplo.com) que o usuário pode ver no DevTools.
+     */
+    private String analyzedHost;
+
     private boolean    redirectsToHttps;
     private SSLInfo    sslInfo;
     private TlsDetails tlsDetails;
