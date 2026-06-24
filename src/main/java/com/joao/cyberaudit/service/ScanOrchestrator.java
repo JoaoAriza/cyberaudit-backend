@@ -52,6 +52,7 @@ public class ScanOrchestrator {
     private final AuditService                   auditService;
     private final DegradationNotificationService degradationNotificationService;
     private final ComplianceMappingService        complianceMappingService;
+    private final RelatedHostsHeaderService       relatedHostsHeaderService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -81,7 +82,8 @@ public class ScanOrchestrator {
             CrlfService crlfService,
             AuditService auditService,
             DegradationNotificationService degradationNotificationService,
-            ComplianceMappingService complianceMappingService) {
+            ComplianceMappingService complianceMappingService,
+            RelatedHostsHeaderService relatedHostsHeaderService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -120,6 +122,7 @@ public class ScanOrchestrator {
         this.auditService                       = auditService;
         this.degradationNotificationService     = degradationNotificationService;
         this.complianceMappingService           = complianceMappingService;
+        this.relatedHostsHeaderService          = relatedHostsHeaderService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -237,6 +240,9 @@ public class ScanOrchestrator {
             var graphQlFuture  = CompletableFuture.supplyAsync(
                             () -> graphQlIntrospectionService.scan(target), passivePool)
                     .exceptionally(e -> List.of());
+            var relatedHostsFuture = CompletableFuture.supplyAsync(
+                            () -> relatedHostsHeaderService.analyze(host), passivePool)
+                    .exceptionally(e -> List.<RelatedHostHeaders>of());
 
             // CT encadeado após DNS para garantir que recebe o resultado correto
             var certTransFuture = dnsFuture
@@ -249,7 +255,8 @@ public class ScanOrchestrator {
                 CompletableFuture.allOf(
                         robotsFuture, secTxtFuture, dnsFuture, methodsFuture, dirListFuture,
                         hostHeaderFuture, sourceMapFuture,
-                        takeoverFuture, certTransFuture, cveFuture, apiDocsFuture, graphQlFuture
+                        takeoverFuture, certTransFuture, cveFuture, apiDocsFuture, graphQlFuture,
+                        relatedHostsFuture
                 ).get(120, TimeUnit.SECONDS);
             } catch (Exception ignored) {}
 
@@ -269,6 +276,7 @@ public class ScanOrchestrator {
             moduleStatus.put("Cert Transparency",   moduleState(certTransFuture));
             moduleStatus.put("Tech fingerprint",    moduleState(fingerprintFuture));
             moduleStatus.put("CVE correlation",     moduleState(cveFuture));
+            moduleStatus.put("Related hosts headers", moduleState(relatedHostsFuture));
 
             List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
@@ -282,6 +290,7 @@ public class ScanOrchestrator {
             List<ApiDocsExposureFinding>         apiDocsExposure      = apiDocsFuture.getNow(List.of());
             List<GraphQlIntrospectionFinding>    graphQlIntrospection = graphQlFuture.getNow(List.of());
             List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
+            List<RelatedHostHeaders>      relatedHostHeaders       = relatedHostsFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
             boolean secTxtFound   = securityTxt != null && securityTxt.found();
@@ -334,6 +343,7 @@ public class ScanOrchestrator {
                                     dnsSecurityResult, null, techFingerprint, List.of()),
                             previousScan))                             // ← change detection
                     .moduleStatus(moduleStatus)
+                    .relatedHostHeaders(relatedHostHeaders)
                     .score(passiveScore)
                     .build();
 
@@ -489,6 +499,7 @@ public class ScanOrchestrator {
                                     dnsSecurityResult, wafDetectionResult, techFingerprint, sensitiveFiles),
                             previousScan))
                     .moduleStatus(moduleStatus)
+                    .relatedHostHeaders(relatedHostHeaders)
                     .score(score)
                     .build();
 

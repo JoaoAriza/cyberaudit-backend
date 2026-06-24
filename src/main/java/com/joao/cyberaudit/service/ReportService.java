@@ -67,6 +67,19 @@ public class ReportService {
         }
         s.append("Server version exposed: ").append(r.isServerVersionExposed()).append("\n\n");
 
+        // ── Related Hosts (informativo, fora do score) ─────
+        if (r.getRelatedHostHeaders() != null && !r.getRelatedHostHeaders().isEmpty()) {
+            s.append("== Related Hosts — Security Headers (informativo, fora do score) ==\n");
+            for (RelatedHostHeaders rh : r.getRelatedHostHeaders()) {
+                s.append("  ").append(rh.getHost())
+                        .append("  — ").append(rh.getMissingCount()).append(" header(s) ausente(s)\n");
+                if (rh.getHeaders() != null)
+                    rh.getHeaders().forEach((k, v) ->
+                            s.append(String.format("      %-33s %s%n", k, v)));
+            }
+            s.append("\n");
+        }
+
         // ── CORS ──────────────────────────────────────────
         if (r.getCorsResult() != null && r.getCorsResult().isTested()) {
             CorsResult c = r.getCorsResult();

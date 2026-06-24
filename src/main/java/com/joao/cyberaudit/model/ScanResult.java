@@ -74,6 +74,12 @@ public class ScanResult {
      */
     private Map<String, String> moduleStatus;
 
+    /**
+     * Headers de segurança de hosts relacionados (api., server., www. ...) — informativo,
+     * não entra no score. Esclarece que outros hosts do site podem ter config diferente.
+     */
+    private List<RelatedHostHeaders> relatedHostHeaders;
+
     /** Mapeamento de conformidade LGPD / ISO 27001:2022 — computado pelo orchestrator */
     private ComplianceReport compliance;
 }

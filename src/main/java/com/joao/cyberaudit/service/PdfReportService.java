@@ -121,6 +121,8 @@ public class PdfReportService {
         transportSection(r);
         // 4. Headers
         if (r.getHeaders() != null && !r.getHeaders().isEmpty()) headersSection(r);
+        // 4b. Related hosts headers (informational)
+        if (r.getRelatedHostHeaders() != null && !r.getRelatedHostHeaders().isEmpty()) relatedHostsSection(r);
         // 5. Technology
         if (r.getTechFingerprint() != null) techSection(r);
         // 6. DNS
@@ -480,6 +482,21 @@ public class PdfReportService {
         kv("Server version exposed", o(r.isServerVersionExposed()), r.isServerVersionExposed() ? CRIT : OK);
         for (Map.Entry<String, String> e : r.getHeaders().entrySet()) {
             kv(e.getKey(), e.getValue());
+        }
+        cy -= 6;
+    }
+
+    private void relatedHostsSection(ScanResult r) throws IOException {
+        secHead("RELATED HOSTS  —  security headers (informational, not scored)");
+        for (RelatedHostHeaders rh : r.getRelatedHostHeaders()) {
+            need(LH + 4);
+            txt(s(rh.getHost()), M + 8, cy, bold, 9, TEXT);
+            txtR(rh.getMissingCount() + " missing", PW - M - 8, cy, normal, 8, MUTED);
+            cy -= LH + 2;
+            if (rh.getHeaders() != null)
+                for (Map.Entry<String, String> e : rh.getHeaders().entrySet())
+                    kv(e.getKey(), e.getValue());
+            cy -= 4;
         }
         cy -= 6;
     }
