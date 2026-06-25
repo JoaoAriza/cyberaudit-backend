@@ -79,6 +79,12 @@ public class DnsSecurityService {
             "(?:^|;)\\s*p=([^;\\s]+)", Pattern.CASE_INSENSITIVE
     );
 
+    private final PublicSuffixService publicSuffixService;
+
+    public DnsSecurityService(PublicSuffixService publicSuffixService) {
+        this.publicSuffixService = publicSuffixService;
+    }
+
     public DnsSecurityResult scan(String host) {
         DnsSecurityResult.DnsSecurityResultBuilder b = DnsSecurityResult.builder();
         ExecutorService pool = Executors.newFixedThreadPool(5);
@@ -113,7 +119,7 @@ public class DnsSecurityService {
         // Espelha o fallback do DMARC: tenta o host, depois o domínio pai.
         if (querySpf(host, b)) return;
 
-        String parent = parentDomain(host);
+        String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
             querySpf(parent, b);
         }
@@ -162,7 +168,7 @@ public class DnsSecurityService {
         // We mirror this: try the host first, then the parent domain.
         if (queryDmarc(host, b)) return;
 
-        String parent = parentDomain(host);
+        String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
             queryDmarc(parent, b);
         }
@@ -207,21 +213,6 @@ public class DnsSecurityService {
         return false;
     }
 
-    /**
-     * Returns the parent (organisational) domain for a subdomain.
-     * "app.exemplo.com.br" → "exemplo.com.br"
-     * "exemplo.com.br"     → null (already apex-ish; don't recurse)
-     * Handles up to one level of stripping. Good enough for DMARC fallback.
-     */
-    private String parentDomain(String host) {
-        if (host == null) return null;
-        int dot = host.indexOf('.');
-        if (dot < 0) return null;
-        String candidate = host.substring(dot + 1);
-        // Only return if candidate still looks like a real domain (has at least one more dot)
-        return candidate.contains(".") ? candidate : null;
-    }
-
     // ── DKIM — seletores testados em paralelo ─────────────────────────────────
 
     private void analyzeDkim(String host,
@@ -231,7 +222,7 @@ public class DnsSecurityService {
         // um único batch paralelo para não dobrar a latência.
         List<String> domains = new ArrayList<>();
         domains.add(host);
-        String parent = parentDomain(host);
+        String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) domains.add(parent);
 
         List<String[]> probes = new ArrayList<>();   // {selector, domain}
@@ -299,7 +290,7 @@ public class DnsSecurityService {
         // "sem MX" (e elevar o risco indevidamente) quando se escaneia um subdomínio.
         if (queryMx(host, b)) return;
 
-        String parent = parentDomain(host);
+        String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
             queryMx(parent, b);
         }

@@ -33,20 +33,25 @@ public class RelatedHostsHeaderService {
     );
     private static final int MAX_HOSTS = 6;
 
-    private final HttpFetchService httpFetchService;
-    private final HeaderService    headerService;
+    private final HttpFetchService    httpFetchService;
+    private final HeaderService       headerService;
+    private final PublicSuffixService publicSuffixService;
 
-    public RelatedHostsHeaderService(HttpFetchService httpFetchService, HeaderService headerService) {
-        this.httpFetchService = httpFetchService;
-        this.headerService    = headerService;
+    public RelatedHostsHeaderService(HttpFetchService httpFetchService, HeaderService headerService,
+                                     PublicSuffixService publicSuffixService) {
+        this.httpFetchService    = httpFetchService;
+        this.headerService       = headerService;
+        this.publicSuffixService = publicSuffixService;
     }
 
     public List<RelatedHostHeaders> analyze(String scannedHost) {
         if (scannedHost == null || scannedHost.isBlank()) return List.of();
 
-        // Base = host sem o "www." inicial (heurística suficiente para o caso comum
-        // apex/www; resolução 100% correta de apex depende da Public Suffix List).
-        String base = scannedHost.startsWith("www.") ? scannedHost.substring(4) : scannedHost;
+        // Base = domínio registrável (apex) via Public Suffix List. Funciona para
+        // subdomínios profundos (app.deep.site.com → site.com) e sufixos multi-label
+        // (www.site.com.br → site.com.br). Fallback para o host se não houver registrável.
+        String base = publicSuffixService.registrableDomain(scannedHost);
+        if (base == null) base = scannedHost;
 
         // Candidatos = prefixos + base, exceto o host já analisado no fluxo principal.
         LinkedHashSet<String> candidates = new LinkedHashSet<>();
