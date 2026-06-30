@@ -69,8 +69,7 @@ public class ScanResult {
 
     /**
      * Status de execução por módulo: nome → "OK" | "TIMEOUT" | "SKIPPED".
-     * Distingue "verificado e sem achado" de "não conseguiu verificar" — sem isto,
-     * um módulo que deu timeout parecia "seguro" (ausência de achado tratada como OK).
+     * Distingue "verificado e sem achado" de "não conseguiu verificar".
      */
     private Map<String, String> moduleStatus;
 

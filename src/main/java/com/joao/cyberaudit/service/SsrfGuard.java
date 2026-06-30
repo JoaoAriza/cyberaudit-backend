@@ -7,22 +7,13 @@ import java.net.URI;
 import java.net.UnknownHostException;
 
 /**
- * Guard anti-SSRF aplicado a TODA URL de scan antes de qualquer requisição.
+ * Guard anti-SSRF aplicado a toda URL de scan antes de qualquer requisição.
+ * Resolve o host do alvo e rejeita destinos internos — loopback, link-local
+ * (inclui metadata cloud 169.254.169.254), redes privadas RFC 1918, CGNAT,
+ * ULA IPv6 e endereços wildcard/multicast.
  *
- * Resolve o host do alvo e rejeita destinos que apontem para a infraestrutura
- * interna — loopback, link-local (inclui o endpoint de metadata da cloud
- * 169.254.169.254), redes privadas RFC 1918, CGNAT, ULA IPv6 e endereços
- * wildcard/multicast.
- *
- * Sem este guard, um visitante NÃO autenticado poderia usar o backend como
- * proxy de SSRF / port-scanner contra a rede onde o serviço roda
- * (ex.: http://169.254.169.254/latest/meta-data/, http://localhost:5434/).
- *
- * Limitação conhecida: NÃO protege contra DNS-rebinding (TOCTOU) — o host é
- * re-resolvido pelo HttpClient no momento do fetch, então um DNS malicioso
- * poderia devolver um IP público aqui e um IP interno na conexão real. O
- * fechamento completo exige fixar o IP resolvido na conexão e será tratado
- * junto do refactor do HttpFetchService.
+ * Não protege contra DNS-rebinding (TOCTOU): o host é re-resolvido pelo
+ * HttpClient no momento do fetch.
  */
 public final class SsrfGuard {
 

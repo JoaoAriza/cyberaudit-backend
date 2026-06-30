@@ -245,7 +245,7 @@ public class WafDetectionService {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
-                    .timeout(Duration.ofSeconds(4)) // ← era 8
+                    .timeout(Duration.ofSeconds(4))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
             HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());

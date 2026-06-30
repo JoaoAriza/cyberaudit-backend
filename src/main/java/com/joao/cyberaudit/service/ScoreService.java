@@ -121,11 +121,8 @@ public class ScoreService {
             if (status == null) continue;
 
             if (header.equalsIgnoreCase("error")) {
-                // Fetch falhou: NENHUM header de segurança pôde ser verificado. Antes isto
-                // custava só -15 e pulava todas as penalidades de header (HSTS/CSP/etc, ~-38) —
-                // então um timeout dava nota MELHOR que a análise real de um site inseguro.
-                // Cobramos uma penalidade representativa de "headers não verificados" e
-                // registramos como issue, sem fingir que as proteções estão presentes.
+                // Fetch falhou: nenhum header de segurança pôde ser verificado. Penalidade
+                // representativa de "headers não verificados" + issue (resultado parcial).
                 score -= 35;
                 notes.add("Headers de segurança não verificados (falha ao buscar a página): -35");
                 issues.add(new SecurityIssue("HEADERS_UNVERIFIED",
@@ -239,7 +236,6 @@ public class ScoreService {
             int riskyCount  = 0;
             for (PortFinding p : openPorts) {
                 // 80/443 abertos são esperados (servir HTTP/HTTPS) — não penalizar.
-                // "HTTP não redireciona p/ HTTPS" já é tratado na seção 3, sem double-dip.
                 if (p.getPort() == 80 || p.getPort() == 443) continue;
                 int penalty = switch (p.getSeverity()) {
                     case "CRITICAL" -> 15;
@@ -447,13 +443,9 @@ public class ScoreService {
 
         // ═══════════════════════════════════════════════════════
         // 17. CVE Correlation — apenas CVSS >= 7.0 (HIGH/CRITICAL)
-        // POTENCIAL: a correlação parte da versão reportada no banner. Distros
-        // frequentemente fazem backport da correção sem alterar o número da versão,
-        // então estes achados podem ser falso positivo. Por isso:
-        //  - penalidade reduzida (CRITICAL -10, HIGH -6; máx -16, era -25);
-        //  - severidade da issue rebaixada um tier (não força risco alto por achado
-        //    não confirmado via o severity override);
-        //  - rótulo "[Potencial]" + disclaimer pedindo confirmação da versão exata.
+        // Achados POTENCIAIS (correlação por versão de banner): penalidade reduzida
+        // (CRITICAL -10, HIGH -6; máx -16), severidade da issue rebaixada um tier e
+        // rótulo "[Potencial]" + disclaimer na recomendação.
         // ═══════════════════════════════════════════════════════
         if (cveFindings != null && !cveFindings.isEmpty()) {
             int cvePenaltyTotal = 0;
@@ -506,9 +498,8 @@ public class ScoreService {
             notes.add("SSRF (" + ssrfFindings.size() + " param(s)): -" + ssrfPenalty);
         }
 
-        // Host Header Injection penalty — só vetores exploráveis (HIGH/CRITICAL):
-        // Location/Set-Cookie. Reflexão só-no-body é LOW (informativa) e NÃO penaliza —
-        // é FP comum (canonical/og:url), antes custava -10 indevidamente.
+        // Host Header Injection penalty — só vetores exploráveis (HIGH/CRITICAL =
+        // Location/Set-Cookie). Reflexão só-no-body é LOW (informativa) e não penaliza.
         if (hostHeaderFindings != null && !hostHeaderFindings.isEmpty()) {
             long exploitable = hostHeaderFindings.stream()
                     .filter(h -> "HIGH".equals(h.getSeverity()) || "CRITICAL".equals(h.getSeverity()))
@@ -642,11 +633,7 @@ public class ScoreService {
         return new ScoreResult(score, risk, notes, issues);
     }
 
-    /**
-     * Rebaixa a severidade em um tier. Usado para achados POTENCIAIS (ex: CVE por
-     * versão de banner) — evita que um achado não confirmado force o risco global
-     * para cima via o severity override.
-     */
+    /** Rebaixa a severidade em um tier (CRITICAL→HIGH→MEDIUM→LOW). */
     private String downgradeOneTier(String severity) {
         return switch (severity == null ? "" : severity.toUpperCase()) {
             case "CRITICAL" -> "HIGH";

@@ -28,9 +28,8 @@ public class HeaderService {
     public boolean detectsServerVersionExposure(Map<String, String> h) {
         String server   = h.getOrDefault("server", "");
         String xPowered = h.getOrDefault("x-powered-by", "");
-        // Problema anterior: !xPowered.isBlank() retornava true para qualquer valor,
-        // incluindo "Express" ou "PHP" sem numero de versao — nao e "version exposure".
-        // Agora exige versao detectavel nos dois headers.
+        // Só conta como exposição se houver versão detectável no header
+        // (ex: "nginx/1.2.3"), não apenas o nome do software (ex: "Express").
         return (!server.isBlank()   && containsVersion(server)) ||
                (!xPowered.isBlank() && containsVersion(xPowered));
     }
@@ -74,10 +73,8 @@ public class HeaderService {
 
         String lower = v.toLowerCase(Locale.ROOT);
 
-        // Problema anterior: lower.contains("'unsafe-inline'") flagava qualquer CSP com
-        // unsafe-inline, mesmo que estivesse so em style-src — prática aceita e sem risco XSS.
-        // Ex: "script-src 'self'; style-src 'unsafe-inline'" e SEGURA mas era marcada WEAK.
-        // Agora: 'unsafe-inline' so e WEAK se aparecer em script-src ou default-src.
+        // 'unsafe-inline' só é WEAK em script-src ou default-src — em style-src é
+        // prática aceita e sem risco XSS.
         boolean unsafeInlineInScripts = containsUnsafeInlineInScriptContext(lower);
         boolean unsafeEval            = lower.contains("'unsafe-eval'");
 
@@ -107,8 +104,7 @@ public class HeaderService {
 
     private void analyzeReferrerPolicy(Map<String, String> h, Map<String, String> out) {
         String v = h.get("referrer-policy");
-        // Problema anterior: valor vazio ("") nao era tratado como MISSING — caía no else
-        // e retornava "OK ("")" mesmo sem nenhuma política definida.
+        // Valor vazio também conta como MISSING.
         if (v == null || v.isBlank()) { out.put("Referrer-Policy", "MISSING"); return; }
 
         String lower = v.toLowerCase(Locale.ROOT);

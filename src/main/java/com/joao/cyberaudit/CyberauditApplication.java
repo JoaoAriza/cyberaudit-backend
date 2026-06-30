@@ -10,15 +10,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class CyberauditApplication {
     public static void main(String[] args) {
-        // Permite que o HostHeaderService injete o header "Host" (restrito por padrão
-        // no HttpClient do JDK). Sem isso, o probe de Host Header Injection lança
-        // IllegalArgumentException silenciosamente e o vetor mais importante (Host)
-        // nunca é testado de fato.
-        //
-        // O JDK lê esta propriedade UMA ÚNICA VEZ na inicialização da classe interna
-        // de rede, então ela precisa ser definida ANTES de qualquer HttpClient ser
-        // criado — i.e., antes do SpringApplication.run() instanciar os beans.
-        // Respeita valor pré-existente (ex: -D no deploy), apenas garante "host" na lista.
+        // Libera o header "Host" (restrito por padrão no HttpClient do JDK) para o probe
+        // de Host Header Injection. Deve ser definido antes de qualquer HttpClient ser
+        // criado (a propriedade é lida uma única vez na init) e respeita valor pré-existente.
         String restricted = System.getProperty("jdk.httpclient.allowRestrictedHeaders");
         if (restricted == null || restricted.isBlank()) {
             System.setProperty("jdk.httpclient.allowRestrictedHeaders", "host");

@@ -19,20 +19,9 @@ import java.util.stream.Collectors;
 public class DnsSecurityService {
 
     /**
-     * Seletores DKIM conhecidos por provider.
-     *
-     * Problema anterior: lista com apenas 10 seletores genéricos — seletores de
-     * providers como SendGrid (em), Proton (protonmail), Zoho (zoho), Amazon SES
-     * (amazonses), FastMail (fm1/fm2/fm3), HubSpot (hubspot1) não eram checados,
-     * resultando em "DKIM não detectado" mesmo quando DKIM estava corretamente
-     * configurado. Isso tornava o relatório impreciso e confundia o usuário.
-     *
-     * Todos os lookups são paralelos — adicionar mais seletores não aumenta latência.
-     * Timeout total: 5s (já existente).
-     *
-     * Nota: seletores baseados em data (ex: Google "20161025") não são adivinháveis
-     * sem consultar o DNS por wildcard (não suportado). Se nenhum seletor for encontrado
-     * o resultado é marcado como NOT_DETECTED (inconclusivo), não MISSING.
+     * Seletores DKIM conhecidos por provider, consultados em paralelo. Seletores
+     * baseados em data (ex: Google "20161025") não são adivinháveis; se nenhum for
+     * encontrado o resultado é NOT_DETECTED (inconclusivo), não MISSING.
      */
     private static final List<String> DKIM_SELECTORS = List.of(
             // Genéricos
@@ -114,9 +103,7 @@ public class DnsSecurityService {
 
     private void analyzeSpf(String host,
                             DnsSecurityResult.DnsSecurityResultBuilder b) {
-        // SPF é propriedade do domínio organizacional (apex). Ao escanear um
-        // subdomínio (ex: www.site.com), o SPF normalmente está no apex (site.com).
-        // Espelha o fallback do DMARC: tenta o host, depois o domínio pai.
+        // SPF normalmente fica no apex. Tenta o host, depois o domínio registrável (apex).
         if (querySpf(host, b)) return;
 
         String parent = publicSuffixService.registrableDomain(host);
@@ -217,9 +204,8 @@ public class DnsSecurityService {
 
     private void analyzeDkim(String host,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
-        // Probe os seletores no host E no apex (mesmo motivo de SPF/MX): DKIM costuma
-        // estar publicado em selector._domainkey.<apex>. Combina os dois domínios em
-        // um único batch paralelo para não dobrar a latência.
+        // Proba os seletores no host e no apex (DKIM costuma estar em
+        // selector._domainkey.<apex>), num único batch paralelo.
         List<String> domains = new ArrayList<>();
         domains.add(host);
         String parent = publicSuffixService.registrableDomain(host);
@@ -286,8 +272,7 @@ public class DnsSecurityService {
 
     private void analyzeMx(String host,
                            DnsSecurityResult.DnsSecurityResultBuilder b) {
-        // MX normalmente fica no apex. Mesmo fallback de SPF/DMARC para não reportar
-        // "sem MX" (e elevar o risco indevidamente) quando se escaneia um subdomínio.
+        // MX normalmente fica no apex. Tenta o host, depois o domínio registrável (apex).
         if (queryMx(host, b)) return;
 
         String parent = publicSuffixService.registrableDomain(host);

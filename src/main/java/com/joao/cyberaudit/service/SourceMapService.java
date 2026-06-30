@@ -269,9 +269,8 @@ public class SourceMapService {
     }
 
     /**
-     * Sonda um endpoint de debug exigindo confirmação por marcador/formato.
-     * Substitui a heurística antiga (body.length() > 100), que gerava falso
-     * positivo em SPAs — qualquer rota respondia 200 + index.html.
+     * Sonda um endpoint de debug exigindo confirmação por marcador/formato
+     * (SPAs respondem 200 + index.html em qualquer rota — sem marcador, descarta).
      */
     private SourceMapFinding probeDebugEndpoint(String url, DebugTarget target) {
         try {

@@ -37,10 +37,7 @@ public class TechFingerprintService {
         String language  = null;
         List<String> libraries = new ArrayList<>();
 
-        // ── 1. Headers HTTP — fetch unico, nao 1 request por header ───────────
-        // Problema anterior: getRawHeader() fazia 1 HEAD request por chamada,
-        // resultando em 9 requests separadas para o mesmo URL. Alem de lento,
-        // qualquer timeout parcial causava deteccao incompleta.
+        // ── 1. Headers HTTP — fetch único (não 1 request por header) ──────────
         Map<String, List<String>> allHeaders = fetchAllHeaders(targetUrl);
 
         String serverHeader = getFromHeaders(allHeaders, "server");
@@ -215,11 +212,8 @@ public class TechFingerprintService {
                 libraries.add("Svelte"); evidence.add("HTML: Svelte detectado");
             }
 
-            // Libraries — verificar em contexto de asset (src/href), nao texto livre.
-            // Problema anterior: lower.contains("bootstrap") e lower.contains("tailwindcss")
-            // ou lower.contains("tw-") disparavam para qualquer mencao textual na pagina
-            // (ex: "bootstrap the app", "tw-container" de outro design system).
-            // Agora exigimos que a string apareca dentro de um atributo src= ou href=.
+            // Libraries — exige a string dentro de um atributo src=/href= (contexto de
+            // asset), não texto livre, para evitar match em menção textual na página.
             Pattern assetBootstrap = Pattern.compile(
                     "(?:src|href)\\s*=\\s*[\"'][^\"']*bootstrap[^\"']*[\"']",
                     Pattern.CASE_INSENSITIVE);
@@ -260,8 +254,6 @@ public class TechFingerprintService {
 
             // Laravel: requer path de asset especifico (/vendor/laravel/, livewire) OU
             // combinacao de csrf-token meta + linguagem PHP ja identificada.
-            // Problema anterior: lower.contains("laravel") disparava para qualquer pagina
-            // que mencionasse "Laravel" em texto (ex: "Migrating from Laravel to Django").
             boolean laravelAsset = lower.contains("/vendor/laravel/") ||
                                    lower.contains("laravel-livewire") ||
                                    lower.contains("livewire/livewire.js");
@@ -324,13 +316,9 @@ public class TechFingerprintService {
     /**
      * Extrai a versao do WordPress core — NAO de plugins.
      *
-     * Problema anterior: Pattern "?ver=(\d+\.\d+)" pegava o PRIMEIRO ?ver= do HTML,
-     * que frequentemente e versao de plugin (ex: Contact Form 7 5.7.7), nao do core WP.
-     * Isso passava versao errada para CVECorrelationService gerando CVE lookups incorretos.
-     *
-     * Agora prioriza:
-     * 1. Meta generator: <meta name="generator" content="WordPress X.Y.Z"> — mais confiavel
-     * 2. Fallback: ?ver= em paths /wp-includes/ (arquivos do core, nao plugins)
+     * Prioriza:
+     * 1. Meta generator: <meta name="generator" content="WordPress X.Y.Z"> — mais confiável
+     * 2. Fallback: ?ver= em paths /wp-includes/ (arquivos do core, não plugins)
      */
     private Optional<String> extractWpVersion(String html) {
         // Meta generator e a fonte mais confiavel da versao do core

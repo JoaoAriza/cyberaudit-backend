@@ -17,12 +17,8 @@ public class HttpMethodService {
 
     /**
      * Métodos a testar com seus riscos.
-     * GET, POST, HEAD são normais — não testados.
-     * OPTIONS é testado indiretamente pelo CORS probe.
-     *
-     * PATCH foi removido intencionalmente: é método padrão REST (RFC 5789).
-     * Qualquer API REST pode aceitar PATCH com 200 e JSON — isso não é vulnerabilidade.
-     * Incluí-lo gerava falso positivo garantido em praticamente toda API moderna.
+     * GET, POST, HEAD são normais — não testados. OPTIONS é coberto pelo CORS probe.
+     * PATCH não é testado: é método REST padrão (RFC 5789), não vulnerabilidade.
      */
     private static final Map<String, MethodRisk> METHOD_RISKS = Map.of(
             "TRACE",   new MethodRisk("CRITICAL",

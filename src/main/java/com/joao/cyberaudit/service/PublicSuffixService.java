@@ -13,17 +13,13 @@ import java.util.Set;
 
 /**
  * Resolve o domínio registrável (eTLD+1) usando a Public Suffix List oficial
- * (bundled em resources/public_suffix_list.dat).
+ * (bundled em resources/public_suffix_list.dat). Exemplos:
+ *   www.site.com.br   → site.com.br
+ *   app.deep.site.com → site.com
+ *   site.com.br       → site.com.br
+ *   com.br            → null (é um public suffix)
  *
- * Substitui o heurístico anterior de "remover um label", que errava em sufixos
- * multi-label (com.br, co.uk) e em subdomínios profundos. Ex:
- *   www.site.com.br      → site.com.br
- *   app.deep.site.com    → site.com
- *   site.com.br          → site.com.br (já é o registrável)
- *   com.br               → null (é um public suffix, não tem registrável)
- *
- * Nota: a lista é um snapshot (ver linha VERSION no .dat) e precisa de refresh
- * periódico para acompanhar novos TLDs/sufixos.
+ * A lista é um snapshot (ver linha VERSION no .dat) e precisa de refresh periódico.
  */
 @Service
 public class PublicSuffixService {

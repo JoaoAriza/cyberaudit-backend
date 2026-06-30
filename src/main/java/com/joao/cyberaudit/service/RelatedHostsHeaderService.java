@@ -14,15 +14,11 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * Audita os headers de segurança de hosts RELACIONADOS ao alvo (escopo focado:
+ * Audita os headers de segurança de hosts relacionados ao alvo (escopo focado:
  * prefixos com cara de app/API). Ex: ao escanear exemplo.com, também olha
  * api.exemplo.com, server.exemplo.com, etc.
  *
- * Motivação: apps modernos são frontend + API em hosts distintos. O usuário vê
- * headers de segurança no DevTools (na chamada de API) e estranha o scan do
- * frontend dizer "nenhum header". Este painel mostra a postura de cada host.
- *
- * Informativo: NÃO entra no score do host principal (decisão de produto).
+ * Informativo: não entra no score do host principal.
  */
 @Service
 public class RelatedHostsHeaderService {
