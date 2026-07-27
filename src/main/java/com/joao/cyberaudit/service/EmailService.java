@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.model.Feedback;
 import com.joao.cyberaudit.model.ScanResult;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
@@ -226,6 +227,67 @@ public class EmailService {
             mailSender.send(msg);
         } catch (MessagingException | RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar OTP: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Notifica o admin/OWNER (e/ou a caixa da plataforma) sobre um novo feedback
+     * de cliente contestando um achado. Silencioso se mail.enabled=false ou em falha.
+     */
+    public void sendFeedbackNotification(String toEmail, String fromUserName, Feedback fb) {
+        if (!enabled || toEmail == null || toEmail.isBlank()) return;
+        try {
+            String sender = fromUserName != null && !fromUserName.isBlank() ? fromUserName : "Um cliente";
+            String target = fb.getFindingLabel() != null && !fb.getFindingLabel().isBlank()
+                    ? fb.getFindingLabel()
+                    : (fb.getModule() != null && !fb.getModule().isBlank() ? fb.getModule() : "scan inteiro");
+
+            String html = """
+                <!DOCTYPE html><html lang="pt-BR">
+                <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
+                  <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
+                    <tr><td align="center">
+                      <table width="560" cellpadding="0" cellspacing="0"
+                             style="background:#0d1b2a;border:1px solid #1c2a3a;border-radius:8px;overflow:hidden;">
+                        <tr><td style="background:#0a1520;padding:20px 28px;border-bottom:3px solid #00d4a0;">
+                          <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
+                          <span style="margin-left:16px;font-size:12px;color:#00d4a0;font-weight:700;letter-spacing:.08em;">✎ NOVO FEEDBACK</span>
+                        </td></tr>
+                        <tr><td style="padding:28px;">
+                          <p style="margin:0 0 20px;color:#b8ccde;font-size:15px;">
+                            <strong style="color:#e0eaf4;">%s</strong> contestou um resultado de scan.
+                          </p>
+                          <table width="100%%" cellpadding="0" cellspacing="0"
+                                 style="background:#0a1520;border:1px solid #1c2a3a;border-radius:6px;margin-bottom:20px;">
+                            <tr><td style="padding:18px 22px;">
+                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Host</div>
+                              <div style="font-size:16px;font-weight:600;color:#e0eaf4;font-family:monospace;margin-bottom:14px;">%s</div>
+                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Alvo contestado</div>
+                              <div style="font-size:14px;color:#e0eaf4;margin-bottom:14px;">%s</div>
+                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Mensagem</div>
+                              <div style="font-size:14px;color:#b8ccde;line-height:1.5;white-space:pre-wrap;">%s</div>
+                            </td></tr>
+                          </table>
+                          <p style="margin:0;color:#5a7a96;font-size:13px;">Abra o painel de administração para triar este feedback.</p>
+                        </td></tr>
+                        <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
+                          Você recebeu este e-mail como administrador do CyberAudit.
+                        </td></tr>
+                      </table>
+                    </td></tr>
+                  </table>
+                </body></html>
+                """.formatted(escHtml(sender), escHtml(fb.getHost()), escHtml(target), escHtml(fb.getMessage()));
+
+            MimeMessage msg = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
+            helper.setFrom(from);
+            helper.setTo(toEmail);
+            helper.setSubject("CyberAudit — Novo feedback: " + fb.getHost());
+            helper.setText(html, true);
+            mailSender.send(msg);
+        } catch (MessagingException | RuntimeException e) {
+            System.err.println("[EmailService] Falha ao enviar notificação de feedback: " + e.getMessage());
         }
     }
 
