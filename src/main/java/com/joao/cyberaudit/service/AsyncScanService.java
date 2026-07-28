@@ -15,16 +15,19 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AsyncScanService {
 
     private final ConcurrentHashMap<String, AsyncScanStatus> statusMap = new ConcurrentHashMap<>();
-    private final ScanOrchestrator  scanOrchestrator;
-    private final EmailService      emailService;
-    private final AppUserRepository appUserRepository;
+    private final ScanOrchestrator       scanOrchestrator;
+    private final EmailService           emailService;
+    private final AppUserRepository       appUserRepository;
+    private final ScanEntitlementService scanEntitlement;
 
     public AsyncScanService(ScanOrchestrator scanOrchestrator,
                             EmailService emailService,
-                            AppUserRepository appUserRepository) {
+                            AppUserRepository appUserRepository,
+                            ScanEntitlementService scanEntitlement) {
         this.scanOrchestrator  = scanOrchestrator;
         this.emailService      = emailService;
         this.appUserRepository = appUserRepository;
+        this.scanEntitlement   = scanEntitlement;
     }
 
     public String submit(String url, boolean active, AppUser currentUser,
@@ -60,14 +63,18 @@ public class AsyncScanService {
 
             ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh);
 
-            statusMap.put(scanId, new AsyncScanStatus(scanId, State.DONE, result, null));
-
+            // E-mail pessoal (ao próprio usuário) usa o resultado completo.
             if (notify && currentUser != null && result != null) {
                 emailService.sendScanComplete(
                         currentUser.getEmail(),
                         currentUser.getName(),
                         result);
             }
+
+            // A UI recebe o resultado já com gating por plano (guest/FREE não veem
+            // impacto/correção/breakdown). applyEntitlement nunca muta o cache.
+            statusMap.put(scanId, new AsyncScanStatus(scanId, State.DONE,
+                    scanEntitlement.applyEntitlement(result, currentUser), null));
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             statusMap.put(scanId, new AsyncScanStatus(scanId, State.ERROR, null,

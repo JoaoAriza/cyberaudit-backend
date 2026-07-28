@@ -25,6 +25,7 @@ public class ScanController {
     private final DomainProtectionService domainProtectionService;
     private final GuestRateLimitService   guestRateLimitService;
     private final PlanLimitService        planLimitService;
+    private final ScanEntitlementService  scanEntitlement;
 
     public ScanController(
             ScanOrchestrator scanOrchestrator,
@@ -34,7 +35,8 @@ public class ScanController {
             RateLimitService rateLimitService,
             DomainProtectionService domainProtectionService,
             GuestRateLimitService guestRateLimitService,
-            PlanLimitService planLimitService) {
+            PlanLimitService planLimitService,
+            ScanEntitlementService scanEntitlement) {
         this.scanOrchestrator        = scanOrchestrator;
         this.asyncScanService        = asyncScanService;
         this.reportService           = reportService;
@@ -43,6 +45,7 @@ public class ScanController {
         this.domainProtectionService = domainProtectionService;
         this.guestRateLimitService   = guestRateLimitService;
         this.planLimitService        = planLimitService;
+        this.scanEntitlement         = scanEntitlement;
     }
 
     // ── Scan síncrono ─────────────────────────────────────────────────────────
@@ -63,7 +66,8 @@ public class ScanController {
             if (active) planLimitService.checkActiveScan(currentUser, url);
             planLimitService.checkAndIncrementDailyScan(currentUser);
         }
-        return scanOrchestrator.execute(url, active, currentUser, false);
+        return scanEntitlement.applyEntitlement(
+                scanOrchestrator.execute(url, active, currentUser, false), currentUser);
     }
 
     // ── Relatório texto ───────────────────────────────────────────────────────
@@ -74,8 +78,8 @@ public class ScanController {
                              HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
-        return reportService.generateReport(
-                scanOrchestrator.execute(url, active, currentUser, false));
+        return reportService.generateReport(scanEntitlement.applyEntitlement(
+                scanOrchestrator.execute(url, active, currentUser, false), currentUser));
     }
 
     // ── Relatório PDF — via scanId (sem re-scan, resultado já em memória) ───────

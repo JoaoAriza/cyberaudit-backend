@@ -10,7 +10,7 @@ import lombok.Setter;
 import java.util.List;
 import java.util.Map;
 
-@Getter @Setter @Builder @AllArgsConstructor @NoArgsConstructor
+@Getter @Setter @Builder(toBuilder = true) @AllArgsConstructor @NoArgsConstructor
 public class ScanResult {
 
     private String url;
@@ -81,4 +81,11 @@ public class ScanResult {
 
     /** Mapeamento de conformidade LGPD / ISO 27001:2022 — computado pelo orchestrator */
     private ComplianceReport compliance;
+
+    /**
+     * true quando o requester (guest ou plano FREE) NÃO tem acesso ao detalhe:
+     * as issues vêm sem impacto/correção e o breakdown fica travado no front.
+     * Aplicado por {@code ScanEntitlementService} — nunca muta o resultado em cache.
+     */
+    private boolean detailsLocked;
 }
