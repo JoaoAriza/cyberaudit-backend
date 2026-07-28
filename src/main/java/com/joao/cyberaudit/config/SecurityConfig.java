@@ -79,6 +79,11 @@ public class SecurityConfig {
                         // ── Verify-check público (guests no OwnershipCard) ─────────
                         .requestMatchers(HttpMethod.GET, "/scan/verify-check").permitAll()
 
+                        // ── Webhook do Mercado Pago (público; validado contra a API do MP) ─
+                        .requestMatchers(HttpMethod.POST, "/billing/webhook").permitAll()
+                        // ── Assinatura (autenticado) ───────────────────────────────
+                        .requestMatchers("/billing/**").authenticated()
+
                         // ── Scan autenticado ───────────────────────────────────────
                         .requestMatchers(HttpMethod.GET, "/scan/report/pdf").authenticated()
                         .requestMatchers("/scan/verify-token").authenticated()
