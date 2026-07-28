@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.model.CVEFinding;
 import com.joao.cyberaudit.model.TechFingerprintResult;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -65,6 +66,14 @@ public class CVECorrelationService {
             .connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper jackson = new ObjectMapper();
 
+    /**
+     * Chave da API do NVD (opcional). Com chave, o rate-limit sobe de 5 → 50 req/30s,
+     * tornando o DELAY_MS de 700ms adequado e reduzindo drasticamente os 429.
+     * Registre em https://nvd.nist.gov/developers/request-an-api-key
+     */
+    @Value("${nvd.api-key:}")
+    private String nvdApiKey;
+
     public List<CVEFinding> correlate(TechFingerprintResult fingerprint) {
         if (fingerprint == null) return List.of();
 
@@ -123,12 +132,16 @@ public class CVECorrelationService {
             String url = NVD_CVE_API + "?cpeName=" + encoded
                     + "&resultsPerPage=" + MAX_PER_SW;
 
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+            HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(12))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
-                    .header("Accept", "application/json")
-                    .build();
+                    .header("Accept", "application/json");
+            // Com a chave, o NVD libera 50 req/30s (vs. 5 sem chave) → menos 429.
+            if (nvdApiKey != null && !nvdApiKey.isBlank()) {
+                reqBuilder.header("apiKey", nvdApiKey);
+            }
+            HttpRequest req = reqBuilder.build();
 
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
 
