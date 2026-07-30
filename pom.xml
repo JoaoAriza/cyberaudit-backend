@@ -121,6 +121,13 @@
             <version>1.7.1</version>
         </dependency>
 
+        <!-- Carrega o arquivo .env como property source (variáveis reais têm precedência) -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>
