@@ -46,7 +46,14 @@ public class MercadoPagoService {
     // ── Resultados ──────────────────────────────────────────────────────────────
 
     public record PreapprovalResult(String id, String initPoint, String status) {}
-    public record PreapprovalInfo(String id, String status, String externalReference) {}
+
+    /**
+     * {@code amount} vem de {@code auto_recurring.transaction_amount} — o valor que o MP
+     * de fato cobra. Serve para o backend conferir que a assinatura confirmada custa o
+     * que a tabela de preços diz, em vez de confiar só no id do preapproval.
+     */
+    public record PreapprovalInfo(String id, String status, String externalReference,
+                                  BigDecimal amount, String currency) {}
 
     // ── Operações ───────────────────────────────────────────────────────────────
 
@@ -79,10 +86,13 @@ public class MercadoPagoService {
     public PreapprovalInfo getPreapproval(String id) {
         requireConfigured();
         JsonNode json = send("GET", "/preapproval/" + id, null);
+        JsonNode recurring = json != null ? json.get("auto_recurring") : null;
         return new PreapprovalInfo(
                 text(json, "id"),
                 text(json, "status"),
-                text(json, "external_reference"));
+                text(json, "external_reference"),
+                decimal(recurring, "transaction_amount"),
+                text(recurring, "currency_id"));
     }
 
     public void cancelPreapproval(String id) {
@@ -140,5 +150,14 @@ public class MercadoPagoService {
 
     private String text(JsonNode n, String field) {
         return n != null && n.hasNonNull(field) ? n.get(field).asText() : null;
+    }
+
+    private BigDecimal decimal(JsonNode n, String field) {
+        if (n == null || !n.hasNonNull(field)) return null;
+        try {
+            return n.get(field).decimalValue();
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

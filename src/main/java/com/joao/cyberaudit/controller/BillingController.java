@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.dto.SubscriptionDto;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.service.BillingService;
+import com.joao.cyberaudit.service.MercadoPagoService;
+import com.joao.cyberaudit.service.RateLimitService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -15,7 +17,9 @@ import org.springframework.web.bind.annotation.*;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -27,15 +31,25 @@ import java.util.Map;
 @RestController
 public class BillingController {
 
-    private final BillingService billingService;
-    private final ObjectMapper mapper;
+    /** Teto de notificações aceitas por minuto e por IP. O MP real fica muito abaixo disso. */
+    private static final int WEBHOOK_MAX_PER_MINUTE = 60;
+
+    private final BillingService     billingService;
+    private final MercadoPagoService mercadoPagoService;
+    private final RateLimitService   rateLimitService;
+    private final ObjectMapper       mapper;
 
     @Value("${mp.webhook-secret:}")
     private String webhookSecret;
 
-    public BillingController(BillingService billingService, ObjectMapper mapper) {
-        this.billingService = billingService;
-        this.mapper = mapper;
+    public BillingController(BillingService billingService,
+                             MercadoPagoService mercadoPagoService,
+                             RateLimitService rateLimitService,
+                             ObjectMapper mapper) {
+        this.billingService     = billingService;
+        this.mercadoPagoService = mercadoPagoService;
+        this.rateLimitService   = rateLimitService;
+        this.mapper             = mapper;
     }
 
     // ── Cliente ──────────────────────────────────────────────────────────────────
@@ -63,6 +77,12 @@ public class BillingController {
     public ResponseEntity<String> webhook(@RequestBody(required = false) String rawBody,
                                           @RequestParam Map<String, String> params,
                                           HttpServletRequest request) {
+        // Endpoint público que dispara uma chamada de saída à API do MP por notificação
+        // aceita. Sem teto, um laço de curl vira flood na nossa cota do Mercado Pago.
+        if (!rateLimitService.allow("mp-webhook:" + request.getRemoteAddr(),
+                WEBHOOK_MAX_PER_MINUTE, 60_000)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body("rate limited");
+        }
         try {
             String type   = firstNonBlank(params.get("type"), params.get("topic"));
             String dataId = firstNonBlank(params.get("data.id"), params.get("id"));
@@ -92,9 +112,24 @@ public class BillingController {
         return ResponseEntity.ok("ok");
     }
 
-    /** Valida x-signature do MP. Se o secret não está configurado, pula (ambiente sandbox). */
+    /**
+     * Valida o x-signature do MP.
+     *
+     * Sem secret configurado a validação era simplesmente pulada — inclusive em
+     * produção, onde esquecer `MP_WEBHOOK_SECRET` deixava o endpoint aberto para
+     * qualquer um mandar notificação. Agora só pula quando o Mercado Pago não está
+     * integrado de fato (sem `MP_ACCESS_TOKEN`, ou seja, dev/sandbox sem dinheiro
+     * envolvido); com o MP ativo e sem secret, rejeita.
+     */
     private boolean verifySignature(HttpServletRequest request, String dataId) {
-        if (webhookSecret == null || webhookSecret.isBlank()) return true;
+        if (webhookSecret == null || webhookSecret.isBlank()) {
+            if (mercadoPagoService.isConfigured()) {
+                System.err.println("[BillingWebhook] MP_ACCESS_TOKEN está configurado mas "
+                        + "MP_WEBHOOK_SECRET não — notificação recusada. Defina o secret.");
+                return false;
+            }
+            return true; // sem integração real: nada a proteger
+        }
         try {
             String sig       = request.getHeader("x-signature");
             String requestId = request.getHeader("x-request-id");
@@ -117,7 +152,10 @@ public class BillingController {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             byte[] hash = mac.doFinal(manifest.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash).equalsIgnoreCase(v1);
+            // Comparação em tempo constante — não vazar por timing quanto do HMAC bateu.
+            return MessageDigest.isEqual(
+                    HexFormat.of().formatHex(hash).getBytes(StandardCharsets.UTF_8),
+                    v1.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             return false;
         }

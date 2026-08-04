@@ -146,12 +146,31 @@ public class BillingService {
 
         Account account = sub.getAccount();
         if (status == SubscriptionStatus.AUTHORIZED) {
+            // Confere o valor que o MP realmente cobra contra a tabela de preços antes
+            // de liberar o plano. O id do preapproval sozinho não prova quanto foi pago;
+            // sem esta checagem, uma assinatura de valor menor que a tabela ainda
+            // resultaria em upgrade completo.
+            if (!amountCoversPlan(info.amount(), sub.getPlan())) {
+                System.err.println("[BillingService] upgrade recusado: preapproval " + preapprovalId
+                        + " tem valor " + info.amount() + " abaixo do preço do plano " + sub.getPlan());
+                return;
+            }
             account.setPlan(sub.getPlan());
             accountRepository.save(account);
         } else if (status == SubscriptionStatus.CANCELLED || status == SubscriptionStatus.PAUSED) {
             account.setPlan(Plan.FREE);
             accountRepository.save(account);
         }
+    }
+
+    /**
+     * true se o valor cobrado pelo MP cobre o preço configurado do plano.
+     * Valor ausente na resposta do MP não bloqueia o upgrade — a API nem sempre
+     * devolve auto_recurring e travar aqui deixaria cliente pagante sem acesso.
+     */
+    private boolean amountCoversPlan(BigDecimal mpAmount, Plan plan) {
+        if (mpAmount == null) return true;
+        return mpAmount.compareTo(amountFor(plan)) >= 0;
     }
 
     // ── Interno ──────────────────────────────────────────────────────────────────
