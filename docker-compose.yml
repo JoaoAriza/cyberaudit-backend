@@ -3,11 +3,16 @@ services:
     image: postgres:16-alpine
     container_name: cyberaudit-db
     environment:
-      POSTGRES_DB: cyberaudit
-      POSTGRES_USER: cyberaudit
-      POSTGRES_PASSWORD: cyberaudit123
+      POSTGRES_DB: ${DB_NAME:-cyberaudit}
+      POSTGRES_USER: ${DB_USERNAME:-cyberaudit}
+      # Sem default: o compose lê o .env deste diretório. Senha de banco não fica
+      # hardcoded em arquivo versionado — antes era "cyberaudit123" em texto puro,
+      # commitado e público no GitHub.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD no .env}
     ports:
-      - "5434:5432"
+      # Bind explícito em 127.0.0.1: com "5434:5432" o Docker publica em 0.0.0.0
+      # e o banco de desenvolvimento fica acessível para toda a rede local.
+      - "127.0.0.1:5434:5432"
     volumes:
       - cyberaudit_data:/var/lib/postgresql/data
 
