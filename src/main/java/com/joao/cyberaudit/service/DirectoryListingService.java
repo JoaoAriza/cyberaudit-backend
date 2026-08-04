@@ -90,7 +90,7 @@ public class DirectoryListingService {
                     .build();
 
             HttpResponse<String> resp = client.send(
-                    req, HttpResponse.BodyHandlers.ofString());
+                    req, ScannerHttp.limitedString());
 
             int status = resp.statusCode();
 

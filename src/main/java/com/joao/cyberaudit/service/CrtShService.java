@@ -156,7 +156,7 @@ public class CrtShService {
                     .build();
 
             HttpResponse<String> resp = httpClient.send(req,
-                    HttpResponse.BodyHandlers.ofString());
+                    ScannerHttp.limitedString(ScannerHttp.MAX_JSON_BODY_BYTES));
 
             System.out.println("[CrtShService] certspotter HTTP " + resp.statusCode() + " for " + host);
             if (resp.statusCode() != 200) return List.of();

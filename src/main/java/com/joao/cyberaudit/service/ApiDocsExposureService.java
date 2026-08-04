@@ -56,7 +56,7 @@ public class ApiDocsExposureService {
     );
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -84,7 +84,7 @@ public class ApiDocsExposureService {
                     .header("Accept", "text/html,application/json,application/yaml,*/*")
                     .build();
 
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
 
             if (resp.statusCode() != 200) return null;
 

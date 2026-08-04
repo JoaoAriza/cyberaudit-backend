@@ -23,7 +23,7 @@ public class HttpFetchService {
     // connectTimeout: tempo máximo para estabelecer a conexão TCP
     // Reduzido de 8s para 5s — se o servidor não responde em 5s, não vale esperar mais
     private final HttpClient clientFollow = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -64,7 +64,7 @@ public class HttpFetchService {
                     .header("Origin", origin)
                     .build();
 
-            HttpResponse<Void> resp = clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> resp = ScannerHttp.sendFollowingSafely(clientFollow, req, HttpResponse.BodyHandlers.discarding());
             Map<String, String> normalized = new LinkedHashMap<>();
             resp.headers().map().forEach((k, v) -> {
                 if (k != null && v != null && !v.isEmpty())
@@ -86,7 +86,7 @@ public class HttpFetchService {
                     .header("Accept", "*/*")
                     .build();
 
-            HttpResponse<Void> resp = clientFollow.send(req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> resp = ScannerHttp.sendFollowingSafely(clientFollow, req, HttpResponse.BodyHandlers.discarding());
             return resp.uri().toString().startsWith("https://");
 
         } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
@@ -103,7 +103,7 @@ public class HttpFetchService {
                 .header("User-Agent", ScannerHttp.USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .build();
-        return clientFollow.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return ScannerHttp.sendFollowingSafely(clientFollow, req, ScannerHttp.limitedString());
     }
 
     private HttpFetchResult buildResult(HttpResponse<String> resp) {

@@ -53,6 +53,7 @@ public class ScanOrchestrator {
     private final DegradationNotificationService degradationNotificationService;
     private final ComplianceMappingService        complianceMappingService;
     private final RelatedHostsHeaderService       relatedHostsHeaderService;
+    private final ScanConcurrencyLimiter          concurrencyLimiter;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -83,7 +84,8 @@ public class ScanOrchestrator {
             AuditService auditService,
             DegradationNotificationService degradationNotificationService,
             ComplianceMappingService complianceMappingService,
-            RelatedHostsHeaderService relatedHostsHeaderService) {
+            RelatedHostsHeaderService relatedHostsHeaderService,
+            ScanConcurrencyLimiter concurrencyLimiter) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -123,6 +125,7 @@ public class ScanOrchestrator {
         this.degradationNotificationService     = degradationNotificationService;
         this.complianceMappingService           = complianceMappingService;
         this.relatedHostsHeaderService          = relatedHostsHeaderService;
+        this.concurrencyLimiter                 = concurrencyLimiter;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -143,6 +146,14 @@ public class ScanOrchestrator {
             scanCacheService.invalidate(cacheKey);
         }
 
+        // Só o trabalho real ocupa slot — cache hit não entra na fila.
+        final AppUser user = currentUser;
+        return concurrencyLimiter.withSlot(
+                () -> runScan(inputUrl, cacheKey, active, user, origin));
+    }
+
+    private ScanResult runScan(String inputUrl, String cacheKey, boolean active,
+                               AppUser currentUser, ScanOrigin origin) {
         // Registra início do scan somente para usuários autenticados
         if (currentUser != null) {
             auditService.log(currentUser, AuditAction.SCAN_STARTED,
@@ -201,7 +212,8 @@ public class ScanOrchestrator {
 
         // ── Busca scan anterior ANTES de salvar (para change detection) ───────
         ScanResult previousScan = (host != null)
-                ? scanHistoryService.findLastResult(host, active).orElse(null)
+                ? scanHistoryService.findLastResult(host, active,
+                        currentUser != null ? currentUser.getAccount() : null).orElse(null)
                 : null;
 
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────

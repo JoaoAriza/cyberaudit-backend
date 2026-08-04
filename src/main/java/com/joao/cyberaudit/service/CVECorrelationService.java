@@ -143,11 +143,11 @@ public class CVECorrelationService {
             }
             HttpRequest req = reqBuilder.build();
 
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString(ScannerHttp.MAX_JSON_BODY_BYTES));
 
             if (resp.statusCode() == 429) {
                 Thread.sleep(3000);
-                resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+                resp = client.send(req, ScannerHttp.limitedString(ScannerHttp.MAX_JSON_BODY_BYTES));
             }
 
             if (resp.statusCode() != 200) return List.of();

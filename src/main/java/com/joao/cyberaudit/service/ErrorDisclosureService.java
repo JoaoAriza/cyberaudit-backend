@@ -16,7 +16,7 @@ import java.util.List;
 public class ErrorDisclosureService {
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
@@ -39,7 +39,7 @@ public class ErrorDisclosureService {
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,/;q=0.8")
                     .build();
 
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
             String body = resp.body() == null ? "" : resp.body().toLowerCase();
 
             return containsDbErrorPatterns(body);

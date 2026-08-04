@@ -55,7 +55,7 @@ public class GraphQlIntrospectionService {
             Pattern.compile("\"name\"\\s*:", Pattern.CASE_INSENSITIVE);
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -94,8 +94,8 @@ public class GraphQlIntrospectionService {
                     .header("Accept", "application/json")
                     .build();
 
-            HttpResponse<String> resp = client.send(
-                    introspectionReq, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, 
+                    introspectionReq, ScannerHttp.limitedString());
 
             String body        = resp.body() == null ? "" : resp.body();
             String lower       = body.toLowerCase(Locale.ROOT);
@@ -130,8 +130,8 @@ public class GraphQlIntrospectionService {
                     .header("Accept", "text/html,application/xhtml+xml,*/*")
                     .build();
 
-            HttpResponse<String> getResp = client.send(
-                    getReq, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> getResp = ScannerHttp.sendFollowingSafely(client, 
+                    getReq, ScannerHttp.limitedString());
 
             if (getResp.statusCode() == 200) {
                 String getBody  = getResp.body() == null ? "" : getResp.body();

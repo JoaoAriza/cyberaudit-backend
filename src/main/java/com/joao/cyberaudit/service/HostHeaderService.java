@@ -79,7 +79,7 @@ public class HostHeaderService {
             }
 
             HttpResponse<String> resp = client.send(builder.build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                    ScannerHttp.limitedString());
 
             String body  = resp.body() == null ? "" : resp.body();
             String lower = body.toLowerCase(Locale.ROOT);

@@ -125,7 +125,7 @@ public class SsrfService {
                         .header("Accept", "text/html,application/json,*/*")
                         .build();
 
-                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
                 String body  = resp.body() == null ? "" : resp.body();
                 String lower = body.toLowerCase(Locale.ROOT);
 

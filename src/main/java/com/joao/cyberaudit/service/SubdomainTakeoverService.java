@@ -70,7 +70,7 @@ public class SubdomainTakeoverService {
 
     private final CrtShService crtShService; // ← compartilhado
     private final HttpClient   httpClient = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -140,7 +140,7 @@ public class SubdomainTakeoverService {
                     .GET().timeout(Duration.ofSeconds(6))
                     .header("User-Agent", ScannerHttp.USER_AGENT).build();
 
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(httpClient, req, ScannerHttp.limitedString());
             String body = resp.body() != null ? resp.body() : "";
 
             if (body.toLowerCase().contains(matched.bodyFingerprint().toLowerCase())) {

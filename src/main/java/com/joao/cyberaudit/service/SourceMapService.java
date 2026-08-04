@@ -180,7 +180,7 @@ public class SourceMapService {
                     .timeout(Duration.ofSeconds(8))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
 
             String sourceMap = resp.headers().firstValue("SourceMap")
                     .or(() -> resp.headers().firstValue("X-SourceMap"))
@@ -205,7 +205,7 @@ public class SourceMapService {
                     .timeout(Duration.ofSeconds(8))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
 
             if (resp.statusCode() != 200) return null;
 
@@ -235,7 +235,7 @@ public class SourceMapService {
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "application/json,text/html,*/*")
                     .build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
 
             int status = resp.statusCode();
             if (status != 200 && status != 206) return null;
@@ -280,7 +280,7 @@ public class SourceMapService {
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .header("Accept", "application/json,text/html,*/*")
                     .build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
 
             int status = resp.statusCode();
             if (status != 200 && status != 206) return null;
@@ -342,7 +342,7 @@ public class SourceMapService {
                     .timeout(Duration.ofSeconds(10))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
             return resp.statusCode() == 200 ? resp.body() : null;
         } catch (Exception ignored) {
             return null;

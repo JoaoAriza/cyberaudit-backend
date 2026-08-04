@@ -32,7 +32,7 @@ public class RobotsTxtService {
     );
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(6))
             .build();
 
@@ -80,7 +80,7 @@ public class RobotsTxtService {
                     .timeout(Duration.ofSeconds(8))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
             if (resp.statusCode() != 200) return null;
             return resp.body();
         } catch (Exception e) {

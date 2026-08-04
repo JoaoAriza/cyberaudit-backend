@@ -63,67 +63,101 @@ public class ScanHistoryService {
         }
     }
 
-    public Optional<ScanResult> findLastResult(String host, boolean activeMode) {
-        return findByHost(host, 10, null).stream()
+    /**
+     * Último resultado de um host DENTRO da conta — base da detecção de mudanças.
+     * Escopado por conta: comparar contra o scan de outro tenant vazaria o estado
+     * anterior daquela conta no diff.
+     */
+    public Optional<ScanResult> findLastResult(String host, boolean activeMode, Account account) {
+        if (account == null) return Optional.empty();
+        return findByHost(account, host, 10, null).stream()
                 .filter(r -> r.isActiveMode() == activeMode)
                 .findFirst()
-                .flatMap(r -> getResult(r.getId()));
+                .flatMap(r -> getResult(r.getId(), account));
     }
 
-    /** Busca scans de um host, filtrando opcionalmente por origin. */
-    public List<ScanRecord> findByHost(String host, int limit, ScanOrigin origin) {
+    /** Scans de um host na conta, filtrando opcionalmente por origin. */
+    public List<ScanRecord> findByHost(Account account, String host, int limit, ScanOrigin origin) {
+        if (account == null) return List.of();
         String normalized = host.startsWith("www.") ? host.substring(4) : host;
         PageRequest page  = PageRequest.of(0, limit);
         List<ScanRecord> records = (origin != null)
-                ? repository.findByHostAndOriginOrderByScannedAtDesc(normalized, origin, page)
-                : repository.findByHostOrderByScannedAtDesc(normalized, page);
+                ? repository.findByAccountAndHostAndOriginOrderByScannedAtDesc(account, normalized, origin, page)
+                : repository.findByAccountAndHostOrderByScannedAtDesc(account, normalized, page);
         // Fallback para registros legados gravados com www.
         if (records.isEmpty()) {
             records = (origin != null)
-                    ? repository.findByHostAndOriginOrderByScannedAtDesc("www." + normalized, origin, page)
-                    : repository.findByHostOrderByScannedAtDesc("www." + normalized, page);
+                    ? repository.findByAccountAndHostAndOriginOrderByScannedAtDesc(account, "www." + normalized, origin, page)
+                    : repository.findByAccountAndHostOrderByScannedAtDesc(account, "www." + normalized, page);
         }
         return records;
     }
 
-    /** Compatibilidade — sem filtro de origin. */
-    public List<ScanRecord> findByHost(String host, int limit) {
-        return findByHost(host, limit, null);
+    /**
+     * Último scan de um host em QUALQUER conta. Uso restrito ao badge público, que
+     * expõe só score e nível de risco do alvo — nunca para devolver histórico a um
+     * usuário. Todo o resto passa pelas variantes com Account.
+     */
+    public List<ScanRecord> findLatestForBadge(String host) {
+        String normalized = host.startsWith("www.") ? host.substring(4) : host;
+        PageRequest page  = PageRequest.of(0, 1);
+        List<ScanRecord> records = repository.findByHostOrderByScannedAtDesc(normalized, page);
+        if (records.isEmpty()) {
+            records = repository.findByHostOrderByScannedAtDesc("www." + normalized, page);
+        }
+        return records;
     }
 
     /** Último scan por host para uma conta (para Visão Geral). */
     public List<ScanRecord> findLatestPerHost(Account account, int limit) {
+        if (account == null) return List.of();
         return repository.findLatestPerHostByAccount(account, PageRequest.of(0, limit));
     }
 
-    /** Busca scans de um host em um intervalo de datas (para gráfico intraday). */
-    public List<ScanRecord> findByHostBetween(String host, LocalDateTime from, LocalDateTime to) {
+    /** Scans de um host da conta em um intervalo de datas (para gráfico intraday). */
+    public List<ScanRecord> findByHostBetween(Account account, String host,
+                                              LocalDateTime from, LocalDateTime to) {
+        if (account == null) return List.of();
         String normalized = host.startsWith("www.") ? host.substring(4) : host;
         PageRequest page  = PageRequest.of(0, 200);
-        List<ScanRecord> records = repository.findByHostAndScannedAtBetweenOrderByScannedAtDesc(normalized, from, to, page);
+        List<ScanRecord> records = repository
+                .findByAccountAndHostAndScannedAtBetweenOrderByScannedAtDesc(account, normalized, from, to, page);
         if (records.isEmpty()) {
-            records = repository.findByHostAndScannedAtBetweenOrderByScannedAtDesc("www." + normalized, from, to, page);
+            records = repository.findByAccountAndHostAndScannedAtBetweenOrderByScannedAtDesc(
+                    account, "www." + normalized, from, to, page);
         }
         return records;
     }
 
-    public List<ScanRecord> findRecent(int limit) {
-        return repository.findAllByOrderByScannedAtDesc(PageRequest.of(0, limit));
+    public List<ScanRecord> findRecent(Account account, int limit) {
+        if (account == null) return List.of();
+        return repository.findByAccountOrderByScannedAtDesc(account, PageRequest.of(0, limit));
     }
 
-    public List<ScanRecord> findRecentByOrigin(int limit, ScanOrigin origin) {
-        return repository.findAllByOriginOrderByScannedAtDesc(origin, PageRequest.of(0, limit));
+    public List<ScanRecord> findRecentByOrigin(Account account, int limit, ScanOrigin origin) {
+        if (account == null) return List.of();
+        return repository.findByAccountAndOriginOrderByScannedAtDesc(
+                account, origin, PageRequest.of(0, limit));
     }
 
-    public Optional<ScanResult> getResult(UUID id) {
-        return repository.findById(id).flatMap(r -> {
-            try {
-                return Optional.of(objectMapper.readValue(r.getResultJson(), ScanResult.class));
-            } catch (Exception e) {
-                System.err.println("[ScanHistoryService] Falha ao desserializar scan " + id + ": " + e.getMessage());
-                return Optional.empty();
-            }
-        });
+    /**
+     * Resultado completo de um scan, apenas se ele pertencer à conta informada.
+     * Sem esse filtro, qualquer usuário autenticado lê o scan de qualquer conta
+     * conhecendo o UUID.
+     */
+    public Optional<ScanResult> getResult(UUID id, Account account) {
+        if (account == null) return Optional.empty();
+        return repository.findById(id)
+                .filter(r -> r.getAccount() != null
+                        && r.getAccount().getId().equals(account.getId()))
+                .flatMap(r -> {
+                    try {
+                        return Optional.of(objectMapper.readValue(r.getResultJson(), ScanResult.class));
+                    } catch (Exception e) {
+                        System.err.println("[ScanHistoryService] Falha ao desserializar scan " + id + ": " + e.getMessage());
+                        return Optional.empty();
+                    }
+                });
     }
 
     public Optional<ScanRecord> findRecordById(UUID id) {

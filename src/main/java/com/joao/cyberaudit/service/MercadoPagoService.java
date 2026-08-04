@@ -106,7 +106,7 @@ public class MercadoPagoService {
                     : HttpRequest.BodyPublishers.noBody();
             req.method(method, pub);
 
-            HttpResponse<String> res = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> res = http.send(req.build(), ScannerHttp.limitedString());
             if (res.statusCode() >= 200 && res.statusCode() < 300) {
                 return res.body() == null || res.body().isBlank()
                         ? mapper.createObjectNode()

@@ -121,7 +121,7 @@ public class PathTraversalService {
                         .header("Accept", "text/html,text/plain,*/*")
                         .build();
 
-                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                HttpResponse<String> resp = client.send(req, ScannerHttp.limitedString());
                 if (resp.statusCode() != 200) continue;
 
                 String body = resp.body() == null ? "" : resp.body();

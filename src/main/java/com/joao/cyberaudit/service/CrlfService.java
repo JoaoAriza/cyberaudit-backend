@@ -125,7 +125,7 @@ public class CrlfService {
                         .build();
 
                 HttpResponse<String> resp = client.send(req,
-                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                        ScannerHttp.limitedString());
 
                 CrlfFinding f = checkProbeInResponse(resp, "path", payload, injectionType);
                 if (f != null) return f;
@@ -154,7 +154,7 @@ public class CrlfService {
                         .build();
 
                 HttpResponse<String> resp = client.send(req,
-                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                        ScannerHttp.limitedString());
 
                 CrlfFinding f = checkProbeInResponse(resp, paramName, payload, injectionType);
                 if (f != null) return f;

@@ -33,7 +33,7 @@ public class SubdomainEnumerationService {
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .build();
 
     public SubdomainEnumerationService(CrtShService crtShService) {
@@ -139,7 +139,7 @@ public class SubdomainEnumerationService {
                         .header("User-Agent", ScannerHttp.USER_AGENT)
                         .build();
 
-                HttpResponse<Void> resp = httpClient.send(req,
+                HttpResponse<Void> resp = ScannerHttp.sendFollowingSafely(httpClient, req,
                         HttpResponse.BodyHandlers.discarding());
                 return resp.statusCode();
             } catch (Exception ignored) {}

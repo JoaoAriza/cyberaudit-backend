@@ -17,7 +17,7 @@ import java.util.Map;
 public class WafDetectionService {
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -232,7 +232,7 @@ public class WafDetectionService {
                     .timeout(Duration.ofSeconds(4))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            return client.send(req, HttpResponse.BodyHandlers.discarding());
+            return ScannerHttp.sendFollowingSafely(client, req, HttpResponse.BodyHandlers.discarding());
         } catch (Exception e) { return null; }
     }
 
@@ -248,7 +248,7 @@ public class WafDetectionService {
                     .timeout(Duration.ofSeconds(4))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> resp = ScannerHttp.sendFollowingSafely(client, req, HttpResponse.BodyHandlers.discarding());
             return resp.statusCode();
         } catch (Exception e) { return -1; }
     }

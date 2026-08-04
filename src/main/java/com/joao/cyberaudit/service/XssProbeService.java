@@ -16,7 +16,7 @@ import java.util.UUID;
 public class XssProbeService {
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
@@ -50,7 +50,7 @@ public class XssProbeService {
                     .build();
 
             HttpResponse<String> resp =
-                    client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                    ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
             String body = resp.body() == null ? "" : resp.body();
 
             // Passo 1: marker precisa aparecer no body

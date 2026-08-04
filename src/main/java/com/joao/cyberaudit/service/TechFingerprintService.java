@@ -19,7 +19,7 @@ public class TechFingerprintService {
             Pattern.compile("(\\d+\\.\\d+(?:\\.\\d+)?)");
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
@@ -155,7 +155,7 @@ public class TechFingerprintService {
                     .header("Accept", "text/html")
                     .build();
 
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
             String body  = resp.body() == null ? "" : resp.body();
             String lower = body.toLowerCase(Locale.ROOT);
 
@@ -296,7 +296,7 @@ public class TechFingerprintService {
                     .timeout(Duration.ofSeconds(6))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
-            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> resp = ScannerHttp.sendFollowingSafely(client, req, HttpResponse.BodyHandlers.discarding());
             return resp.headers().map();
         } catch (Exception e) { return Map.of(); }
     }

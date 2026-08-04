@@ -19,7 +19,7 @@ public class BadgeService {
      * Gera badge lendo do histórico de scans (fallback padrão).
      */
     public String generateBadge(String host, String style) {
-        List<ScanRecord> records = scanHistoryService.findByHost(host, 1);
+        List<ScanRecord> records = scanHistoryService.findLatestForBadge(host);
         if (records.isEmpty()) return buildNotScannedBadge(host, style);
         ScanRecord latest = records.get(0);
         return buildBadge(host, latest.getScore(), latest.getRiskLevel(), style);

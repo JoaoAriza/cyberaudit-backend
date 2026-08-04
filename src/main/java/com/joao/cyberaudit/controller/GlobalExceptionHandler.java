@@ -3,6 +3,7 @@ package com.joao.cyberaudit.controller;
 import com.joao.cyberaudit.exception.DomainBlockedException;
 import com.joao.cyberaudit.exception.GuestDailyLimitException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
+import com.joao.cyberaudit.exception.ScanCapacityException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -43,6 +44,17 @@ public class GlobalExceptionHandler {
                 "resetsAt",       ex.getResetsAt().toString(),
                 "upgrade",        "Para acesso ilimitado, solicite um convite ao administrador."
         ));
+    }
+
+    @ExceptionHandler(ScanCapacityException.class)
+    public ResponseEntity<Map<String, Object>> handleCapacity(ScanCapacityException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header("Retry-After", "30")
+                .body(Map.of(
+                        "error",     "SCAN_CAPACITY",
+                        "message",   ex.getMessage(),
+                        "timestamp", LocalDateTime.now().toString()
+                ));
     }
 
     @ExceptionHandler(ResponseStatusException.class)

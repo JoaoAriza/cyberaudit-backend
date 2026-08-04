@@ -56,16 +56,7 @@ public class ScanController {
                            HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
-        if (active && currentUser == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Scan ativo requer autenticação. Faça login ou solicite um convite.");
-        }
-        if (currentUser == null) {
-            guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
-        } else {
-            if (active) planLimitService.checkActiveScan(currentUser, url);
-            planLimitService.checkAndIncrementDailyScan(currentUser);
-        }
+        enforceScanLimits(url, active, currentUser, request);
         return scanEntitlement.applyEntitlement(
                 scanOrchestrator.execute(url, active, currentUser, false), currentUser);
     }
@@ -78,6 +69,9 @@ public class ScanController {
                              HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
+        // Mesmas travas do GET /scan: este endpoint dispara um scan completo e é
+        // público — sem isso era o caminho para scan ativo anônimo e ilimitado.
+        enforceScanLimits(url, active, currentUser, request);
         return reportService.generateReport(scanEntitlement.applyEntitlement(
                 scanOrchestrator.execute(url, active, currentUser, false), currentUser));
     }
@@ -85,7 +79,8 @@ public class ScanController {
     // ── Relatório PDF — via scanId (sem re-scan, resultado já em memória) ───────
 
     @GetMapping(value = "/report/pdf/{scanId}", produces = "application/pdf")
-    public ResponseEntity<byte[]> scanReportPdfByScanId(@PathVariable String scanId) {
+    public ResponseEntity<byte[]> scanReportPdfByScanId(@PathVariable String scanId,
+                                                         HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
         if (currentUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
@@ -94,7 +89,9 @@ public class ScanController {
 
         planLimitService.checkPdfExport(currentUser);
 
-        AsyncScanStatus status = asyncScanService.getStatus(scanId);
+        // Só o autor do scan exporta o PDF dele — o scanId é um UUID, não uma credencial.
+        AsyncScanStatus status = asyncScanService.getStatusFor(scanId,
+                AsyncScanService.ownerKey(currentUser, request.getRemoteAddr()));
         if (status == null || status.getResult() == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Resultado de scan não encontrado. Realize um novo scan antes de exportar o PDF.");
@@ -126,6 +123,8 @@ public class ScanController {
         }
         planLimitService.checkPdfExport(currentUser);
         checkRateLimit(request, currentUser);
+        // Re-scan completo: consome limite diário como qualquer outro scan.
+        enforceScanLimits(url, active, currentUser, request);
         ScanResult result = scanOrchestrator.execute(url, active, currentUser, false);
         return pdfReportService.generatePdf(
                 result, reportService.generateReport(result), currentUser.getAccount());
@@ -143,25 +142,22 @@ public class ScanController {
 
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
+        enforceScanLimits(url, active, currentUser, request);
 
-        if (active && currentUser == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Scan ativo requer autenticação.");
-        }
-        if (currentUser == null) {
-            guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
-        } else {
-            if (active) planLimitService.checkActiveScan(currentUser, url);
-            planLimitService.checkAndIncrementDailyScan(currentUser);
-        }
-
-        String scanId = asyncScanService.submit(url, active, currentUser, refresh, notify);
+        String scanId = asyncScanService.submit(url, active, currentUser, refresh, notify,
+                AsyncScanService.ownerKey(currentUser, request.getRemoteAddr()));
         return ResponseEntity.accepted().body(Map.of("scanId", scanId));
     }
 
+    /**
+     * Endpoint público: o scanId sozinho não autoriza nada, então o resultado só
+     * volta para quem submeteu (usuário autenticado ou mesmo IP, para guest).
+     */
     @GetMapping("/async/{scanId}")
-    public ResponseEntity<AsyncScanStatus> getAsyncStatus(@PathVariable String scanId) {
-        AsyncScanStatus status = asyncScanService.getStatus(scanId);
+    public ResponseEntity<AsyncScanStatus> getAsyncStatus(@PathVariable String scanId,
+                                                          HttpServletRequest request) {
+        AsyncScanStatus status = asyncScanService.getStatusFor(scanId,
+                AsyncScanService.ownerKey(getCurrentUser(), request.getRemoteAddr()));
         if (status == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(status);
     }
@@ -170,6 +166,7 @@ public class ScanController {
 
     @GetMapping("/verify-token")
     public ResponseEntity<Map<String, String>> verifyToken(@RequestParam String host) {
+        SsrfGuard.validateHost(host);
         String token = domainProtectionService.generateVerificationToken(host);
         return ResponseEntity.ok(Map.of(
                 "host",         host,
@@ -179,8 +176,16 @@ public class ScanController {
         ));
     }
 
+    /**
+     * Público (guests usam no OwnershipCard) e faz requisição de saída para o host
+     * informado: passa pelo SsrfGuard antes e consome rate-limit como qualquer
+     * endpoint que gera tráfego externo.
+     */
     @GetMapping("/verify-check")
-    public ResponseEntity<Map<String, Object>> verifyCheck(@RequestParam String host) {
+    public ResponseEntity<Map<String, Object>> verifyCheck(@RequestParam String host,
+                                                           HttpServletRequest request) {
+        checkRateLimit(request, getCurrentUser());
+        SsrfGuard.validateHost(host);
         boolean verified = domainProtectionService.isOwnershipVerified(host);
         return ResponseEntity.ok(Map.of(
                 "host",     host,
@@ -192,6 +197,27 @@ public class ScanController {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Travas de custo de TODO endpoint que dispara um scan: scan ativo exige login,
+     * guest consome a cota diária por IP e usuário consome a cota do plano.
+     *
+     * Estava duplicado em /scan e /scan/async e ausente em /scan/report e
+     * /scan/report/pdf — o que fazia dos dois últimos um bypass completo dos limites.
+     */
+    private void enforceScanLimits(String url, boolean active,
+                                   AppUser currentUser, HttpServletRequest request) {
+        if (active && currentUser == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Scan ativo requer autenticação. Faça login ou solicite um convite.");
+        }
+        if (currentUser == null) {
+            guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
+        } else {
+            if (active) planLimitService.checkActiveScan(currentUser, url);
+            planLimitService.checkAndIncrementDailyScan(currentUser);
+        }
+    }
 
     private void checkRateLimit(HttpServletRequest request, AppUser currentUser) {
         if (!rateLimitService.allow(request.getRemoteAddr(), currentUser)) {

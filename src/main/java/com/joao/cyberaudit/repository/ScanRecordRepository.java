@@ -26,11 +26,30 @@ public interface ScanRecordRepository extends JpaRepository<ScanRecord, UUID> {
     List<ScanRecord> findByHostAndScannedAtBetweenOrderByScannedAtDesc(
             String host, LocalDateTime from, LocalDateTime to, Pageable pageable);
 
-    // ── Globais ───────────────────────────────────────────────────────────────
+    // ── Globais (sem filtro de conta) ─────────────────────────────────────────
+    // ATENÇÃO: só para uso público que não expõe dados da conta — hoje apenas o
+    // badge (score + nível de risco de um host). Tudo que devolve histórico a um
+    // usuário DEVE usar as variantes por conta abaixo.
 
     List<ScanRecord> findAllByOrderByScannedAtDesc(Pageable pageable);
 
     List<ScanRecord> findAllByOriginOrderByScannedAtDesc(ScanOrigin origin, Pageable pageable);
+
+    // ── Escopados por conta (histórico do usuário) ────────────────────────────
+
+    List<ScanRecord> findByAccountOrderByScannedAtDesc(Account account, Pageable pageable);
+
+    List<ScanRecord> findByAccountAndOriginOrderByScannedAtDesc(
+            Account account, ScanOrigin origin, Pageable pageable);
+
+    List<ScanRecord> findByAccountAndHostOrderByScannedAtDesc(
+            Account account, String host, Pageable pageable);
+
+    List<ScanRecord> findByAccountAndHostAndOriginOrderByScannedAtDesc(
+            Account account, String host, ScanOrigin origin, Pageable pageable);
+
+    List<ScanRecord> findByAccountAndHostAndScannedAtBetweenOrderByScannedAtDesc(
+            Account account, String host, LocalDateTime from, LocalDateTime to, Pageable pageable);
 
     // ── Por conta (TEAM_SCANS / PDF executivo) ────────────────────────────────
 

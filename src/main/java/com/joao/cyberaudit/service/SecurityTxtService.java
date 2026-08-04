@@ -21,7 +21,7 @@ public class SecurityTxtService {
      */
 
     private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -46,8 +46,8 @@ public class SecurityTxtService {
                     .header("User-Agent", ScannerHttp.USER_AGENT)
                     .build();
 
-            HttpResponse<String> resp = client.send(
-                    req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, 
+                    req, ScannerHttp.limitedString());
 
             if (resp.statusCode() != 200) return new SecurityTxtResult(false, null, null);
 
