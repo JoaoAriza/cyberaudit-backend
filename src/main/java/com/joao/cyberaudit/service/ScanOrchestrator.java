@@ -54,6 +54,7 @@ public class ScanOrchestrator {
     private final ComplianceMappingService        complianceMappingService;
     private final RelatedHostsHeaderService       relatedHostsHeaderService;
     private final ScanConcurrencyLimiter          concurrencyLimiter;
+    private final PlatformStaffService            platformStaffService;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -85,7 +86,8 @@ public class ScanOrchestrator {
             DegradationNotificationService degradationNotificationService,
             ComplianceMappingService complianceMappingService,
             RelatedHostsHeaderService relatedHostsHeaderService,
-            ScanConcurrencyLimiter concurrencyLimiter) {
+            ScanConcurrencyLimiter concurrencyLimiter,
+            PlatformStaffService platformStaffService) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -126,6 +128,7 @@ public class ScanOrchestrator {
         this.complianceMappingService           = complianceMappingService;
         this.relatedHostsHeaderService          = relatedHostsHeaderService;
         this.concurrencyLimiter                 = concurrencyLimiter;
+        this.platformStaffService               = platformStaffService;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -363,12 +366,17 @@ public class ScanOrchestrator {
             passiveResult.setCompliance(complianceMappingService.generate(passiveResult));
 
             // ── Fase 3: ownership check ────────────────────────────────────────
+            // Posse é exigida SEMPRE. Antes havia uma heurística
+            // (requiresOwnershipForActiveScan) que dispensava a checagem quando o
+            // alvo "parecia bem configurado" — invertida: liberava justamente os
+            // scans ativos contra sites de terceiros bem mantidos. Quão hardened o
+            // alvo é não diz nada sobre ter autorização para atacá-lo.
             if (active) {
-                boolean needsOwnership  = domainProtectionService.requiresOwnershipForActiveScan(passiveResult);
-                boolean bypassOwnership = currentUser != null &&
-                        (currentUser.getRole() == Role.OWNER ||
-                                currentUser.getRole() == Role.ADMIN);
-                if (needsOwnership && !bypassOwnership &&
+                // Só equipe da plataforma dispensa a prova de posse. Antes era
+                // `role == OWNER || role == ADMIN` — e /auth/register entrega OWNER
+                // a quem se cadastrar, o que tornava a checagem opcional para todos.
+                boolean bypassOwnership = platformStaffService.isStaff(currentUser);
+                if (!bypassOwnership &&
                         !domainProtectionService.isOwnershipVerified(host)) {
                     throw new OwnershipNotVerifiedException(passiveResult,
                             "Scan ativo não autorizado para este domínio. " +

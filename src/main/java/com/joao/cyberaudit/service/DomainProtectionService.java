@@ -1,6 +1,5 @@
 package com.joao.cyberaudit.service;
 
-import com.joao.cyberaudit.model.ScanResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -38,33 +37,6 @@ public class DomainProtectionService {
     public DomainProtectionService(
             @Value("${domain.verification-secret:${jwt.secret}}") String secret) {
         this.verificationSecret = secret.getBytes(StandardCharsets.UTF_8);
-    }
-
-    public boolean requiresOwnershipForActiveScan(ScanResult passiveScan) {
-        if (passiveScan == null) return true;
-
-        if (passiveScan.isInputSurfaceDetected()) return true;
-
-        if (passiveScan.getScore() != null &&
-                passiveScan.getScore().getScore() < 60) return true;
-
-        if (passiveScan.getOpenPorts() != null) {
-            boolean sensitivePorts = passiveScan.getOpenPorts().stream()
-                    .anyMatch(p -> p.getPort() != 80 && p.getPort() != 443
-                            && "OPEN".equals(p.getState()));
-            if (sensitivePorts) return true;
-        }
-
-        // HSTS e CSP ausentes = provavelmente app em produção sem hardening
-        if (passiveScan.getHeaders() != null) {
-            String hsts = passiveScan.getHeaders().get("Strict-Transport-Security");
-            String csp  = passiveScan.getHeaders().get("Content-Security-Policy");
-            boolean hstsMissing = hsts != null && hsts.startsWith("MISSING");
-            boolean cspMissing  = csp  != null && csp.startsWith("MISSING");
-            if (hstsMissing && cspMissing) return true;
-        }
-
-        return false;
     }
 
     /**

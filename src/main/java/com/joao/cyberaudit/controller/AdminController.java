@@ -55,7 +55,10 @@ public class AdminController {
     @GetMapping("/users")
     public List<UserManagementDto> listUsers(@AuthenticationPrincipal AppUser caller) {
         requireOwner(caller);
-        return userRepository.findAll()
+        // findAll() devolvia TODOS os usuários da plataforma. Como /auth/register é
+        // público e cria o usuário já como OWNER, qualquer pessoa se cadastrava e
+        // listava nome/e-mail/role de todos os clientes.
+        return userRepository.findByAccount(requireAccount(caller))
                 .stream()
                 .map(UserManagementDto::from)
                 .toList();
@@ -74,7 +77,7 @@ public class AdminController {
                     "Não é possível promover outro usuário a OWNER.");
         }
 
-        AppUser target = findUser(id);
+        AppUser target = findUser(id, caller);
 
         if (target.getRole() == Role.OWNER) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
@@ -96,7 +99,7 @@ public class AdminController {
 
         requireOwner(caller);
 
-        AppUser target = findUser(id);
+        AppUser target = findUser(id, caller);
 
         if (target.getRole() == Role.OWNER) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
@@ -120,7 +123,7 @@ public class AdminController {
             @AuthenticationPrincipal AppUser caller) {
 
         requireOwner(caller);
-        AppUser target = findUser(id);
+        AppUser target = findUser(id, caller);
         target.setActive(true);
         userRepository.save(target);
         auditService.log(caller, AuditAction.USER_REACTIVATED, target.getEmail());
@@ -153,7 +156,7 @@ public class AdminController {
     @GetMapping("/invites")
     public List<InviteDto> listInvites(@AuthenticationPrincipal AppUser caller) {
         requireOwner(caller);
-        return inviteService.findPending();
+        return inviteService.findPending(caller);
     }
 
     @DeleteMapping("/invites/{id}")
@@ -279,8 +282,27 @@ public class AdminController {
         }
     }
 
-    private AppUser findUser(UUID id) {
+    private Account requireAccount(AppUser caller) {
+        Account account = caller.getAccount();
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Usuário sem conta associada.");
+        }
+        return account;
+    }
+
+    /**
+     * Usuário alvo, obrigatoriamente da MESMA conta do chamador.
+     *
+     * Sem o filtro de conta, um OWNER podia alterar role, desativar e reativar
+     * usuários de qualquer outra conta apenas conhecendo o UUID. Alvo de outra
+     * conta responde 404 — não confirma existência.
+     */
+    private AppUser findUser(UUID id, AppUser caller) {
+        Account account = requireAccount(caller);
         return userRepository.findById(id)
+                .filter(u -> u.getAccount() != null
+                        && u.getAccount().getId().equals(account.getId()))
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Usuário não encontrado."));
     }

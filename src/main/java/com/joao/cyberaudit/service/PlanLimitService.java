@@ -29,8 +29,12 @@ public class PlanLimitService {
 
     private final DomainRepository domainRepository;
 
-    public PlanLimitService(DomainRepository domainRepository) {
-        this.domainRepository = domainRepository;
+    private final PlatformStaffService platformStaffService;
+
+    public PlanLimitService(DomainRepository domainRepository,
+                            PlatformStaffService platformStaffService) {
+        this.domainRepository     = domainRepository;
+        this.platformStaffService = platformStaffService;
     }
 
     /** "accountId:date" → scans executados hoje */
@@ -90,10 +94,14 @@ public class PlanLimitService {
      * Verifica se o usuário pode executar scan ativo no host-alvo.
      *
      * Regras:
-     *  OWNER / ADMIN  → sempre permitido (qualquer domínio)
-     *  COMPANY        → permitido (qualquer domínio cadastrado e verificado ou não)
-     *  PRO (PERSONAL) → permitido APENAS se o host (ou seu domínio pai) está verificado na conta
-     *  FREE           → bloqueado
+     *  OWNER / ADMIN  → sempre permitido (equipe da plataforma)
+     *  FREE (PESSOAL) → bloqueado
+     *  PRO / EMPRESA  → permitido APENAS se o host (ou seu domínio pai) está verificado na conta
+     *
+     * O plano define QUANTOS domínios e com que frequência — nunca dispensa a prova
+     * de posse. Scan ativo faz port scan e dispara probes de injeção a partir da
+     * infra do CyberAudit: sem posse verificada, seria uma ferramenta de ataque a
+     * terceiros vendida por assinatura. (Antes, conta EMPRESA passava direto.)
      */
     public void checkActiveScan(AppUser user, String targetHost) {
         if (user == null) {
@@ -101,8 +109,9 @@ public class PlanLimitService {
                     "Scan ativo requer autenticação.");
         }
 
-        // OWNER / ADMIN — acesso total
-        if (user.getRole() == Role.OWNER || user.getRole() == Role.ADMIN) return;
+        // Equipe da plataforma (lista em platform.staff-emails, vazia por padrão).
+        // NÃO usar Role.OWNER aqui: /auth/register entrega OWNER a qualquer cadastro.
+        if (platformStaffService.isStaff(user)) return;
 
         Account account = user.getAccount();
         if (account == null) {
@@ -110,17 +119,13 @@ public class PlanLimitService {
                     "Conta não encontrada.");
         }
 
-        // EMPRESA (COMPANY) — acesso total
-        if (account.getType() == AccountType.COMPANY) return;
-
         // PESSOAL FREE — bloqueado
         Plan plan = effectivePlan(account);
-        if (plan == Plan.FREE) {
+        if (plan == Plan.FREE && account.getType() != AccountType.COMPANY) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "Scan ativo requer plano PRO ou superior.");
         }
 
-        // PESSOAL PRO — apenas domínios verificados na conta
         if (targetHost == null || targetHost.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Host inválido para scan ativo.");
@@ -134,8 +139,8 @@ public class PlanLimitService {
 
         if (!allowed) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Scan ativo em modo PESSOAL só é permitido em domínios verificados na sua conta. "
-                    + "Acesse Domínios, cadastre e verifique \"" + host + "\" ou faça upgrade para conta Empresa.");
+                    "Scan ativo só é permitido em domínios verificados na sua conta. "
+                    + "Acesse Domínios, cadastre e verifique \"" + host + "\" para continuar.");
         }
     }
 

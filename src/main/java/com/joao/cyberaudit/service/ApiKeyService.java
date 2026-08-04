@@ -4,6 +4,7 @@ import com.joao.cyberaudit.dto.ApiKeyDto;
 import com.joao.cyberaudit.model.*;
 import com.joao.cyberaudit.repository.ApiKeyRepository;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +36,7 @@ public class ApiKeyService {
     private final PlanLimitService planLimitService;
 
     public ApiKeyService(ApiKeyRepository apiKeyRepository,
-                         PasswordEncoder passwordEncoder,
+                         @Qualifier("apiKeyEncoder") PasswordEncoder passwordEncoder,
                          PlanLimitService planLimitService) {
         this.apiKeyRepository = apiKeyRepository;
         this.passwordEncoder  = passwordEncoder;

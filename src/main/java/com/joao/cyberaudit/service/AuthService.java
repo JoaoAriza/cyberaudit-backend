@@ -28,6 +28,7 @@ public class AuthService {
     private final PlanLimitService    planLimitService;
     private final TwoFactorService    twoFactorService;
     private final AuditService        auditService;
+    private final AuthThrottleService authThrottleService;
 
     public AuthService(AppUserRepository userRepository,
                        AccountRepository accountRepository,
@@ -36,7 +37,8 @@ public class AuthService {
                        AuthenticationManager authManager,
                        PlanLimitService planLimitService,
                        TwoFactorService twoFactorService,
-                       AuditService auditService) {
+                       AuditService auditService,
+                       AuthThrottleService authThrottleService) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.passwordEncoder   = passwordEncoder;
@@ -45,6 +47,7 @@ public class AuthService {
         this.planLimitService  = planLimitService;
         this.twoFactorService  = twoFactorService;
         this.auditService      = auditService;
+        this.authThrottleService = authThrottleService;
     }
 
     @Transactional
@@ -58,6 +61,7 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "É necessário aceitar os Termos de Uso e Política de Privacidade.");
         }
+        PasswordPolicy.validate(req.getPassword());
 
         Account account = buildAccount(req);
         accountRepository.save(account);
@@ -80,18 +84,23 @@ public class AuthService {
         return new AuthResponse(token, UserDto.from(owner, planLimitService));
     }
 
-    public AuthResponse login(LoginRequest req) {
+    public AuthResponse login(LoginRequest req, String clientIp) {
         String email = req.getEmail().toLowerCase().trim();
+
+        // Antes da senha: conta ou IP já travados por tentativas anteriores.
+        authThrottleService.checkLoginAllowed(email, clientIp);
 
         try {
             authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(email, req.getPassword())
             );
         } catch (AuthenticationException e) {
+            authThrottleService.recordLoginFailure(email, clientIp);
             auditService.log(null, null, email, null,
                     AuditAction.LOGIN_FAILED, null, false);
             throw e;
         }
+        authThrottleService.recordLoginSuccess(email, clientIp);
 
         AppUser user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResponseStatusException(
@@ -137,10 +146,7 @@ public class AuthService {
         if (req.getEmail() == null || req.getEmail().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório.");
         }
-        if (req.getPassword() == null || req.getPassword().length() < 8) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Senha deve ter pelo menos 8 caracteres.");
-        }
+        PasswordPolicy.validate(req.getPassword());
 
         String email = req.getEmail().toLowerCase().trim();
 

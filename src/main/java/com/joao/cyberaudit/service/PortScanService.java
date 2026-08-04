@@ -55,6 +55,12 @@ public class PortScanService {
         try { addr = InetAddress.getByName(host); }
         catch (Exception e) { return Collections.emptyList(); }
 
+        // Único módulo que abre socket TCP cru, e o único que resolve o host por
+        // conta própria: confere o endereço REALMENTE resolvido antes de conectar.
+        // Sem isso, um host que resolva para IP interno viraria um port scan da
+        // rede da própria instância.
+        if (SsrfGuard.isForbidden(addr)) return Collections.emptyList();
+
         ExecutorService pool = Executors.newFixedThreadPool(20);
         Semaphore sem = new Semaphore(10);
         AtomicInteger timeouts = new AtomicInteger(0);

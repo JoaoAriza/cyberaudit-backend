@@ -110,6 +110,7 @@ public class InviteService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "É necessário aceitar os Termos de Uso e Política de Privacidade.");
         }
+        PasswordPolicy.validate(req.getPassword());
 
         String name = (req.getName() != null && !req.getName().isBlank())
                 ? req.getName() : invite.getName();
@@ -135,12 +136,14 @@ public class InviteService {
         inviteRepository.save(invite);
     }
 
-    public List<InviteDto> findPending() {
-        return inviteRepository.findPending(LocalDateTime.now())
+    /** Convites pendentes da conta do chamador — nunca de outras contas. */
+    public List<InviteDto> findPending(AppUser caller) {
+        if (caller == null || caller.getAccount() == null) return List.of();
+        return inviteRepository.findPendingByAccount(caller.getAccount(), LocalDateTime.now())
                 .stream()
                 .map(invite -> {
                     InviteDto dto = InviteDto.from(invite);
-                    // Inclui o link na listagem — só OWNER acessa esse endpoint
+                    // Inclui o link na listagem — só OWNER da própria conta chega aqui
                     dto.setAcceptLink("/auth/accept-invite/" + invite.getToken());
                     return dto;
                 })
@@ -152,6 +155,13 @@ public class InviteService {
         Invite invite = inviteRepository.findById(inviteId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Convite não encontrado."));
+
+        // Convite de outra conta responde 404 — não confirma nem a existência.
+        if (caller == null || caller.getAccount() == null
+                || invite.getAccount() == null
+                || !invite.getAccount().getId().equals(caller.getAccount().getId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Convite não encontrado.");
+        }
 
         if (invite.isAccepted()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,

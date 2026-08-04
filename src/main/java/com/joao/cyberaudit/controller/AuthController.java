@@ -29,6 +29,7 @@ public class AuthController {
     private final TwoFactorService      twoFactorService;
     private final JwtUtil               jwtUtil;
     private final AuditService          auditService;
+    private final AuthThrottleService   authThrottleService;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
@@ -37,7 +38,8 @@ public class AuthController {
                           AppUserRepository userRepository,
                           TwoFactorService twoFactorService,
                           JwtUtil jwtUtil,
-                          AuditService auditService) {
+                          AuditService auditService,
+                          AuthThrottleService authThrottleService) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
@@ -46,6 +48,7 @@ public class AuthController {
         this.twoFactorService      = twoFactorService;
         this.jwtUtil               = jwtUtil;
         this.auditService          = auditService;
+        this.authThrottleService   = authThrottleService;
     }
 
     /**
@@ -64,8 +67,9 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req) {
-        return ResponseEntity.ok(authService.login(req));
+    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req,
+                                              HttpServletRequest request) {
+        return ResponseEntity.ok(authService.login(req, request.getRemoteAddr()));
     }
 
     /**
@@ -165,7 +169,18 @@ public class AuthController {
         AppUser user = currentUser();
         String  code   = body.get("code");
         String  method = body.getOrDefault("method", "TOTP");
-        twoFactorService.verifyLoginCode(user, code, method);
+
+        // Sem isto o código de 6 dígitos é força-brutável: o token pre-auth pode ser
+        // reemitido à vontade e o OTP de e-mail vale 10 minutos.
+        authThrottleService.checkTwoFactorAllowed(user.getId());
+        try {
+            twoFactorService.verifyLoginCode(user, code, method);
+        } catch (RuntimeException e) {
+            authThrottleService.recordTwoFactorFailure(user.getId());
+            throw e;
+        }
+        authThrottleService.recordTwoFactorSuccess(user.getId());
+
         auditService.log(user, AuditAction.LOGIN_2FA_VERIFIED, "method=" + method);
         auditService.log(user, AuditAction.LOGIN_SUCCESS, "via 2FA (" + method + ")");
         String fullToken = jwtUtil.generateToken(user);
@@ -182,7 +197,11 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Email OTP não está habilitado para este usuário.");
         }
+        // Cooldown: o endpoint aceita token pre-auth, então quem só tem a senha
+        // poderia usá-lo como bomba de e-mail contra a vítima.
+        authThrottleService.checkOtpResendAllowed(user.getId());
         twoFactorService.sendEmailOtp(user);
+        authThrottleService.recordOtpSent(user.getId());
         return ResponseEntity.ok(Map.of("message", "Código reenviado para " + user.getEmail()));
     }
 

@@ -1,9 +1,11 @@
 package com.joao.cyberaudit.repository;
 
+import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.Invite;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,8 +19,15 @@ public interface InviteRepository extends JpaRepository<Invite, UUID> {
 
     Optional<Invite> findByToken(String token);
 
-    @Query("SELECT i FROM Invite i WHERE i.accepted = false AND i.expiresAt > :now")
-    List<Invite> findPending(LocalDateTime now);
+    /**
+     * Convites pendentes de UMA conta. Escopado de propósito: a listagem devolve o
+     * link de aceite (com o token), então uma versão global entregaria a qualquer
+     * OWNER o convite de entrada em outra empresa.
+     */
+    @Query("SELECT i FROM Invite i WHERE i.accepted = false AND i.expiresAt > :now "
+            + "AND i.account = :account")
+    List<Invite> findPendingByAccount(@Param("account") Account account,
+                                      @Param("now") LocalDateTime now);
 
     @Modifying
     @Transactional

@@ -23,4 +23,7 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
     Optional<AppUser> findByEmailWithAccount(@Param("email") String email);
 
     List<AppUser> findByAccountAndRole(Account account, Role role);
+
+    /** Usuários de uma conta — base da gestão de equipe em /admin/users. */
+    List<AppUser> findByAccount(Account account);
 }
