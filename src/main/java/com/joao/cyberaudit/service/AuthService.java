@@ -62,6 +62,7 @@ public class AuthService {
                     "É necessário aceitar os Termos de Uso e Política de Privacidade.");
         }
         PasswordPolicy.validate(req.getPassword());
+        PasswordPolicy.validateIdentity(req.getName(), req.getEmail());
 
         Account account = buildAccount(req);
         accountRepository.save(account);
@@ -147,6 +148,7 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório.");
         }
         PasswordPolicy.validate(req.getPassword());
+        PasswordPolicy.validateIdentity(req.getName(), req.getEmail());
 
         String email = req.getEmail().toLowerCase().trim();
 

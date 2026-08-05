@@ -111,6 +111,7 @@ public class InviteService {
                     "É necessário aceitar os Termos de Uso e Política de Privacidade.");
         }
         PasswordPolicy.validate(req.getPassword());
+        PasswordPolicy.validateIdentity(req.getName(), invite.getEmail());
 
         String name = (req.getName() != null && !req.getName().isBlank())
                 ? req.getName() : invite.getName();

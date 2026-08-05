@@ -74,17 +74,11 @@ public class PdfReportService {
                 if (account.getBrandReportName() != null
                         && !account.getBrandReportName().isBlank())
                     brandName = account.getBrandReportName().toUpperCase();
-                if (account.getBrandLogoBase64() != null
-                        && !account.getBrandLogoBase64().isBlank()) {
-                    try {
-                        String b64 = account.getBrandLogoBase64();
-                        // Remove prefixo "data:image/...;base64," se presente
-                        if (b64.contains(",")) b64 = b64.substring(b64.indexOf(',') + 1);
-                        brandLogoBytes = Base64.getDecoder().decode(b64);
-                    } catch (Exception ignored2) {
-                        brandLogoBytes = null;
-                    }
-                }
+                // Revalida no render, não só na gravação: contas que já tinham logo
+                // salvo antes da validação passariam direto para o PDFBox, e um logo
+                // malformado/gigante derrubaria toda exportação de PDF da conta.
+                var logo = BrandLogoValidator.validate(account.getBrandLogoBase64());
+                brandLogoBytes = logo.valid() ? logo.bytes() : null;
             }
 
             doc    = new PDDocument();

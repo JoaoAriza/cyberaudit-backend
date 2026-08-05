@@ -22,6 +22,22 @@ public final class PasswordPolicy {
      */
     public static final int MAX_LENGTH = 128;
 
+    /**
+     * Nome e e-mail não tinham teto: acima de 255 chars a inserção estourava na
+     * coluna e o cliente recebia um 500 em vez de um 400 claro.
+     */
+    public static void validateIdentity(String name, String email) {
+        if (name != null && name.strip().length() > 120) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Nome muito longo. Máximo 120 caracteres.");
+        }
+        if (email != null && email.strip().length() > 254) {
+            // 254 é o limite prático de endereço de e-mail (RFC 5321).
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "E-mail muito longo. Máximo 254 caracteres.");
+        }
+    }
+
     public static void validate(String password) {
         if (password == null || password.length() < MIN_LENGTH) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,

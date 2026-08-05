@@ -6,6 +6,7 @@ import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.AccountRepository;
+import com.joao.cyberaudit.service.BrandLogoValidator;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -50,11 +51,13 @@ public class AccountController {
 
         checkOwnerOrAdmin(user);
 
-        // Valida tamanho máximo do logo (~200 KB em base64 ≈ ~150 KB imagem)
-        if (dto.getBrandLogoBase64() != null
-                && dto.getBrandLogoBase64().length() > 280_000) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Logo muito grande. Máximo 200 KB após base64.");
+        // Valida o logo de verdade: tamanho, formato (PNG/JPEG por assinatura) e
+        // DIMENSÕES. A checagem antiga só media a string base64, o que deixava passar
+        // bomba de descompressão — um PNG de poucos KB declarando 50000x50000 px
+        // estoura a heap quando o PDFBox for desenhar o relatório.
+        var logo = BrandLogoValidator.validate(dto.getBrandLogoBase64());
+        if (!logo.valid()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, logo.reason());
         }
 
         // Valida formato hex da cor
@@ -62,6 +65,13 @@ public class AccountController {
                 && !dto.getBrandColor().matches("^#[0-9A-Fa-f]{6}$")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Cor inválida. Use formato hex (#RRGGBB).");
+        }
+
+        // Nome do relatório vai para o cabeçalho do PDF e para o banco — sem teto,
+        // era string ilimitada em ambos.
+        if (dto.getBrandReportName() != null && dto.getBrandReportName().strip().length() > 120) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Nome do relatório muito longo. Máximo 120 caracteres.");
         }
 
         Account account = user.getAccount();
