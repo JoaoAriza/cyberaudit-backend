@@ -52,7 +52,9 @@ public class TwoFactorService {
 
         return Map.of(
                 "secret", secret,
-                "qrUri",  totpService.buildQrUri(secret, user.getEmail())
+                "qrUri",  totpService.buildQrUri(secret, user.getEmail()),
+                // QR renderizado no servidor: o segredo não sai da nossa origem.
+                "qrImage", totpService.buildQrDataUri(secret, user.getEmail())
         );
     }
 

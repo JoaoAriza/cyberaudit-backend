@@ -31,10 +31,12 @@ public class BadgeController {
                 ? badgeService.generateBadge(host, score, risk, style)
                 : badgeService.generateBadge(host, style);
 
+        // Um único Cache-Control: .cacheControl() e .header("Cache-Control", ...)
+        // juntos emitiam DOIS headers com valores diferentes ("max-age=300" e
+        // "no-cache, max-age=300"), deixando o comportamento de cache ambíguo.
         return ResponseEntity.ok()
                 .contentType(MediaType.valueOf("image/svg+xml"))
-                .cacheControl(CacheControl.maxAge(5, TimeUnit.MINUTES))
-                .header("Cache-Control", "no-cache, max-age=300")
+                .cacheControl(CacheControl.maxAge(5, TimeUnit.MINUTES).cachePublic())
                 .header("Content-Disposition", "inline")
                 .body(svg);
     }
