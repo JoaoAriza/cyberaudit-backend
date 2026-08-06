@@ -26,4 +26,7 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
 
     /** Usuários de uma conta — base da gestão de equipe em /admin/users. */
     List<AppUser> findByAccount(Account account);
+
+    /** Exclusão de conta: quem foi convidado por este usuário (para soltar a FK). */
+    List<AppUser> findByInvitedBy(AppUser invitedBy);
 }

@@ -96,4 +96,14 @@ public interface ScanRecordRepository extends JpaRepository<ScanRecord, UUID> {
     @Modifying
     @Query("DELETE FROM ScanRecord r WHERE r.scannedAt < :cutoff")
     int deleteByScannedAtBefore(@Param("cutoff") LocalDateTime cutoff);
+
+    /**
+     * Exclusão de conta (LGPD, direito ao esquecimento): remove o histórico de scans.
+     * Sem isto, a FK scan_records.account_id impedia a exclusão da conta — e, como
+     * todo scan autenticado grava um registro aqui, isso significava que nenhuma
+     * conta que já tivesse usado o produto conseguia ser excluída.
+     */
+    @Modifying
+    @Query("DELETE FROM ScanRecord r WHERE r.account = :account")
+    int deleteByAccount(@Param("account") Account account);
 }

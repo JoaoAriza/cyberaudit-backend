@@ -11,6 +11,12 @@ import java.util.UUID;
 @Repository
 public interface ApiKeyRepository extends JpaRepository<ApiKey, UUID> {
 
+    /** Exclusão de conta (LGPD): remove todas as chaves da conta. */
+    void deleteByAccount(Account account);
+
+    /** Exclusão de usuário: chaves criadas por ele. */
+    void deleteByCreatedBy(com.joao.cyberaudit.model.AppUser createdBy);
+
     /** Todas as keys da conta (ativas e revogadas), mais recentes primeiro */
     List<ApiKey> findByAccountOrderByCreatedAtDesc(Account account);
 

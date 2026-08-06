@@ -13,6 +13,13 @@ import java.util.UUID;
 @Repository
 public interface FeedbackRepository extends JpaRepository<Feedback, UUID> {
 
+    /** Exclusão de conta (LGPD). */
+    void deleteByAccount(Account account);
+
+    void deleteByUser(AppUser user);
+
+    List<Feedback> findByReviewedBy(AppUser reviewedBy);
+
     /** Feedback enviado por um usuário (view "meus feedbacks"). */
     List<Feedback> findByUserOrderByCreatedAtDesc(AppUser user);
 
