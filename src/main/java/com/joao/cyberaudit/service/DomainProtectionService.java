@@ -35,7 +35,7 @@ public class DomainProtectionService {
     private final byte[] verificationSecret;
 
     public DomainProtectionService(
-            @Value("${domain.verification-secret:${jwt.secret}}") String secret) {
+            @Value("${domain.verification-secret}") String secret) {
         this.verificationSecret = secret.getBytes(StandardCharsets.UTF_8);
     }
 
