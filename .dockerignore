@@ -1,0 +1,21 @@
+# Todo o contexto é enviado ao daemon do Docker antes do build. Sem este arquivo,
+# .env (segredos), .git (histórico completo) e target/ vão junto — desperdício e
+# risco desnecessário, mesmo que o Dockerfile não os copie explicitamente.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+target/
+*.log
+
+.idea/
+.vscode/
+.claude/
+*.iml
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md

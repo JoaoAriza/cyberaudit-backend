@@ -233,13 +233,11 @@ Variáveis de ambiente (ver `src/main/resources/application.properties`):
 ## Como rodar localmente
 
 ```bash
-# 1) Postgres (exemplo via Docker)
-docker run -d --name cyberaudit-db -p 5434:5432 \
-  -e POSTGRES_DB=cyberaudit -e POSTGRES_USER=cyberaudit -e POSTGRES_PASSWORD=cyberaudit123 \
-  postgres:16-alpine
+# 1) Copie o .env.example para .env e preencha (DB_PASSWORD e JWT_SECRET são obrigatórios)
+cp .env.example .env
 
-# 2) Segredo JWT
-export JWT_SECRET="$(openssl rand -base64 48)"
+# 2) Postgres — o compose lê DB_PASSWORD do .env e publica só em 127.0.0.1
+docker compose up -d
 
 # 3) Rodar
 mvn spring-boot:run
@@ -250,7 +248,28 @@ API em `http://localhost:8081`. O frontend (`cyberaudit-ui`) sobe em `:5173` e a
 ```bash
 mvn clean package      # gera o jar executável em target/
 mvn -q -o compile      # apenas compila
+mvn test               # suíte de testes
 ```
+
+### Rodar em container
+
+A imagem já roda como usuário não-root (uid 10001) e com o jar somente-leitura.
+Em produção, complete o isolamento no `docker run` — verificado funcionando com
+todas estas flags:
+
+```bash
+docker run -d --name cyberaudit \
+  --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --env-file .env -p 8081:8081 \
+  cyberaudit
+```
+
+`--read-only` funciona porque o app não escreve em disco (o PDF é gerado em
+memória); o `tmpfs` em `/tmp` existe só para arquivos temporários da JVM.
+
+> **Nunca** use `--env-file` apontando para um `.env` versionado, nem embuta
+> segredos com `ENV` no Dockerfile — o valor fica na imagem e no histórico dela.
 
 ---
 
