@@ -5,7 +5,12 @@ segurança do alvo (TLS, headers, DNS/e-mail, exposições, vulnerabilidades com
 produz uma **nota de 0 a 100** com nível de risco, lista de issues acionáveis e
 relatórios (texto / PDF).
 
-> Spring Boot 3.2.5 · Java 17 · PostgreSQL. Faz par com o frontend `cyberaudit-ui` (React).
+> Spring Boot 3.5.16 · Java 17 · PostgreSQL. Faz par com o frontend `cyberaudit-ui` (React).
+
+> ⚠ **Antes de publicar**, leia [`docs/DEPLOY_CHECKLIST.md`](docs/DEPLOY_CHECKLIST.md) —
+> há variáveis de ambiente sem as quais a aplicação não sobe ou sobe com um controle
+> de segurança desligado. O histórico da revisão de segurança está em
+> [`docs/SECURITY_REVIEW_SCOPE.md`](docs/SECURITY_REVIEW_SCOPE.md).
 
 ---
 
@@ -45,7 +50,7 @@ módulo e o **status de cada verificação** (OK / TIMEOUT / SKIPPED).
 
 | Camada | Tecnologia |
 |---|---|
-| Runtime | Java 17, Spring Boot 3.2.5 |
+| Runtime | Java 17, Spring Boot 3.5.16 |
 | Web | spring-boot-starter-web |
 | Persistência | spring-data-jpa + Hibernate, PostgreSQL |
 | Segurança | spring-security + JWT (jjwt), API keys, 2FA TOTP (dev.samstevens.totp) |
