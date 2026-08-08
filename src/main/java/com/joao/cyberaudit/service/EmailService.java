@@ -164,7 +164,7 @@ public class EmailService {
                     </td></tr>
                   </table>
                 </body></html>
-                """.formatted(firstName, escHtml(host), oldScore, drop, color, newScore,
+                """.formatted(escHtml(firstName), escHtml(host), oldScore, drop, color, newScore,
                               color, color, newRisk, escHtml(reason), findingsSection);
 
             MimeMessage msg = mailSender.createMimeMessage();
@@ -216,7 +216,7 @@ public class EmailService {
                     </td></tr>
                   </table>
                 </body></html>
-                """.formatted(firstName, formattedCode);
+                """.formatted(escHtml(firstName), formattedCode);
 
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
@@ -423,7 +423,10 @@ public class EmailService {
             </body>
             </html>
             """.formatted(
-                firstName, host,
+                // `host` aqui é a URL COMPLETA do scan (result.getUrl()): o SsrfGuard
+                // valida esquema e host, mas path e query seguem livres, então é dado
+                // de usuário indo direto para dentro do HTML.
+                escHtml(firstName), escHtml(host),
                 color, score,
                 color, color, risk,
                 issueCount > 0
@@ -443,8 +446,20 @@ public class EmailService {
         };
     }
 
+    /**
+     * Escapa dado de usuário para interpolação em HTML de e-mail.
+     *
+     * Aspas incluídas: sem elas, qualquer valor colocado dentro de um ATRIBUTO
+     * (`href="%s"`, `title="%s"`) escaparia do atributo mesmo com &lt;/&gt; tratados.
+     * Hoje nenhum valor de usuário cai em atributo, mas a próxima pessoa a editar
+     * um template não deveria precisar saber disso.
+     */
     private String escHtml(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }

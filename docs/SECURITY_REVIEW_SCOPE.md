@@ -61,7 +61,7 @@ O app faz **requisições de saída para URLs que o usuário fornece** → é a 
 ## 💉 Prioridade 1 — Validação de Entrada & Injeção
 
 - [x] **SQL Injection** — auditado: zero `nativeQuery = true`, zero `createQuery`/`createNativeQuery`, zero concatenação de string em query. Só JPQL com `@Param` e derived queries.
-- [~] **XSS** — auditado: zero `dangerouslySetInnerHTML` em todo o `Frontend/src`. **Falta** revisar os templates do `EmailService` (6 usos de `escHtml` — conferir se cobrem todas as interpolações). **Templates HTML do `EmailService`** — confirmar que TODO input de usuário passa por `escHtml()` (host, nome, mensagem de feedback, etc.).
+- [x] **XSS** — zero `dangerouslySetInnerHTML` em todo o `Frontend/src` ✓. Templates do `EmailService` auditados na Rodada 3 (ver Etapa 8): `escHtml` existia mas **não cobria todas as interpolações** e não escapava aspas. **Templates HTML do `EmailService`** — confirmar que TODO input de usuário passa por `escHtml()` (host, nome, mensagem de feedback, etc.).
 - [ ] **Command injection** — o scanner faz shell-out pra alguma ferramenta externa? Se sim, sanitizar argumentos.
 - [ ] **Path traversal** — geração de relatório, logo da marca (base64), qualquer manuseio de arquivo/path.
 - [x] **Deserialização** — auditado: nenhum `activateDefaultTyping`/`enableDefaultTyping` no projeto. `ScanResult` desserializa com typing estático.
@@ -540,3 +540,36 @@ prazo de retenção incluído (`data.retention.audit-logs-days`, padrão 365 dia
 - **`SCAN_STARTED` registra a URL completa do alvo.** Se o usuário escanear uma URL
   com credencial na query string, ela fica no audit log.
 - **`totpSecret` em texto no banco** (já anotado na Rodada 2).
+
+---
+
+## 📌 Rodada 3 — Etapa 8: escaping nos e-mails (P1 que ficou pendente)
+
+Item que a Rodada 2 deixou marcado `[~]` e voltei para fechar: os templates HTML do
+`EmailService` montam o corpo por `String.formatted()`, então cada `%s` é uma
+interpolação crua a menos que passe por `escHtml`.
+
+**O que estava errado:**
+
+1. `escHtml` escapava `&`, `<` e `>`, mas **não aspas**. Nenhum valor de usuário cai
+   em atributo HTML hoje, mas quem editasse um template no futuro não teria como
+   saber disso — `href="%s"` seria explorável sem nenhum aviso.
+2. `firstName` entrava **cru** em três templates (scan concluído, alerta de
+   degradação, OTP).
+3. No template de scan concluído, o parâmetro chamado `host` é na verdade
+   `result.getUrl()` — a **URL completa**. O `SsrfGuard` valida esquema e host, mas
+   path e query seguem livres, então `https://example.com/?q=<img src=x onerror=…>`
+   passava direto para o corpo do e-mail. Nesse mesmo template o `host` também não
+   era escapado, enquanto no de degradação era: exatamente o tipo de inconsistência
+   que vira bug quando alguém acrescenta um destinatário.
+
+**Severidade real, sem inflar:** não há vetor cross-user vivo. `sendScanComplete` vai
+para o próprio usuário (tanto pelo scan assíncrono quanto pelo agendado), e
+`sendDegradationAlert` — que é o único que alcança terceiros, os OWNER/ADMIN da
+conta — já escapava o `host`. Na prática era auto-injeção na própria caixa de
+entrada. Corrigi mesmo assim porque a correção custa cinco linhas, e um produto de
+segurança com template de e-mail injetável é indefensável no dia em que alguém
+mudar um destinatário.
+
+5 testes novos, incluindo a URL com `<img onerror>` e o nome com `<script>`
+verificados no HTML gerado de fato — não só no `escHtml` isolado.
