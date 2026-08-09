@@ -1,0 +1,35 @@
+# CyberAudit — Cloudflare Tunnel.
+# Destino: /etc/cloudflared/config.yml
+#
+# Por que Tunnel e não apenas "Cloudflare na frente":
+# o IP do droplet (192.241.149.151) já esteve público no DNS, e passive DNS
+# guarda isso para sempre. Com Cloudflare em modo proxy tradicional, quem
+# conhecesse o IP ainda alcançaria a origem direto e poderia FORJAR o header
+# X-Forwarded-For — o que zera o limite de 5 scans/dia por IP e o lockout de
+# login por IP. Com Tunnel não há porta aberta para forjar nada.
+#
+# Instalar:
+#   cloudflared tunnel login
+#   cloudflared tunnel create cyberaudit
+#   cloudflared tunnel route dns cyberaudit api.cyberaudit.com.br
+#   (copie este arquivo, ajuste o tunnel id, e então:)
+#   cloudflared service install
+#
+# O <TUNNEL-ID> e o caminho do .json saem do comando `tunnel create`.
+
+tunnel: <TUNNEL-ID>
+credentials-file: /root/.cloudflared/<TUNNEL-ID>.json
+
+ingress:
+  - hostname: api.cyberaudit.com.br
+    # Aponta para o nginx (127.0.0.1:8080), não direto para o Spring (8081):
+    # é no nginx que ficam o client_max_body_size e os timeouts longos do scan.
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 10s
+      # Precisa acomodar o orçamento de 120s por fase do scan.
+      noTLSVerify: false
+      httpHostHeader: api.cyberaudit.com.br
+
+  # Regra final obrigatória: qualquer outro hostname recebe 404.
+  - service: http_status:404
