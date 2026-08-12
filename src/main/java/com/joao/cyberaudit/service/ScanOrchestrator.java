@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.*;
 import java.util.Collections;
+import com.joao.cyberaudit.exception.DomainBlockedException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +56,7 @@ public class ScanOrchestrator {
     private final RelatedHostsHeaderService       relatedHostsHeaderService;
     private final ScanConcurrencyLimiter          concurrencyLimiter;
     private final PlatformStaffService            platformStaffService;
+    private final HostingProviderPolicy           hostingProviderPolicy;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -87,7 +89,8 @@ public class ScanOrchestrator {
             ComplianceMappingService complianceMappingService,
             RelatedHostsHeaderService relatedHostsHeaderService,
             ScanConcurrencyLimiter concurrencyLimiter,
-            PlatformStaffService platformStaffService) {
+            PlatformStaffService platformStaffService,
+            HostingProviderPolicy hostingProviderPolicy) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -129,6 +132,7 @@ public class ScanOrchestrator {
         this.relatedHostsHeaderService          = relatedHostsHeaderService;
         this.concurrencyLimiter                 = concurrencyLimiter;
         this.platformStaffService               = platformStaffService;
+        this.hostingProviderPolicy              = hostingProviderPolicy;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -140,6 +144,15 @@ public class ScanOrchestrator {
         // Anti-SSRF: bloqueia alvos internos/privados antes de qualquer request
         // (cobre fetch, port scan e demais módulos, pois todos rodam dentro deste execute()).
         SsrfGuard.validate(inputUrl);
+
+        // Infraestrutura de quem nos hospeda nunca é alvo legítimo — o suporte do
+        // Render pediu explicitamente que o scanner não sonde os sistemas deles.
+        String targetHost = extractHostSafe(inputUrl);
+        if (hostingProviderPolicy.isProviderInfrastructure(targetHost)) {
+            throw new DomainBlockedException(
+                    "Scan bloqueado: '" + targetHost + "' é infraestrutura do provedor de "
+                            + "hospedagem desta plataforma e não pode ser escaneado daqui.");
+        }
         String cacheKey = buildCacheKey(inputUrl, active);
 
         if (!refresh) {

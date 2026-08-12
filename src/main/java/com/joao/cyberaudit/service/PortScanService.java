@@ -18,6 +18,12 @@ import java.util.stream.Collectors;
 @Service
 public class PortScanService {
 
+    private final HostingProviderPolicy hostingProviderPolicy;
+
+    public PortScanService(HostingProviderPolicy hostingProviderPolicy) {
+        this.hostingProviderPolicy = hostingProviderPolicy;
+    }
+
     private static final List<PortConfig> PORT_CONFIGS = List.of(
             // Protocolo / Serviço          port  sev        connectMs  banner?
             new PortConfig(21,   "FTP",                    "HIGH",    1500, true),
@@ -51,6 +57,12 @@ public class PortScanService {
     );
 
     public List<PortFinding> scanCommonPorts(String host) {
+        // Alvo hospedado na infraestrutura compartilhada do nosso provedor: as
+        // portas abertas seriam da borda dele, não do cliente. Sondá-las é
+        // exatamente o que o suporte do Render pediu para não fazer — e o
+        // resultado não diria nada de útil sobre o alvo.
+        if (hostingProviderPolicy.isPortScanForbidden(host)) return Collections.emptyList();
+
         InetAddress addr;
         try { addr = InetAddress.getByName(host); }
         catch (Exception e) { return Collections.emptyList(); }
