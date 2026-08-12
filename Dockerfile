@@ -26,16 +26,22 @@ COPY --from=build --chown=root:root --chmod=444 /app/target/*.jar app.jar
 # em disco (PDF é gerado em memória) e escuta em porta alta.
 USER 10001:10001
 
-# A aplicação escuta em server.port (8081). O EXPOSE dizia 8080 e o ENV PORT não
-# era lido por nada — divergência que só aparecia na hora de mapear a porta.
+# PORT é a variável que Render, Fly e Heroku injetam para dizer em qual porta o
+# processo DEVE escutar (o Render usa 10000). Definir aqui só estabelece o valor
+# local: quando a plataforma injeta o dela, ela sobrescreve, e o
+# application.properties (`server.port=${PORT:...}`) segue o mesmo valor.
+#
+# Antes havia `ENV SERVER_PORT=8081` e o HEALTHCHECK apontava para SERVER_PORT.
+# No Render isso divergia: a app subia na 10000 (via PORT) e o healthcheck batia
+# na 8081, marcando o container como unhealthy mesmo com tudo funcionando.
+ENV PORT=8081
 EXPOSE 8081
-ENV SERVER_PORT=8081
 
 # java.awt.headless: sem isso o AWT do PDFBox tenta abrir display e falha no container.
 # MaxRAMPercentage: o default de 25% desperdiça memória em container com limite baixo.
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -Djava.awt.headless=true -Djava.security.egd=file:/dev/urandom"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -fsS "http://127.0.0.1:${SERVER_PORT}/actuator/health" || exit 1
+    CMD curl -fsS "http://127.0.0.1:${PORT}/actuator/health" || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
