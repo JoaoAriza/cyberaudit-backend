@@ -20,7 +20,7 @@ Sem estas, ou a aplicação não sobe, ou sobe com um controle de segurança des
 | `JWT_SECRET` | Sem default, mínimo 32 chars. **Nunca use** `31082005@JoaoAriza-cyberaudit-chave-segura!!` — está no histórico público do GitHub (ver §4). |
 | `ALLOWED_ORIGINS` | O boot **falha** se vier vazio ou com `*`. Use a origem real do front, ex.: `https://app.seudominio.com.br`. |
 | `PLATFORM_STAFF_EMAILS` | Vazio = **ninguém** dispensa a prova de posse de domínio em scan ativo, nem você. Preencha com os e-mails da sua equipe. |
-| `FORWARD_HEADERS=framework` | **Se houver proxy reverso** (nginx/Caddy/Let's Encrypt). Sem isso, `getRemoteAddr()` devolve o IP do proxy: todos os visitantes compartilham o mesmo balde de rate-limit e o mesmo dono de scan assíncrono. Deixe `none` se a app estiver exposta direto — `X-Forwarded-For` é forjável. |
+| `TRUSTED_PROXY_COUNT` | **Se houver proxy na frente.** `1` para Render, nginx ou Cloudflare Tunnel; `2` se o Cloudflare também proxiar. Com `0` (padrão) o `X-Forwarded-For` é ignorado e todos os visitantes caem no mesmo balde de rate-limit. Errar para MAIS aperta o limite; para MENOS, afrouxa — na dúvida, use o maior. |
 
 ## 2. Variáveis que decidem comportamento de segurança
 

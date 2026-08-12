@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.dto.SubscriptionDto;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.service.BillingService;
+import com.joao.cyberaudit.service.ClientIpResolver;
 import com.joao.cyberaudit.service.MercadoPagoService;
 import com.joao.cyberaudit.service.RateLimitService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +39,7 @@ public class BillingController {
     private final MercadoPagoService mercadoPagoService;
     private final RateLimitService   rateLimitService;
     private final ObjectMapper       mapper;
+    private final ClientIpResolver   clientIpResolver;
 
     @Value("${mp.webhook-secret:}")
     private String webhookSecret;
@@ -45,11 +47,13 @@ public class BillingController {
     public BillingController(BillingService billingService,
                              MercadoPagoService mercadoPagoService,
                              RateLimitService rateLimitService,
-                             ObjectMapper mapper) {
+                             ObjectMapper mapper,
+                             ClientIpResolver clientIpResolver) {
         this.billingService     = billingService;
         this.mercadoPagoService = mercadoPagoService;
         this.rateLimitService   = rateLimitService;
         this.mapper             = mapper;
+        this.clientIpResolver   = clientIpResolver;
     }
 
     // ── Cliente ──────────────────────────────────────────────────────────────────
@@ -79,7 +83,7 @@ public class BillingController {
                                           HttpServletRequest request) {
         // Endpoint público que dispara uma chamada de saída à API do MP por notificação
         // aceita. Sem teto, um laço de curl vira flood na nossa cota do Mercado Pago.
-        if (!rateLimitService.allow("mp-webhook:" + request.getRemoteAddr(),
+        if (!rateLimitService.allow("mp-webhook:" + clientIpResolver.resolve(request),
                 WEBHOOK_MAX_PER_MINUTE, 60_000)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body("rate limited");
         }

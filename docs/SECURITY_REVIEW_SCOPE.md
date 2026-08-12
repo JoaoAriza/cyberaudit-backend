@@ -3,11 +3,11 @@
 > Documento de escopo para auditar a segurança do próprio CyberAudit antes de ir pra web.
 > Feito pra ser trabalhado **categoria por categoria** num chat novo. Marque `[x]` conforme verifica.
 >
-> **Status: P0, P1, P2 e P3 fechados no código** (3 rodadas, 2026-08-03 a 06). O que
+> **Status: P0, P1, P2 e P3 fechados no código** (3 rodadas, 2026-08-03 a 12). O que
 > sobrou depende do ambiente de produção e está consolidado em
 > [`DEPLOY_CHECKLIST.md`](DEPLOY_CHECKLIST.md) — leia aquele antes de subir.
 >
-> **Stack:** Spring Boot 3.2.5 / Java 17 / PostgreSQL / React 19 + Vite / Docker / Mercado Pago.
+> **Stack:** Spring Boot 3.5.16 / Java 17 / PostgreSQL / React 19 + Vite / Docker / Mercado Pago.
 > **Localização:** Backend `C:\Projetos\Cyberaudit\Backend`, Frontend `C:\Projetos\Cyberaudit\Frontend`.
 > Este documento cobre os **dois** repositórios, mas vive no do backend para ficar
 > versionado (antes estava em `Cyberaudit\Docs\`, fora de qualquer git).
@@ -106,7 +106,7 @@ O app faz **requisições de saída para URLs que o usuário fornece** → é a 
 ## 🚦 Prioridade 2 — Rate Limiting, Abuso & DoS
 
 - [x] Rate-limit de guest (5/dia por IP, `GuestRateLimitService`) e limites diários por plano — **`/scan/report` não tinha NENHUM** (guest fazia scan ativo anônimo e ilimitado por ali) e `/scan/report/pdf` não consumia cota diária. Unificado em `ScanController.enforceScanLimits()`, aplicado nos 4 endpoints.
-  - ⚠ **Atenção no deploy**: atrás de proxy reverso, `getRemoteAddr()` devolve o IP do proxy e todos os guests caem no mesmo balde. Setar `FORWARD_HEADERS=framework` em produção (property já adicionada, default `none`).
+  - ⚠ **Atenção no deploy**: todos esses limites são por IP, e atrás de proxy o `getRemoteAddr()` devolve o IP do proxy. Resolvido pelo `ClientIpResolver` + `TRUSTED_PROXY_COUNT` — ver Etapa 9.
 - [x] `RateLimitService` (RPM) aplicado nos pontos certos — faltava no `/scan/verify-check` (público, gera requisição de saída). Adicionado.
 - [x] **Limite global de scans concorrentes** (repetido da P0 — DoS).
 - [x] Geração de PDF com limite de recurso — a entrada não-limitada era o **logo da marca**: o cap existente media só o tamanho da string base64, o que deixa passar bomba de descompressão. Ver `BrandLogoValidator` na Etapa 4.
@@ -573,3 +573,55 @@ mudar um destinatário.
 
 5 testes novos, incluindo a URL com `<img onerror>` e o nome com `<script>`
 verificados no HTML gerado de fato — não só no `escHtml` isolado.
+
+---
+
+## 📌 Rodada 3 — Etapa 9: IP do cliente resolvido em código
+
+Veio de uma pergunta certeira durante o deploy: *"não tem como ajustar essa parte?"*
+
+O contexto: os limites por IP (cota diária de guest, lockout de login,
+rate-limit por minuto, dono de scan assíncrono anônimo) dependiam de acertar
+`server.forward-headers-strategy` — e o valor correto **varia por provedor**:
+
+- proxies que **substituem** o `X-Forwarded-For` (nginx configurado, Cloudflare
+  Tunnel) → o primeiro valor da lista é confiável;
+- proxies que **apendam** ao header que o cliente mandou (Render e a maioria dos
+  PaaS) → o primeiro valor é escrito pelo atacante.
+
+Com `framework` num provedor que apenda, bastava mandar
+`X-Forwarded-For: 1.2.3.4` para ter scans de guest ilimitados e login sem
+lockout. E o pior: **nada quebra visivelmente**. Não há erro, não há log — os
+controles simplesmente deixam de valer.
+
+Trocar por `native` resolveria no Render, mas mantém a fragilidade: uma variável
+de ambiente errada desliga silenciosamente três controles de segurança.
+
+**Solução:** `ClientIpResolver`, único ponto de verdade, com uma configuração que
+descreve a topologia em vez do mecanismo — `TRUSTED_PROXY_COUNT`. A lista do
+`X-Forwarded-For` cresce da esquerda para a direita, então contando da direita a
+posição N é o último valor escrito por infraestrutura nossa; tudo à esquerda é
+entrada do cliente e não vale nada.
+
+Falha segura por construção: se a cadeia vier mais curta que o esperado, cai
+para `getRemoteAddr()`. O pior caso é todo mundo no mesmo balde (limite apertado
+demais), nunca alguém escapando dele.
+
+Substituiu `getRemoteAddr()` nos 8 pontos de controllers. O `AuditService`
+manteve o dele — ali o IP é registro histórico, não decisão de segurança.
+
+**Verificado de duas formas.** 13 testes unitários cobrindo proxy que apenda,
+proxy que substitui, dois saltos, cadeia curta, header ausente, e normalização
+de porta/IPv6. E um teste de integração reproduzindo o Render — 8 chamadas
+trocando o `X-Forwarded-For` a cada vez, com um segundo valor constante
+simulando o que o proxy acrescenta:
+
+```
+200 200 200 200 200 429 429 429
+```
+
+Cinco passam, o resto é barrado: o valor forjado foi descartado e todas as
+chamadas foram atribuídas ao mesmo IP real. Antes disso, a primeira versão do
+teste (sem o valor apendado) devolveu `200` oito vezes — o que não era falha do
+resolvedor, e sim o cenário local não reproduzindo o Render. Vale registrar
+porque é a diferença entre testar o mecanismo e testar a topologia.

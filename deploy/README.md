@@ -49,12 +49,13 @@ processo escute nela. O `application.properties` já prioriza `PORT`; só não
 defina `SERVER_PORT`, que sobrescreveria com 8081 e o health check nunca
 alcançaria a aplicação — o sintoma é 502.
 
-**`FORWARD_HEADERS=native`, não `framework`.** O proxy do Render **apenda** o IP
-real ao `X-Forwarded-For` que o cliente mandou, em vez de substituir. Com
-`framework` o Spring lê o *primeiro* valor da lista, que é o que o cliente
-escreveu — qualquer um mandaria `X-Forwarded-For: 1.2.3.4` e teria scans de guest
-ilimitados e login sem lockout. `native` usa o `RemoteIpValve` do Tomcat, que lê
-da direita para a esquerda e pega o valor que o proxy acrescentou.
+**`TRUSTED_PROXY_COUNT=1`.** O proxy do Render **apenda** o IP real ao
+`X-Forwarded-For` que o cliente mandou, em vez de substituir. Sem essa variável
+(padrão 0) o header é ignorado e todos os visitantes caem no mesmo balde de
+rate-limit. Com o valor certo, o `ClientIpResolver` lê a lista da direita para a
+esquerda e descarta o que o cliente escreveu — que é o que impede alguém de
+mandar `X-Forwarded-For: 1.2.3.4` e ter scans de guest ilimitados e login sem
+lockout.
 
 **A URL do Postgres precisa ser convertida.** O painel do Render mostra
 `postgresql://user:senha@host/banco`; o Spring não aceita esse formato. Use a
@@ -74,10 +75,11 @@ No Cloudflare, depois de apontar os nameservers do registrador para lá:
 |---|---|---|---|
 | CNAME | `api` | host que o Render fornecer | **DNS only** (nuvem cinza) |
 
-Deixe `api` **sem proxy**. Com Cloudflare na frente do Render, o
-`X-Forwarded-For` ganha mais um salto e o `native` passaria a enxergar o IP da
-borda do Cloudflare como cliente — os limites por IP voltariam a ficar errados.
-O Render já entrega TLS gerenciado, então não se perde HTTPS.
+Deixe `api` **sem proxy**. Com Cloudflare na frente do Render o
+`X-Forwarded-For` ganha mais um salto, e aí `TRUSTED_PROXY_COUNT` teria que
+virar `2` — se esquecer, o IP registrado passa a ser o da borda do Cloudflare e
+os limites por IP param de distinguir visitantes. O Render já entrega TLS
+gerenciado, então manter `DNS only` não custa HTTPS.
 
 O apex e o `www` o próprio Pages configura.
 
@@ -92,9 +94,22 @@ curl -s https://api.cyberauditapp.com/actuator/health
 Deve responder `{"status":"UP"}`. Se vier 503, é o indicador de e-mail
 reclamando do SMTP.
 
-Teste que o IP real está chegando — crie uma conta e erre a senha 6 vezes: a
-partir da 6ª deve vir **429**. Se nunca bloquear, o `FORWARD_HEADERS` está
-errado e os limites por IP não estão valendo.
+Teste que o IP real está chegando — erre a senha 6 vezes seguidas: a partir da
+6ª deve vir **429**. Se nunca bloquear, `TRUSTED_PROXY_COUNT` está errado e os
+limites por IP não estão valendo.
+
+E o inverso, que confirma que o header forjado é descartado:
+
+```bash
+for i in $(seq 1 8); do
+  curl -s -o /dev/null -w "%{http_code} " \
+    -H "X-Forwarded-For: 1.2.3.$i" \
+    "https://api.cyberauditapp.com/scan?url=example.com"
+done
+```
+
+Trocar o `X-Forwarded-For` a cada chamada **não pode** renovar a cota de guest:
+depois de 5, o resto tem que vir 429.
 
 ## ⚠ Antes de tudo: avise o suporte do Render
 
@@ -124,8 +139,7 @@ algum dia proxiar a API, as regras gerenciadas lerão isso como XSS e devolverã
 Os arquivos `nginx-api.conf` e `cloudflared-config.yml` deste diretório cobrem o
 cenário de servidor próprio (VPS + Cloudflare Tunnel). Nesse caminho:
 
-- o nginx **substitui** o `X-Forwarded-For`, então lá o correto é
-  `FORWARD_HEADERS=framework`;
+- `TRUSTED_PROXY_COUNT=1` também (nginx ou Tunnel é um salto só);
 - `client_max_body_size 2m` fecha o corpo JSON ilimitado do Spring MVC;
 - o túnel dispensa abrir 80/443 — mas **remova as regras de entrada no firewall**
   do provedor, senão a origem continua alcançável e o `X-Forwarded-For` volta a

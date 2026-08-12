@@ -26,6 +26,7 @@ public class ScanController {
     private final GuestRateLimitService   guestRateLimitService;
     private final PlanLimitService        planLimitService;
     private final ScanEntitlementService  scanEntitlement;
+    private final ClientIpResolver        clientIpResolver;
 
     public ScanController(
             ScanOrchestrator scanOrchestrator,
@@ -36,7 +37,8 @@ public class ScanController {
             DomainProtectionService domainProtectionService,
             GuestRateLimitService guestRateLimitService,
             PlanLimitService planLimitService,
-            ScanEntitlementService scanEntitlement) {
+            ScanEntitlementService scanEntitlement,
+            ClientIpResolver clientIpResolver) {
         this.scanOrchestrator        = scanOrchestrator;
         this.asyncScanService        = asyncScanService;
         this.reportService           = reportService;
@@ -46,6 +48,7 @@ public class ScanController {
         this.guestRateLimitService   = guestRateLimitService;
         this.planLimitService        = planLimitService;
         this.scanEntitlement         = scanEntitlement;
+        this.clientIpResolver        = clientIpResolver;
     }
 
     // ── Scan síncrono ─────────────────────────────────────────────────────────
@@ -91,7 +94,7 @@ public class ScanController {
 
         // Só o autor do scan exporta o PDF dele — o scanId é um UUID, não uma credencial.
         AsyncScanStatus status = asyncScanService.getStatusFor(scanId,
-                AsyncScanService.ownerKey(currentUser, request.getRemoteAddr()));
+                AsyncScanService.ownerKey(currentUser, clientIpResolver.resolve(request)));
         if (status == null || status.getResult() == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Resultado de scan não encontrado. Realize um novo scan antes de exportar o PDF.");
@@ -145,7 +148,7 @@ public class ScanController {
         enforceScanLimits(url, active, currentUser, request);
 
         String scanId = asyncScanService.submit(url, active, currentUser, refresh, notify,
-                AsyncScanService.ownerKey(currentUser, request.getRemoteAddr()));
+                AsyncScanService.ownerKey(currentUser, clientIpResolver.resolve(request)));
         return ResponseEntity.accepted().body(Map.of("scanId", scanId));
     }
 
@@ -157,7 +160,7 @@ public class ScanController {
     public ResponseEntity<AsyncScanStatus> getAsyncStatus(@PathVariable String scanId,
                                                           HttpServletRequest request) {
         AsyncScanStatus status = asyncScanService.getStatusFor(scanId,
-                AsyncScanService.ownerKey(getCurrentUser(), request.getRemoteAddr()));
+                AsyncScanService.ownerKey(getCurrentUser(), clientIpResolver.resolve(request)));
         if (status == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(status);
     }
@@ -212,7 +215,7 @@ public class ScanController {
                     "Scan ativo requer autenticação. Faça login ou solicite um convite.");
         }
         if (currentUser == null) {
-            guestRateLimitService.checkAndIncrement(request.getRemoteAddr());
+            guestRateLimitService.checkAndIncrement(clientIpResolver.resolve(request));
         } else {
             if (active) planLimitService.checkActiveScan(currentUser, url);
             planLimitService.checkAndIncrementDailyScan(currentUser);
@@ -220,7 +223,7 @@ public class ScanController {
     }
 
     private void checkRateLimit(HttpServletRequest request, AppUser currentUser) {
-        if (!rateLimitService.allow(request.getRemoteAddr(), currentUser)) {
+        if (!rateLimitService.allow(clientIpResolver.resolve(request), currentUser)) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "Muitas requisições. " +
                             (currentUser == null

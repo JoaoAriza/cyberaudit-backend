@@ -30,6 +30,7 @@ public class AuthController {
     private final JwtUtil               jwtUtil;
     private final AuditService          auditService;
     private final AuthThrottleService   authThrottleService;
+    private final ClientIpResolver      clientIpResolver;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
@@ -39,7 +40,8 @@ public class AuthController {
                           TwoFactorService twoFactorService,
                           JwtUtil jwtUtil,
                           AuditService auditService,
-                          AuthThrottleService authThrottleService) {
+                          AuthThrottleService authThrottleService,
+                          ClientIpResolver clientIpResolver) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
@@ -49,6 +51,7 @@ public class AuthController {
         this.jwtUtil               = jwtUtil;
         this.auditService          = auditService;
         this.authThrottleService   = authThrottleService;
+        this.clientIpResolver      = clientIpResolver;
     }
 
     /**
@@ -69,7 +72,7 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req,
                                               HttpServletRequest request) {
-        return ResponseEntity.ok(authService.login(req, request.getRemoteAddr()));
+        return ResponseEntity.ok(authService.login(req, clientIpResolver.resolve(request)));
     }
 
     /**
@@ -95,7 +98,7 @@ public class AuthController {
 
     @GetMapping("/guest-status")
     public ResponseEntity<Map<String, Object>> guestStatus(HttpServletRequest request) {
-        String ip         = request.getRemoteAddr();
+        String ip         = clientIpResolver.resolve(request);
         int    remaining  = guestRateLimitService.getRemainingScans(ip);
         int    dailyLimit = GuestRateLimitService.DAILY_LIMIT;
         int    used       = dailyLimit - remaining;
