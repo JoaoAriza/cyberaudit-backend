@@ -83,28 +83,26 @@ public class StartupConfigCheck implements EnvironmentPostProcessor {
                     + "guest, login e rate-limit não vão distinguir ninguém.");
         }
 
+        // Avisos não impedem o boot, então precisam sair aqui mesmo — não há
+        // logger disponível neste ponto do ciclo de vida.
         if (!warnings.isEmpty()) {
-            System.err.println(banner("⚠  AVISOS DE CONFIGURAÇÃO", warnings,
-                    "A aplicação vai subir, mas os pontos acima merecem atenção."));
+            StringBuilder sb = new StringBuilder("\n");
+            String rule = "=".repeat(78);
+            sb.append(rule).append("\nAVISOS DE CONFIGURACAO\n").append(rule).append('\n');
+            for (int i = 0; i < warnings.size(); i++) {
+                sb.append("  ").append(i + 1).append(". ").append(warnings.get(i)).append('\n');
+            }
+            sb.append(rule).append("\nA aplicacao vai subir, mas os pontos acima merecem atencao.\n")
+              .append(rule).append('\n');
+            System.err.println(sb);
         }
 
+        // Erros viram exceção tipada: o StartupConfigFailureAnalyzer a converte no
+        // bloco "APPLICATION FAILED TO START", impresso no FIM do log. Mensagem no
+        // meio do boot fica soterrada — e é justamente o fim que as pessoas copiam.
         if (!errors.isEmpty()) {
-            System.err.println(banner("✖  CONFIGURAÇÃO INVÁLIDA — a aplicação não vai subir", errors,
-                    "Corrija as variáveis acima no painel do provedor e faça o redeploy."));
-            throw new IllegalStateException(
-                    "Configuração inválida: " + String.join(" | ", errors));
+            throw new InvalidStartupConfigException(errors);
         }
-    }
-
-    private static String banner(String title, List<String> lines, String footer) {
-        StringBuilder sb = new StringBuilder("\n");
-        String rule = "═".repeat(78);
-        sb.append(rule).append('\n').append(title).append('\n').append(rule).append('\n');
-        for (int i = 0; i < lines.size(); i++) {
-            sb.append("  ").append(i + 1).append(". ").append(lines.get(i)).append('\n');
-        }
-        sb.append(rule).append('\n').append(footer).append('\n').append(rule).append('\n');
-        return sb.toString();
     }
 
     private static boolean isBlank(String value) {

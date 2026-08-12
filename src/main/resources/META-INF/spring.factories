@@ -1,3 +1,5 @@
-# EnvironmentPostProcessor ainda é registrado por spring.factories no Spring Boot 3
-# (roda antes do contexto existir, então não dá para usar @Component).
+# EnvironmentPostProcessor e FailureAnalyzer ainda são registrados por
+# spring.factories no Spring Boot 3: os dois rodam antes de o contexto existir,
+# então não dá para usar @Component.
 org.springframework.boot.env.EnvironmentPostProcessor=com.joao.cyberaudit.config.StartupConfigCheck
+org.springframework.boot.diagnostics.FailureAnalyzer=com.joao.cyberaudit.config.StartupConfigFailureAnalyzer
