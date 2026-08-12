@@ -1,0 +1,3 @@
+# EnvironmentPostProcessor ainda é registrado por spring.factories no Spring Boot 3
+# (roda antes do contexto existir, então não dá para usar @Component).
+org.springframework.boot.env.EnvironmentPostProcessor=com.joao.cyberaudit.config.StartupConfigCheck
