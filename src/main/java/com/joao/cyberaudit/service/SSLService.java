@@ -39,12 +39,23 @@ public class SSLService {
                     .atZone(ZoneId.systemDefault())
                     .toLocalDate();
 
-            long daysRemaining = ChronoUnit.DAYS.between(LocalDate.now(), expiration);
+            // notBefore junto com notAfter dá a vida útil TOTAL, que o score usa para
+            // julgar a expiração em proporção. Sem isso, 30 dias restantes num
+            // certificado Let's Encrypt (90 dias de vida) seriam lidos como risco,
+            // quando são exatamente o momento em que o certbot renova.
+            LocalDate issued = cert.getNotBefore()
+                    .toInstant()
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate();
+
+            long daysRemaining      = ChronoUnit.DAYS.between(LocalDate.now(), expiration);
+            long totalValidityDays  = Math.max(0, ChronoUnit.DAYS.between(issued, expiration));
             boolean valid = daysRemaining > 0;
 
             String message = valid ? "Certificado válido" : "Certificado expirado";
 
-            return new SSLInfo(true, valid, expiration.toString(), daysRemaining, message);
+            return new SSLInfo(true, valid, expiration.toString(), daysRemaining, message,
+                    totalValidityDays);
 
         } catch (Exception e) {
             return new SSLInfo(true, false, null, 0, "Erro ao verificar certificado: " + e.getMessage());

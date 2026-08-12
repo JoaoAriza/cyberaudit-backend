@@ -74,17 +74,14 @@ public class ScoreService {
                         "Browsers bloqueiam ou alertam o usuário.",
                         "Renovar o certificado imediatamente."));
 
-            } else if (days <= 30) {
-                score -= 20;
-                notes.add("Certificado expira em até 30 dias: -20");
+            } else if (days < renewalWarningThreshold(sslInfo.getTotalValidityDays())) {
+                score -= 15;
+                notes.add("Certificado muito próximo da expiração: -15");
                 issues.add(new SecurityIssue("SSL_EXPIRING_SOON",
                         "Certificado próximo da expiração", "MEDIUM",
-                        "Risco de indisponibilidade se não renovado.",
-                        "Renovar antes da expiração."));
-
-            } else if (days <= 90) {
-                score -= 10;
-                notes.add("Certificado expira em até 90 dias: -10");
+                        "Restam " + days + " dia(s). Nesse ponto a renovação automática já "
+                                + "deveria ter ocorrido — o mais provável é que ela esteja falhando.",
+                        "Verificar o certbot/ACME client e os logs de renovação."));
             }
         }
 
@@ -744,5 +741,40 @@ public class ScoreService {
 
             default -> score;
         };
+    }
+
+    // ── Expiração de certificado ──────────────────────────────────────────────
+
+    /** Fração da vida útil abaixo da qual a renovação é considerada em falha. */
+    private static final double RENEWAL_WARNING_FRACTION = 0.10;
+
+    /**
+     * Teto absoluto do aviso. Impede que certificado de vida muito longa
+     * (CA interna com validade de anos) dispare alerta com meses de folga.
+     */
+    private static final long RENEWAL_WARNING_MAX_DAYS = 30;
+
+    /** Piso absoluto, para o caso de a vida útil total ser desconhecida. */
+    private static final long RENEWAL_WARNING_FALLBACK_DAYS = 7;
+
+    /**
+     * A partir de quantos dias restantes vale alertar sobre a expiração.
+     *
+     * Em PROPORÇÃO à vida útil, não em dias absolutos. A regra anterior descontava
+     * pontos de qualquer certificado com 90 dias ou menos — o que era impossível de
+     * satisfazer, já que 90 dias é a vida ÚTIL INTEIRA de um Let's Encrypt: todo
+     * usuário nascia penalizado e levava -20 durante a renovação normal, aos 30 dias.
+     *
+     * O CA/Browser Forum está reduzindo o máximo de 398 para 200 dias (2026), 100
+     * (2027) e 47 (2029), então ciclos curtos são a norma que vem por aí — julgar por
+     * dias absolutos ficaria cada vez mais errado.
+     *
+     * Exemplos: Let's Encrypt de 90 dias alerta abaixo de 9; certificado de 47 dias,
+     * abaixo de ~5; anual de 398 dias, abaixo de 30 (o teto).
+     */
+    private long renewalWarningThreshold(long totalValidityDays) {
+        if (totalValidityDays <= 0) return RENEWAL_WARNING_FALLBACK_DAYS;
+        long proportional = Math.round(totalValidityDays * RENEWAL_WARNING_FRACTION);
+        return Math.min(Math.max(proportional, 1), RENEWAL_WARNING_MAX_DAYS);
     }
 }
