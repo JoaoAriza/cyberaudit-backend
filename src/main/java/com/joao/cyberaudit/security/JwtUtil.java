@@ -16,9 +16,40 @@ public class JwtUtil {
     private final SecretKey key;
     private final long expirationMs;
 
+    /** HMAC-SHA256 exige 256 bits. Abaixo disso o JJWT recusa a chave. */
+    private static final int MIN_SECRET_BYTES = 32;
+
     public JwtUtil(JwtProperties props) {
-        this.key          = Keys.hmacShaKeyFor(props.getSecret().getBytes(StandardCharsets.UTF_8));
+        this.key          = buildKey(props.getSecret());
         this.expirationMs = props.getExpirationMs();
+    }
+
+    /**
+     * Valida o segredo com mensagem explícita.
+     *
+     * Sem isto, segredo ausente virava NullPointerException e segredo curto virava
+     * WeakKeyException — as duas aparecendo no log apenas como "Error creating bean
+     * with name 'jwtUtil': Constructor threw exception", sem dizer QUAL variável
+     * está errada nem por quê. Num deploy em PaaS, onde não se edita arquivo para
+     * depurar, isso custa muito tempo.
+     */
+    private static SecretKey buildKey(String secret) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT_SECRET não está definido (ou está vazio). Defina a variável de "
+                            + "ambiente com no mínimo " + MIN_SECRET_BYTES + " caracteres. "
+                            + "Gere um valor com: openssl rand -hex 32");
+        }
+
+        byte[] bytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length < MIN_SECRET_BYTES) {
+            throw new IllegalStateException(
+                    "JWT_SECRET tem apenas " + bytes.length + " bytes; o mínimo é "
+                            + MIN_SECRET_BYTES + " (HMAC-SHA256 exige 256 bits). "
+                            + "Gere um valor com: openssl rand -hex 32");
+        }
+
+        return Keys.hmacShaKeyFor(bytes);
     }
 
     private static final long PRE_AUTH_EXPIRY_MS = 5 * 60 * 1_000; // 5 minutos
