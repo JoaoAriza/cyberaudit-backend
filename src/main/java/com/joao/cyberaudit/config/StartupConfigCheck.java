@@ -68,6 +68,17 @@ public class StartupConfigCheck implements EnvironmentPostProcessor {
                     + "posse de domínio em scan ativo, nem você.");
         }
 
+        if ("true".equalsIgnoreCase(read(env, "mail.enabled"))) {
+            if (isBlank(read(env, "spring.mail.password"))) {
+                warnings.add("MAIL_ENABLED=true mas MAIL_PASSWORD vazio: 2FA por e-mail e "
+                        + "convites vão falhar no envio.");
+            }
+            if (isBlank(read(env, "mail.from"))) {
+                warnings.add("MAIL_ENABLED=true mas MAIL_FROM vazio: o remetente fica em branco "
+                        + "e o envio é recusado pelo servidor SMTP.");
+            }
+        }
+
         boolean mpAtivo = !isBlank(read(env, "mp.access-token"));
         if (mpAtivo && isBlank(read(env, "mp.webhook-secret"))) {
             warnings.add("MP_ACCESS_TOKEN definido mas MP_WEBHOOK_SECRET vazio: o webhook vai "
