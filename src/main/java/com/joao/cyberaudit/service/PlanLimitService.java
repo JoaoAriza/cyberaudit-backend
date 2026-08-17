@@ -194,6 +194,20 @@ public class PlanLimitService {
         }
     }
 
+    /**
+     * Verifica se o plano permite cadastrar domínio próprio.
+     *
+     * O cadastro é a porta de entrada da verificação de posse, que por sua vez
+     * habilita o scan ativo — por isso o gate fica no cadastro, e não só na
+     * verificação. Domínios já cadastrados antes deste limite continuam válidos.
+     */
+    public void checkDomainRegistration(AppUser user) {
+        if (!effectivePlan(user).domainRegistrationAllowed) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    "Cadastro de domínio requer plano PRO ou superior.");
+        }
+    }
+
     /** Verifica se o plano permite acesso ao gráfico de histórico de score. */
     public void checkHistoryChart(AppUser user) {
         if (!effectivePlan(user).historyChartAllowed) {

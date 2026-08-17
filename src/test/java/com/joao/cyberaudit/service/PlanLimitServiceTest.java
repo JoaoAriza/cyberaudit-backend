@@ -8,11 +8,15 @@ import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.DomainRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -94,6 +98,45 @@ class PlanLimitServiceTest {
         assertFalse(plano.activeScanAllowed,    "active scan é ENTERPRISE");
         assertTrue(plano.pdfExportAllowed,      "PDF é liberado para quem loga");
         assertEquals(10, plano.dailyScanLimit,  "FREE tem limite diário, não ilimitado");
+    }
+
+    // ── Agendamentos e domínio próprio ───────────────────────────────────────
+
+    @Test
+    @DisplayName("FREE não tem agendamento nem cadastro de domínio; PRO tem os dois")
+    void agendamentoEDominioSaoProEmDiante() {
+        var service = service("");
+
+        Plan free = service.effectivePlan(cadastroComum(Plan.FREE));
+        assertEquals(0, free.scheduledScanLimit, "FREE não agenda");
+        assertFalse(free.domainRegistrationAllowed, "FREE não cadastra domínio");
+
+        Plan pro = service.effectivePlan(cadastroComum(Plan.PRO));
+        assertEquals(10, pro.scheduledScanLimit);
+        assertTrue(pro.domainRegistrationAllowed);
+    }
+
+    @Test
+    @DisplayName("cadastro de domínio no FREE responde 402, e passa no PRO")
+    void checkDomainRegistration() {
+        var service = service("");
+
+        var erro = assertThrows(ResponseStatusException.class,
+                () -> service.checkDomainRegistration(cadastroComum(Plan.FREE)));
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, erro.getStatusCode());
+
+        assertDoesNotThrow(() -> service.checkDomainRegistration(cadastroComum(Plan.PRO)));
+        assertDoesNotThrow(() -> service.checkDomainRegistration(cadastroComum(Plan.ENTERPRISE)));
+    }
+
+    @Test
+    @DisplayName("primeiro agendamento no FREE já estoura o limite")
+    void agendamentoBloqueadoNoFree() {
+        var service = service("");
+
+        var erro = assertThrows(ResponseStatusException.class,
+                () -> service.checkScheduledScanSlots(cadastroComum(Plan.FREE), 0));
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, erro.getStatusCode());
     }
 
     // ── Quem realmente deve ser promovido ────────────────────────────────────

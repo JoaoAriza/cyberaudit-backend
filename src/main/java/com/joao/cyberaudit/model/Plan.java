@@ -5,8 +5,10 @@ package com.joao.cyberaudit.model;
  *
  * Regras por tier:
  *  Guest  (sem login) — 5 scans/dia via GuestRateLimitService; sem módulos avançados
- *  FREE   (login)     — 10 scans/dia, PDF, sem active scan, sem Changes, sem gráfico
- *  PRO                — ilimitado, PDF, sem active scan, COM Changes e gráfico
+ *  FREE   (login)     — 10 scans/dia, PDF; sem active scan, Changes, gráfico,
+ *                       agendamentos ou cadastro de domínio
+ *  PRO                — ilimitado, PDF, Changes, gráfico, agendamentos e domínios;
+ *                       active scan só em domínio verificado
  *  ENTERPRISE         — ilimitado + active scan + tudo
  *
  * Só a equipe da plataforma (PLATFORM_STAFF_EMAILS) recebe tratamento equivalente a
@@ -14,10 +16,10 @@ package com.joao.cyberaudit.model;
  * plano: /auth/register cria todo cadastro como OWNER da própria conta.
  */
 public enum Plan {
-    //                 daily  sched  active  pdf    changes history
-    FREE      (10,     0,     false, true,   false, false),
-    PRO       (-1,     10,    false, true,   true,  true),
-    ENTERPRISE(-1,     -1,    true,  true,   true,  true);
+    //                 daily  sched  active  pdf    changes history domain
+    FREE      (10,     0,     false, true,   false, false,  false),
+    PRO       (-1,     10,    false, true,   true,  true,   true),
+    ENTERPRISE(-1,     -1,    true,  true,   true,  true,   true);
 
     public final int     dailyScanLimit;      // -1 = ilimitado
     public final int     scheduledScanLimit;  // -1 = ilimitado
@@ -25,16 +27,20 @@ public enum Plan {
     public final boolean pdfExportAllowed;
     public final boolean changesModuleAllowed;
     public final boolean historyChartAllowed;
+    /** Cadastrar domínio próprio (e portanto verificá-lo) é PRO ou superior. */
+    public final boolean domainRegistrationAllowed;
 
     Plan(int dailyScanLimit, int scheduledScanLimit,
          boolean activeScanAllowed, boolean pdfExportAllowed,
-         boolean changesModuleAllowed, boolean historyChartAllowed) {
-        this.dailyScanLimit        = dailyScanLimit;
-        this.scheduledScanLimit    = scheduledScanLimit;
-        this.activeScanAllowed     = activeScanAllowed;
-        this.pdfExportAllowed      = pdfExportAllowed;
-        this.changesModuleAllowed  = changesModuleAllowed;
-        this.historyChartAllowed   = historyChartAllowed;
+         boolean changesModuleAllowed, boolean historyChartAllowed,
+         boolean domainRegistrationAllowed) {
+        this.dailyScanLimit            = dailyScanLimit;
+        this.scheduledScanLimit        = scheduledScanLimit;
+        this.activeScanAllowed         = activeScanAllowed;
+        this.pdfExportAllowed          = pdfExportAllowed;
+        this.changesModuleAllowed      = changesModuleAllowed;
+        this.historyChartAllowed       = historyChartAllowed;
+        this.domainRegistrationAllowed = domainRegistrationAllowed;
     }
 
     /** @return true se o plano não tem limite diário de scans */

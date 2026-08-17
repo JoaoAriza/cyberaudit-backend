@@ -6,6 +6,7 @@ import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.AuditAction;
 import com.joao.cyberaudit.service.AuditService;
 import com.joao.cyberaudit.service.DomainService;
+import com.joao.cyberaudit.service.PlanLimitService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -19,12 +20,16 @@ import java.util.UUID;
 @RequestMapping("/domains")
 public class DomainController {
 
-    private final DomainService domainService;
-    private final AuditService  auditService;
+    private final DomainService    domainService;
+    private final AuditService     auditService;
+    private final PlanLimitService planLimitService;
 
-    public DomainController(DomainService domainService, AuditService auditService) {
-        this.domainService = domainService;
-        this.auditService  = auditService;
+    public DomainController(DomainService domainService,
+                            AuditService auditService,
+                            PlanLimitService planLimitService) {
+        this.domainService    = domainService;
+        this.auditService     = auditService;
+        this.planLimitService = planLimitService;
     }
 
     /** Lista todos os domínios da conta do usuário autenticado. */
@@ -33,11 +38,13 @@ public class DomainController {
         return domainService.list(user);
     }
 
-    /** Cadastra um novo domínio. Body: { "host": "example.com" } */
+    /** Cadastra um novo domínio (PRO+). Body: { "host": "example.com" } */
     @PostMapping
     public ResponseEntity<DomainDto> add(
             @RequestBody Map<String, String> body,
             @AuthenticationPrincipal AppUser user) {
+
+        planLimitService.checkDomainRegistration(user);
 
         String host = body.get("host");
         DomainDto created = domainService.add(host, user);

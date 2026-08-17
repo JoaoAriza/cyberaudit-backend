@@ -50,9 +50,11 @@ public class ScanEntitlementService {
                     strippedScore.getIssues().stream()
                             .map(i -> {
                                 String sev = i.getSeverity() == null ? "" : i.getSeverity().toUpperCase();
-                                // HIGH/MEDIUM: oculta também o título (o "o quê" do problema).
-                                // CRITICAL/LOW: mantém o título (susto do crítico + trivial do low).
-                                boolean hideTitle = sev.equals("HIGH") || sev.equals("MEDIUM");
+                                // CRITICAL/HIGH/MEDIUM: oculta o título (o "o quê" do problema).
+                                // LOW fica visível: é achado trivial e serve de amostra do relatório.
+                                boolean hideTitle = sev.equals("CRITICAL")
+                                        || sev.equals("HIGH")
+                                        || sev.equals("MEDIUM");
                                 return new SecurityIssue(
                                         i.getId(),
                                         hideTitle ? null : i.getTitle(),

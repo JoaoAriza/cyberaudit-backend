@@ -32,6 +32,8 @@ public class AccountDto {
     private boolean pdfExportAllowed;
     private boolean changesModuleAllowed;
     private boolean historyChartAllowed;
+    /** Cadastrar domínio próprio — PRO ou superior */
+    private boolean domainRegistrationAllowed;
 
     /** Token para a página de status pública — null = desativada */
     private String publicStatusToken;
@@ -73,6 +75,7 @@ public class AccountDto {
         dto.setPdfExportAllowed(usedPlan.pdfExportAllowed);
         dto.setChangesModuleAllowed(usedPlan.changesModuleAllowed);
         dto.setHistoryChartAllowed(usedPlan.historyChartAllowed);
+        dto.setDomainRegistrationAllowed(usedPlan.domainRegistrationAllowed);
         dto.setPublicStatusToken(a.getPublicStatusToken());
         return dto;
     }
