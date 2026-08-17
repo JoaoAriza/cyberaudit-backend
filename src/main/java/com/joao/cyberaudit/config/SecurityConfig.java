@@ -8,6 +8,7 @@ import com.joao.cyberaudit.service.ApiKeyService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -58,6 +59,11 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                // Sem isto o preflight (OPTIONS, sempre sem credencial) é julgado pelas
+                // regras abaixo e volta 403 — o navegador aborta antes da requisição
+                // real e o front só enxerga "Network Error". Usa o
+                // CorsConfigurationSource de CorsConfig e responde antes da autorização.
+                .cors(Customizer.withDefaults())
                 .sessionManagement(sm -> sm
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
