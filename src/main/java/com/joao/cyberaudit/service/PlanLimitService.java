@@ -4,7 +4,6 @@ import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Plan;
-import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.DomainRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,7 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Aplica os limites do plano de assinatura (FREE / PRO / ENTERPRISE).
  *
  * Regras de acesso por tier — ver enum Plan para detalhes completos.
- * OWNER e ADMIN recebem tratamento equivalente a ENTERPRISE em todos os checks.
+ * Só a equipe da plataforma (PLATFORM_STAFF_EMAILS) recebe tratamento equivalente
+ * a ENTERPRISE; o role da conta não promove plano.
  *
  * Contagem diária de scans: ConcurrentHashMap em memória, reiniciada à meia-noite.
  * Para produção multi-instância, substituir por Redis.
@@ -50,13 +50,21 @@ public class PlanLimitService {
     // ── Resolução de plano efetivo ────────────────────────────────────────────
 
     /**
-     * OWNER e ADMIN têm acesso equivalente a ENTERPRISE independente do plano da conta.
+     * Plano efetivo do usuário: o da conta dele, salvo para equipe da plataforma.
+     *
+     * NÃO promover por {@code Role.OWNER}/{@code Role.ADMIN}: {@code /auth/register}
+     * é público e cria todo cadastro já como OWNER da própria conta. Promover por
+     * role fazia com que qualquer pessoa que se cadastrasse recebesse tratamento
+     * ENTERPRISE — scans ilimitados, módulo de Changes, gráfico de histórico e o
+     * detalhe completo do scan (impacto/correção/breakdown), tudo num plano FREE.
+     *
+     * É a mesma armadilha que {@link #checkActiveScan(AppUser, String)} já evitava
+     * usando {@link PlatformStaffService}; o active scan foi o único check que
+     * seguiu correto justamente por não olhar o role.
      */
     public Plan effectivePlan(AppUser user) {
         if (user == null) return Plan.FREE;
-        if (user.getRole() == Role.OWNER || user.getRole() == Role.ADMIN) {
-            return Plan.ENTERPRISE;
-        }
+        if (platformStaffService.isStaff(user)) return Plan.ENTERPRISE;
         return effectivePlan(user.getAccount());
     }
 

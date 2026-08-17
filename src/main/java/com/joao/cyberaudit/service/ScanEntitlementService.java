@@ -12,9 +12,9 @@ import java.util.List;
 /**
  * Aplica o gating de detalhe por plano ao resultado de scan.
  *
- * Regra: apenas PRO / ENTERPRISE (e OWNER/ADMIN, via {@link PlanLimitService#effectivePlan})
- * veem impacto, correção e breakdown. Guest e FREE recebem o resultado com esses campos
- * removidos e {@code detailsLocked=true}.
+ * Regra: apenas PRO / ENTERPRISE (e a equipe da plataforma, via
+ * {@link PlanLimitService#effectivePlan}) veem impacto, correção e breakdown. Guest e FREE
+ * recebem o resultado com esses campos removidos e {@code detailsLocked=true}.
  *
  * IMPORTANTE: nunca muta o resultado recebido — o {@code ScanOrchestrator} mantém um cache
  * compartilhado entre usuários, então a versão travada é sempre uma CÓPIA (via toBuilder).
@@ -28,7 +28,7 @@ public class ScanEntitlementService {
         this.planLimitService = planLimitService;
     }
 
-    /** true se o usuário pode ver impacto/correção/breakdown (PRO, ENTERPRISE ou OWNER/ADMIN). */
+    /** true se o usuário pode ver impacto/correção/breakdown (PRO, ENTERPRISE ou staff). */
     public boolean hasDetailAccess(AppUser user) {
         Plan plan = planLimitService.effectivePlan(user); // null/guest → FREE
         return plan == Plan.PRO || plan == Plan.ENTERPRISE;

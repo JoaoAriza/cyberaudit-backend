@@ -9,8 +9,9 @@ package com.joao.cyberaudit.model;
  *  PRO                — ilimitado, PDF, sem active scan, COM Changes e gráfico
  *  ENTERPRISE         — ilimitado + active scan + tudo
  *
- * OWNER e ADMIN recebem tratamento equivalente a ENTERPRISE independente do plano,
- * conforme lógica em PlanLimitService.effectivePlanForUser().
+ * Só a equipe da plataforma (PLATFORM_STAFF_EMAILS) recebe tratamento equivalente a
+ * ENTERPRISE, conforme PlanLimitService.effectivePlan(AppUser). O role NÃO promove
+ * plano: /auth/register cria todo cadastro como OWNER da própria conta.
  */
 public enum Plan {
     //                 daily  sched  active  pdf    changes history
