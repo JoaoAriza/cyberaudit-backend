@@ -16,9 +16,14 @@ class ClientIpResolverTest {
     private static final String PEER   = "10.0.0.5";      // quem abriu a conexão TCP
 
     private HttpServletRequest request(String xff) {
+        return request(xff, null);
+    }
+
+    private HttpServletRequest request(String xff, String cfConnectingIp) {
         HttpServletRequest req = mock(HttpServletRequest.class);
         when(req.getRemoteAddr()).thenReturn(PEER);
         when(req.getHeader(eq("X-Forwarded-For"))).thenReturn(xff);
+        when(req.getHeader(eq("CF-Connecting-IP"))).thenReturn(cfConnectingIp);
         return req;
     }
 
@@ -70,6 +75,54 @@ class ClientIpResolverTest {
 
         // forjado, real (escrito pelo CF), borda do CF (escrita pelo Render)
         assertEquals(REAL, resolver.resolve(request(FORJADO + ", " + REAL + ", 172.71.0.1")));
+    }
+
+    // ── CF-Connecting-IP (o caso que quebrou em produção) ────────────────────
+
+    @Test
+    @DisplayName("CF-Connecting-IP vence a contagem de saltos, que é o que estava errado")
+    void cfConnectingIpTemPrecedencia() {
+        var resolver = new ClientIpResolver(1);
+
+        // Cadeia real do Render: o último salto é o balanceador interno (10.x).
+        // Com a contagem sozinha o resultado seria esse IP interno, que muda a
+        // cada requisição; o header do Cloudflare aponta o cliente de verdade.
+        assertEquals(REAL, resolver.resolve(
+                request(FORJADO + ", " + REAL + ", 10.195.12.1", REAL)));
+    }
+
+    @Test
+    @DisplayName("sem proxy configurado o CF-Connecting-IP é ignorado — seria forjável")
+    void cfConnectingIpIgnoradoSemProxy() {
+        var resolver = new ClientIpResolver(0);
+
+        assertEquals(PEER, resolver.resolve(request(null, FORJADO)));
+    }
+
+    @Test
+    @DisplayName("CF-Connecting-IP com vírgula não é do Cloudflare: cai para o X-Forwarded-For")
+    void cfConnectingIpComVirgulaEDescartado() {
+        var resolver = new ClientIpResolver(1);
+
+        assertEquals(REAL, resolver.resolve(
+                request(FORJADO + ", " + REAL, FORJADO + ", 9.9.9.9")));
+    }
+
+    @Test
+    @DisplayName("CF-Connecting-IP ausente ou vazio mantém o comportamento antigo")
+    void semCfConnectingIpUsaContagem() {
+        var resolver = new ClientIpResolver(1);
+
+        assertEquals(REAL, resolver.resolve(request(FORJADO + ", " + REAL, null)));
+        assertEquals(REAL, resolver.resolve(request(FORJADO + ", " + REAL, "  ")));
+    }
+
+    @Test
+    @DisplayName("porta também é removida do CF-Connecting-IP")
+    void cfConnectingIpNormalizaPorta() {
+        var resolver = new ClientIpResolver(1);
+
+        assertEquals(REAL, resolver.resolve(request(null, REAL + ":41234")));
     }
 
     // ── Falha segura ─────────────────────────────────────────────────────────
