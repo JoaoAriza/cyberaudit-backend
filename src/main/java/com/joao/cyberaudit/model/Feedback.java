@@ -82,4 +82,24 @@ public class Feedback {
 
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
+
+    // ── Exclusão pela equipe (soft delete) ───────────────────────────────────
+    //
+    // Não é DELETE de verdade porque o requisito é justamente mostrar a
+    // justificativa a quem enviou — apagar a linha levaria a justificativa junto.
+    //
+    // Também não virou um valor novo em FeedbackStatus: o enum é persistido como
+    // STRING e o Hibernate cria um CHECK constraint com os valores existentes,
+    // que `ddl-auto=update` NÃO atualiza. Um status novo passaria nos testes e
+    // explodiria em produção na primeira gravação. Aqui são duas colunas
+    // anuláveis, que o update aplica sem tocar em constraint nem em linha antiga.
+    //
+    // Excluído ⇔ deletedAt != null. A justificativa é obrigatória na API, então
+    // um sem o outro não existe.
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    @Column(name = "deletion_reason", columnDefinition = "TEXT")
+    private String deletionReason;
 }

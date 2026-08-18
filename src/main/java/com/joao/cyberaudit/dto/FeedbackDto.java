@@ -29,6 +29,11 @@ public class FeedbackDto {
     private LocalDateTime updatedAt;
     private LocalDateTime resolvedAt;
 
+    /** Excluído pela equipe. Não nulo ⇒ vale a justificativa abaixo. */
+    private LocalDateTime deletedAt;
+    /** Por que a equipe excluiu — mostrado a quem enviou a contestação. */
+    private String deletionReason;
+
     /**
      * Mapeia a entidade para DTO. Acessa associações lazy ({@code user},
      * {@code reviewedBy}), portanto deve ser chamado dentro de uma transação /
@@ -50,6 +55,8 @@ public class FeedbackDto {
                 .createdAt(f.getCreatedAt())
                 .updatedAt(f.getUpdatedAt())
                 .resolvedAt(f.getResolvedAt())
+                .deletedAt(f.getDeletedAt())
+                .deletionReason(f.getDeletionReason())
                 .build();
     }
 }

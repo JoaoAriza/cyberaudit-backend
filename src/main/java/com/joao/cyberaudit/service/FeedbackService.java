@@ -117,15 +117,53 @@ public class FeedbackService {
     public List<FeedbackDto> listForAdmin(AppUser admin, FeedbackStatus status) {
         requireStaff(admin);
         List<Feedback> list = (status != null)
-                ? feedbackRepository.findByStatusOrderByCreatedAtDesc(status)
-                : feedbackRepository.findAllByOrderByCreatedAtDesc();
+                ? feedbackRepository.findByStatusAndDeletedAtIsNullOrderByCreatedAtDesc(status)
+                : feedbackRepository.findByDeletedAtIsNullOrderByCreatedAtDesc();
         return list.stream().map(FeedbackDto::from).toList();
     }
 
     @Transactional(readOnly = true)
     public long countPending(AppUser admin) {
         if (!platformStaffService.isStaff(admin)) return 0;
-        return feedbackRepository.countByStatus(FeedbackStatus.OPEN);
+        return feedbackRepository.countByStatusAndDeletedAtIsNull(FeedbackStatus.OPEN);
+    }
+
+    /**
+     * Exclui uma contestação da fila de triagem, com justificativa.
+     *
+     * A justificativa é obrigatória porque ela é o produto da operação: quem
+     * enviou a contestação continua vendo o item em /feedback/mine, agora com o
+     * motivo de ter sido descartada. Excluir em silêncio deixaria o cliente
+     * esperando resposta para sempre.
+     */
+    @Transactional
+    public FeedbackDto delete(AppUser admin, UUID id, String reason) {
+        requireStaff(admin);
+
+        String motivo = reason == null ? "" : reason.trim();
+        if (motivo.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Justificativa é obrigatória para excluir uma contestação.");
+        }
+        if (motivo.length() > MAX_MESSAGE_LEN) {
+            motivo = motivo.substring(0, MAX_MESSAGE_LEN);
+        }
+
+        Feedback fb = feedbackRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Feedback não encontrado."));
+
+        if (fb.getDeletedAt() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Esta contestação já foi excluída.");
+        }
+
+        fb.setDeletedAt(LocalDateTime.now());
+        fb.setDeletionReason(motivo);
+        fb.setReviewedBy(admin);
+        fb.setUpdatedAt(LocalDateTime.now());
+
+        return FeedbackDto.from(feedbackRepository.save(fb));
     }
 
     @Transactional

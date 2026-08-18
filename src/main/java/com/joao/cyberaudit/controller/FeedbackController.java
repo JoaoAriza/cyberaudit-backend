@@ -65,6 +65,21 @@ public class FeedbackController {
         return feedbackService.reply(caller, id, req);
     }
 
+    /**
+     * Exclui uma contestação da fila, com justificativa obrigatória.
+     *
+     * POST e não DELETE porque a justificativa vai no corpo, e corpo em DELETE é
+     * descartado por parte da infraestrutura no caminho (temos Cloudflare na
+     * frente). Perder o corpo aqui significaria excluir sem motivo — justamente o
+     * que este endpoint existe para impedir.
+     */
+    @PostMapping("/admin/feedback/{id}/delete")
+    public FeedbackDto delete(@PathVariable UUID id,
+                              @RequestBody Map<String, String> body,
+                              @AuthenticationPrincipal AppUser caller) {
+        return feedbackService.delete(caller, id, body.get("reason"));
+    }
+
     private FeedbackStatus parseStatus(String s) {
         if (s == null || s.isBlank()) return null;
         try { return FeedbackStatus.valueOf(s.toUpperCase()); }

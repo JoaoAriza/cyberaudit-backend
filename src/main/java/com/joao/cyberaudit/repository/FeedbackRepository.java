@@ -37,9 +37,12 @@ public interface FeedbackRepository extends JpaRepository<Feedback, UUID> {
     // equipe da plataforma — e ela precisa enxergar todas as contas. O acesso a
     // estes métodos é restrito por PlatformStaffService no FeedbackService.
 
-    List<Feedback> findAllByOrderByCreatedAtDesc();
+    // Excluídos ficam fora da fila de triagem, mas continuam existindo: o cliente
+    // precisa ver a justificativa em /feedback/mine.
 
-    List<Feedback> findByStatusOrderByCreatedAtDesc(FeedbackStatus status);
+    List<Feedback> findByDeletedAtIsNullOrderByCreatedAtDesc();
 
-    long countByStatus(FeedbackStatus status);
+    List<Feedback> findByStatusAndDeletedAtIsNullOrderByCreatedAtDesc(FeedbackStatus status);
+
+    long countByStatusAndDeletedAtIsNull(FeedbackStatus status);
 }
