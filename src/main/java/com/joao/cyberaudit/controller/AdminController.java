@@ -13,6 +13,7 @@ import com.joao.cyberaudit.repository.DomainRepository;
 import com.joao.cyberaudit.service.AuditService;
 import com.joao.cyberaudit.service.ExecutivePdfReportService;
 import com.joao.cyberaudit.service.InviteService;
+import com.joao.cyberaudit.service.PlanLimitService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -37,19 +38,22 @@ public class AdminController {
     private final AuditService           auditService;
     private final DomainRepository       domainRepository;
     private final ExecutivePdfReportService pdfReportService;
+    private final PlanLimitService       planLimitService;
 
     public AdminController(AppUserRepository userRepository,
                            AccountRepository accountRepository,
                            InviteService inviteService,
                            AuditService auditService,
                            DomainRepository domainRepository,
-                           ExecutivePdfReportService pdfReportService) {
+                           ExecutivePdfReportService pdfReportService,
+                           PlanLimitService planLimitService) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.inviteService     = inviteService;
         this.auditService      = auditService;
         this.domainRepository  = domainRepository;
         this.pdfReportService  = pdfReportService;
+        this.planLimitService  = planLimitService;
     }
 
     @GetMapping("/users")
@@ -202,6 +206,7 @@ public class AdminController {
             @AuthenticationPrincipal AppUser caller) {
 
         requireOwner(caller);
+        planLimitService.checkReportsModule(caller);
         Account account = caller.getAccount();
         if (account == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
@@ -244,6 +249,7 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Acesso restrito a OWNER ou ADMIN.");
         }
+        planLimitService.checkReportsModule(caller);
 
         Account account = caller.getAccount();
         if (account == null) {

@@ -16,10 +16,10 @@ package com.joao.cyberaudit.model;
  * plano: /auth/register cria todo cadastro como OWNER da própria conta.
  */
 public enum Plan {
-    //                 daily  sched  active  pdf    changes history domain
-    FREE      (10,     0,     false, true,   false, false,  false),
-    PRO       (-1,     10,    false, true,   true,  true,   true),
-    ENTERPRISE(-1,     -1,    true,  true,   true,  true,   true);
+    //                 daily  sched  active  pdf    changes history domain reports
+    FREE      (10,     0,     false, true,   false, false,  false, false),
+    PRO       (-1,     10,    false, true,   true,  true,   true,  true),
+    ENTERPRISE(-1,     -1,    true,  true,   true,  true,   true,  true);
 
     public final int     dailyScanLimit;      // -1 = ilimitado
     public final int     scheduledScanLimit;  // -1 = ilimitado
@@ -29,11 +29,18 @@ public enum Plan {
     public final boolean historyChartAllowed;
     /** Cadastrar domínio próprio (e portanto verificá-lo) é PRO ou superior. */
     public final boolean domainRegistrationAllowed;
+    /**
+     * Relatórios da conta: log de auditoria, PDF executivo e página de status
+     * pública. NÃO cobre gestão de equipe (usuários, convites, 2FA obrigatório),
+     * que segue livre — uma conta COMPANY precisa montar o time antes de ter
+     * motivo para assinar.
+     */
+    public final boolean reportsModuleAllowed;
 
     Plan(int dailyScanLimit, int scheduledScanLimit,
          boolean activeScanAllowed, boolean pdfExportAllowed,
          boolean changesModuleAllowed, boolean historyChartAllowed,
-         boolean domainRegistrationAllowed) {
+         boolean domainRegistrationAllowed, boolean reportsModuleAllowed) {
         this.dailyScanLimit            = dailyScanLimit;
         this.scheduledScanLimit        = scheduledScanLimit;
         this.activeScanAllowed         = activeScanAllowed;
@@ -41,6 +48,7 @@ public enum Plan {
         this.changesModuleAllowed      = changesModuleAllowed;
         this.historyChartAllowed       = historyChartAllowed;
         this.domainRegistrationAllowed = domainRegistrationAllowed;
+        this.reportsModuleAllowed      = reportsModuleAllowed;
     }
 
     /** @return true se o plano não tem limite diário de scans */

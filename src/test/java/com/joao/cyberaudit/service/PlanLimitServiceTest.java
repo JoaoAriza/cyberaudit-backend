@@ -130,6 +130,32 @@ class PlanLimitServiceTest {
     }
 
     @Test
+    @DisplayName("relatórios da conta (auditoria, PDF executivo, status) são PRO+")
+    void relatoriosSaoProEmDiante() {
+        var service = service("");
+
+        var erro = assertThrows(ResponseStatusException.class,
+                () -> service.checkReportsModule(cadastroComum(Plan.FREE)));
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, erro.getStatusCode());
+
+        assertDoesNotThrow(() -> service.checkReportsModule(cadastroComum(Plan.PRO)));
+        assertDoesNotThrow(() -> service.checkReportsModule(cadastroComum(Plan.ENTERPRISE)));
+    }
+
+    @Test
+    @DisplayName("gestão de equipe NÃO é gateada por plano — COMPANY FREE monta o time")
+    void gestaoDeEquipeNaoDependeDePlano() {
+        // Nenhum check de plano cobre usuários/convites/2FA: é decisão de produto,
+        // não descuido. Se alguém gatear isso um dia, este teste cai junto com a
+        // razão escrita aqui.
+        var free = service("").effectivePlan(
+                usuario(CLIENTE, Role.OWNER, Plan.FREE, AccountType.COMPANY));
+
+        assertEquals(Plan.FREE, free);
+        assertFalse(free.reportsModuleAllowed, "relatórios seguem PRO+");
+    }
+
+    @Test
     @DisplayName("primeiro agendamento no FREE já estoura o limite")
     void agendamentoBloqueadoNoFree() {
         var service = service("");

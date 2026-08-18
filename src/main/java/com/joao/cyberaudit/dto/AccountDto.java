@@ -34,6 +34,8 @@ public class AccountDto {
     private boolean historyChartAllowed;
     /** Cadastrar domínio próprio — PRO ou superior */
     private boolean domainRegistrationAllowed;
+    /** Relatórios da conta (auditoria, PDF executivo, página de status) — PRO+ */
+    private boolean reportsModuleAllowed;
 
     /** Token para a página de status pública — null = desativada */
     private String publicStatusToken;
@@ -76,6 +78,7 @@ public class AccountDto {
         dto.setChangesModuleAllowed(usedPlan.changesModuleAllowed);
         dto.setHistoryChartAllowed(usedPlan.historyChartAllowed);
         dto.setDomainRegistrationAllowed(usedPlan.domainRegistrationAllowed);
+        dto.setReportsModuleAllowed(usedPlan.reportsModuleAllowed);
         dto.setPublicStatusToken(a.getPublicStatusToken());
         return dto;
     }

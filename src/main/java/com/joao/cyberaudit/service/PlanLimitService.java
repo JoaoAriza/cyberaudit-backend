@@ -208,6 +208,21 @@ public class PlanLimitService {
         }
     }
 
+    /**
+     * Verifica se o plano permite os relatórios da conta: log de auditoria,
+     * PDF executivo e página de status pública.
+     *
+     * Gestão de equipe (usuários, convites, 2FA) NÃO passa por aqui de propósito —
+     * continua valendo só o role, senão uma conta COMPANY FREE não conseguiria
+     * montar o próprio time.
+     */
+    public void checkReportsModule(AppUser user) {
+        if (!effectivePlan(user).reportsModuleAllowed) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    "Relatórios da conta requerem plano PRO ou superior.");
+        }
+    }
+
     /** Verifica se o plano permite acesso ao gráfico de histórico de score. */
     public void checkHistoryChart(AppUser user) {
         if (!effectivePlan(user).historyChartAllowed) {

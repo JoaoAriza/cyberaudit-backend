@@ -24,9 +24,12 @@ import java.util.UUID;
 public class AuditController {
 
     private final AuditLogRepository auditLogRepository;
+    private final com.joao.cyberaudit.service.PlanLimitService planLimitService;
 
-    public AuditController(AuditLogRepository auditLogRepository) {
+    public AuditController(AuditLogRepository auditLogRepository,
+                           com.joao.cyberaudit.service.PlanLimitService planLimitService) {
         this.auditLogRepository = auditLogRepository;
+        this.planLimitService   = planLimitService;
     }
 
     /**
@@ -48,6 +51,7 @@ public class AuditController {
         if (caller.getRole() != Role.OWNER && caller.getRole() != Role.ADMIN) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a OWNER ou ADMIN.");
         }
+        planLimitService.checkReportsModule(caller);
 
         UUID accountId = caller.getAccount() != null ? caller.getAccount().getId() : null;
         if (accountId == null) {
