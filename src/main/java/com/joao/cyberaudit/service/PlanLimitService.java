@@ -68,6 +68,11 @@ public class PlanLimitService {
         return effectivePlan(user.getAccount());
     }
 
+    /** Equipe da plataforma — exposto para a UI decidir o que mostrar. */
+    public boolean isPlatformStaff(AppUser user) {
+        return platformStaffService.isStaff(user);
+    }
+
     public Plan effectivePlan(Account account) {
         if (account == null || account.getPlan() == null) return Plan.FREE;
         return account.getPlan();

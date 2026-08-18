@@ -31,4 +31,15 @@ public interface FeedbackRepository extends JpaRepository<Feedback, UUID> {
 
     /** Contador de pendentes (badge no painel admin). */
     long countByAccountAndStatus(Account account, FeedbackStatus status);
+
+    // ── Triagem da plataforma (cross-tenant) ─────────────────────────────────
+    // Contestação é sobre achado que o CyberAudit produziu, então quem tria é a
+    // equipe da plataforma — e ela precisa enxergar todas as contas. O acesso a
+    // estes métodos é restrito por PlatformStaffService no FeedbackService.
+
+    List<Feedback> findAllByOrderByCreatedAtDesc();
+
+    List<Feedback> findByStatusOrderByCreatedAtDesc(FeedbackStatus status);
+
+    long countByStatus(FeedbackStatus status);
 }

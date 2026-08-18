@@ -24,6 +24,13 @@ public class UserDto {
     private boolean totpEnabled;
     private boolean emailOtpEnabled;
 
+    /**
+     * Equipe da plataforma (PLATFORM_STAFF_EMAILS) — não é o dono da conta.
+     * A UI usa isto para mostrar a triagem de contestações só para nós; o
+     * backend não confia neste campo, ele revalida em PlatformStaffService.
+     */
+    private boolean platformStaff;
+
     public static UserDto from(AppUser u) {
         UserDto dto = new UserDto();
         dto.setId(u.getId());
@@ -57,6 +64,7 @@ public class UserDto {
         dto.setAccount(AccountDto.from(u.getAccount(), effectivePlan));
         dto.setTotpEnabled(u.isTotpEnabled());
         dto.setEmailOtpEnabled(u.isEmailOtpEnabled());
+        dto.setPlatformStaff(planLimitService.isPlatformStaff(u));
 
         if (u.getAccount() != null) {
             int remaining = planLimitService.getRemainingScans(u);

@@ -35,6 +35,7 @@ public class FeedbackService {
     private final FeedbackRepository feedbackRepository;
     private final AppUserRepository userRepository;
     private final EmailService emailService;
+    private final PlatformStaffService platformStaffService;
 
     /** Caixa opcional da plataforma que recebe cópia de TODO feedback (cross-tenant). */
     @Value("${feedback.notify.email:}")
@@ -42,10 +43,31 @@ public class FeedbackService {
 
     public FeedbackService(FeedbackRepository feedbackRepository,
                            AppUserRepository userRepository,
-                           EmailService emailService) {
-        this.feedbackRepository = feedbackRepository;
-        this.userRepository     = userRepository;
-        this.emailService       = emailService;
+                           EmailService emailService,
+                           PlatformStaffService platformStaffService) {
+        this.feedbackRepository   = feedbackRepository;
+        this.userRepository       = userRepository;
+        this.emailService         = emailService;
+        this.platformStaffService = platformStaffService;
+    }
+
+    /**
+     * Triagem de contestação é da equipe da plataforma, não do dono da conta.
+     *
+     * A contestação é sobre um achado que o CyberAudit produziu — quem decide se
+     * o scanner errou somos nós, não o cliente que recebeu o resultado. Antes cada
+     * OWNER via e respondia as contestações da própria conta, o que na prática
+     * significa todo mundo: /auth/register entrega OWNER a qualquer cadastro.
+     *
+     * PlatformStaffService (PLATFORM_STAFF_EMAILS) é a mesma autoridade já usada
+     * pelo scan ativo e pelo plano efetivo — não há papel novo a manter, e incluir
+     * alguém da equipe é editar a variável de ambiente.
+     */
+    private void requireStaff(AppUser caller) {
+        if (!platformStaffService.isStaff(caller)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Triagem de contestações é restrita à equipe da plataforma.");
+        }
     }
 
     // ── Cliente ─────────────────────────────────────────────────────────────
@@ -93,32 +115,26 @@ public class FeedbackService {
 
     @Transactional(readOnly = true)
     public List<FeedbackDto> listForAdmin(AppUser admin, FeedbackStatus status) {
-        Account account = admin.getAccount();
-        if (account == null) return List.of();
+        requireStaff(admin);
         List<Feedback> list = (status != null)
-                ? feedbackRepository.findByAccountAndStatusOrderByCreatedAtDesc(account, status)
-                : feedbackRepository.findByAccountOrderByCreatedAtDesc(account);
+                ? feedbackRepository.findByStatusOrderByCreatedAtDesc(status)
+                : feedbackRepository.findAllByOrderByCreatedAtDesc();
         return list.stream().map(FeedbackDto::from).toList();
     }
 
     @Transactional(readOnly = true)
     public long countPending(AppUser admin) {
-        Account account = admin.getAccount();
-        if (account == null) return 0;
-        return feedbackRepository.countByAccountAndStatus(account, FeedbackStatus.OPEN);
+        if (!platformStaffService.isStaff(admin)) return 0;
+        return feedbackRepository.countByStatus(FeedbackStatus.OPEN);
     }
 
     @Transactional
     public FeedbackDto reply(AppUser admin, UUID id, FeedbackReplyRequest req) {
+        requireStaff(admin);
+
         Feedback fb = feedbackRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Feedback não encontrado."));
-
-        // Escopo multi-tenant: o admin só age sobre feedback da própria conta.
-        if (fb.getAccount() == null || admin.getAccount() == null
-                || !fb.getAccount().getId().equals(admin.getAccount().getId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Feedback pertence a outra conta.");
-        }
 
         if (req.getAdminResponse() != null && !req.getAdminResponse().isBlank()) {
             fb.setAdminResponse(req.getAdminResponse().trim());

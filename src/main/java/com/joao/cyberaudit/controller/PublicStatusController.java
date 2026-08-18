@@ -81,23 +81,12 @@ public class PublicStatusController {
         if (records.isEmpty()) {
             return new PublicStatusDto.DomainStatusDto(
                     domain.getHost(), domain.isVerified(),
-                    null, null, null, false, List.of()
+                    null, null, null, false, PublicStatusDto.IssueCountsDto.EMPTY
             );
         }
 
         ScanRecord latest = records.get(0);
         ScanResult result = deserialize(latest);
-
-        List<PublicStatusDto.IssueDto> topIssues = List.of();
-        if (result != null && result.getScore() != null
-                && result.getScore().getIssues() != null) {
-            topIssues = result.getScore().getIssues().stream()
-                    .sorted(Comparator.comparingInt(i -> severityOrder(i.getSeverity())))
-                    .limit(5)
-                    .map(i -> new PublicStatusDto.IssueDto(
-                            i.getSeverity(), i.getTitle(), i.getRecommendation()))
-                    .collect(Collectors.toList());
-        }
 
         return new PublicStatusDto.DomainStatusDto(
                 domain.getHost(),
@@ -106,8 +95,30 @@ public class PublicStatusController {
                 latest.getRiskLevel() != null ? latest.getRiskLevel().name() : null,
                 latest.getScannedAt().format(FMT),
                 latest.isActiveMode(),
-                topIssues
+                countBySeverity(result)
         );
+    }
+
+    /**
+     * Conta achados por severidade. Só o número sai daqui: título e correção
+     * ficam de fora de propósito — ver o javadoc de {@link PublicStatusDto}.
+     */
+    private PublicStatusDto.IssueCountsDto countBySeverity(ScanResult result) {
+        if (result == null || result.getScore() == null
+                || result.getScore().getIssues() == null) {
+            return PublicStatusDto.IssueCountsDto.EMPTY;
+        }
+
+        Map<String, Long> porSeveridade = result.getScore().getIssues().stream()
+                .collect(Collectors.groupingBy(
+                        i -> i.getSeverity() == null ? "" : i.getSeverity().toUpperCase(),
+                        Collectors.counting()));
+
+        return new PublicStatusDto.IssueCountsDto(
+                porSeveridade.getOrDefault("CRITICAL", 0L),
+                porSeveridade.getOrDefault("HIGH",     0L),
+                porSeveridade.getOrDefault("MEDIUM",   0L),
+                porSeveridade.getOrDefault("LOW",      0L));
     }
 
     private ScanResult deserialize(ScanRecord record) {
@@ -116,15 +127,6 @@ public class PublicStatusController {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private int severityOrder(String s) {
-        return switch (s == null ? "" : s) {
-            case "CRITICAL" -> 0;
-            case "HIGH"     -> 1;
-            case "MEDIUM"   -> 2;
-            default         -> 3;
-        };
     }
 
     private String scoreToRisk(int score) {

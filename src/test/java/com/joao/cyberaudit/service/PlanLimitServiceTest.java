@@ -177,6 +177,18 @@ class PlanLimitServiceTest {
     }
 
     @Test
+    @DisplayName("isPlatformStaff distingue equipe de dono da própria conta")
+    void isPlatformStaffNaoOlhaRole() {
+        var service = service(STAFF);
+
+        assertTrue(service.isPlatformStaff(
+                usuario(STAFF, Role.OWNER, Plan.FREE, AccountType.INDIVIDUAL)));
+        // OWNER é o que /auth/register dá a todo mundo — não pode virar staff.
+        assertFalse(service.isPlatformStaff(
+                usuario(CLIENTE, Role.OWNER, Plan.ENTERPRISE, AccountType.COMPANY)));
+    }
+
+    @Test
     @DisplayName("lista de staff vazia (padrão) não promove ninguém")
     void semStaffConfiguradoNinguemSobe() {
         var service = service("");
