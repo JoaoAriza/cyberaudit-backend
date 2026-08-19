@@ -31,6 +31,7 @@ public class AuthController {
     private final AuditService          auditService;
     private final AuthThrottleService   authThrottleService;
     private final ClientIpResolver      clientIpResolver;
+    private final PasswordResetService  passwordResetService;
 
     public AuthController(AuthService authService,
                           GuestRateLimitService guestRateLimitService,
@@ -41,7 +42,8 @@ public class AuthController {
                           JwtUtil jwtUtil,
                           AuditService auditService,
                           AuthThrottleService authThrottleService,
-                          ClientIpResolver clientIpResolver) {
+                          ClientIpResolver clientIpResolver,
+                          PasswordResetService passwordResetService) {
         this.authService           = authService;
         this.guestRateLimitService = guestRateLimitService;
         this.inviteService         = inviteService;
@@ -52,6 +54,7 @@ public class AuthController {
         this.auditService          = auditService;
         this.authThrottleService   = authThrottleService;
         this.clientIpResolver      = clientIpResolver;
+        this.passwordResetService  = passwordResetService;
     }
 
     /**
@@ -82,6 +85,39 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(req));
+    }
+
+    // ── Redefinição de senha ─────────────────────────────────────────────────
+
+    /**
+     * Pede o link de redefinição.
+     *
+     * Responde 200 sempre, exista a conta ou não. Diferenciar aqui transformaria
+     * este endpoint público num verificador de cadastro: bastaria uma lista de
+     * e-mails para descobrir quem usa a plataforma.
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(
+            @RequestBody Map<String, String> body,
+            HttpServletRequest request) {
+
+        // O envio é gratuito para quem chama e custa e-mail para a vítima: sem
+        // limite, vira bomba de mensagens contra qualquer endereço conhecido.
+        String ip = clientIpResolver.resolve(request);
+        authThrottleService.checkPasswordResetAllowed(ip);
+        passwordResetService.requestReset(body.get("email"));
+        authThrottleService.recordPasswordResetRequested(ip);
+
+        return ResponseEntity.ok(Map.of("message",
+                "Se houver uma conta com este e-mail, enviamos um link de redefinição."));
+    }
+
+    /** Consome o token do link e grava a senha nova. */
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody Map<String, String> body) {
+        passwordResetService.resetPassword(body.get("token"), body.get("password"));
+        return ResponseEntity.ok(Map.of("message",
+                "Senha redefinida. Faça login com a nova senha."));
     }
 
     @GetMapping("/me")

@@ -251,6 +251,58 @@ public class EmailService {
      * Notifica o admin/OWNER (e/ou a caixa da plataforma) sobre um novo feedback
      * de cliente contestando um achado. Silencioso se mail.enabled=false ou em falha.
      */
+    /**
+     * Link de redefinição de senha.
+     *
+     * Propaga a falha (como o OTP, diferente dos avisos): sem este e-mail não há
+     * redefinição, e o serviço que chama precisa registrar o problema no log.
+     * Quem decide não mostrar isso ao usuário é o PasswordResetService — contar
+     * que o envio falhou revelaria que a conta existe.
+     */
+    public void sendPasswordResetEmail(String toEmail, String toName, String link, int minutos) {
+        if (!enabled) {
+            throw new EmailDeliveryException(
+                    "Envio de e-mail desativado (MAIL_ENABLED). A redefinição de senha depende dele.");
+        }
+        String firstName = toName != null && toName.contains(" ")
+                ? toName.substring(0, toName.indexOf(' ')) : (toName != null ? toName : "usuário");
+
+        String html = """
+            <!DOCTYPE html>
+            <html lang="pt-BR">
+            <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
+              <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
+                <tr><td align="center">
+                  <table width="480" cellpadding="0" cellspacing="0"
+                         style="background:#0d1b2a;border:1px solid #1c2a3a;border-radius:8px;overflow:hidden;">
+                    <tr><td style="background:#0a1520;padding:20px 28px;border-bottom:1px solid #1c2a3a;">
+                      <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
+                    </td></tr>
+                    <tr><td style="padding:32px 28px;text-align:center;">
+                      <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">Olá, <strong style="color:#e0eaf4;">%s</strong>.</p>
+                      <p style="margin:0 0 28px;color:#5a7a96;font-size:14px;">
+                        Recebemos um pedido para redefinir a senha da sua conta.
+                      </p>
+                      <a href="%s" style="display:inline-block;padding:14px 32px;background:#00d4a0;color:#0a1520;
+                                          font-size:15px;font-weight:700;text-decoration:none;border-radius:8px;">
+                        Redefinir minha senha
+                      </a>
+                      <p style="margin:24px 0 0;color:#344d62;font-size:12px;">
+                        O link vale por %d minutos e só pode ser usado uma vez.
+                      </p>
+                    </td></tr>
+                    <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
+                      Se você não pediu isso, ignore este email — sua senha continua a mesma.
+                    </td></tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body></html>
+            """.formatted(escHtml(firstName), escHtml(link), minutos);
+
+        emailSender.send(from, toEmail, "CyberAudit — Redefinição de senha", html);
+    }
+
     public void sendFeedbackNotification(String toEmail, String fromUserName, Feedback fb) {
         if (!enabled || toEmail == null || toEmail.isBlank()) return;
         try {

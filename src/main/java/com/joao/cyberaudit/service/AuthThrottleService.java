@@ -41,6 +41,7 @@ public class AuthThrottleService {
 
     /** Intervalo mínimo entre reenvios de OTP — evita usar o app como bomba de e-mail. */
     private static final Duration OTP_RESEND_COOLDOWN = Duration.ofSeconds(60);
+    private static final Duration PASSWORD_RESET_COOLDOWN = Duration.ofSeconds(60);
 
     /** Entradas sem atividade além disso são descartadas na limpeza periódica. */
     private static final Duration ENTRY_TTL = Duration.ofHours(2);
@@ -89,6 +90,32 @@ public class AuthThrottleService {
 
     public void recordTwoFactorSuccess(Object userId) {
         attempts.remove(twoFactorKey(userId));
+    }
+
+    // ── Redefinição de senha ─────────────────────────────────────────────────
+
+    /**
+     * Limita o pedido de redefinição por IP.
+     *
+     * A chave é o IP, e não o e-mail, de propósito: o endpoint não revela se a
+     * conta existe, então um limite por e-mail vazaria essa informação pelo
+     * tempo de resposta. Limitar a origem contém o abuso sem abrir essa fresta.
+     */
+    public void checkPasswordResetAllowed(String ip) {
+        String chave = "pwreset:" + ip;
+        Instant last = lastOtpSend.get(chave);
+        if (last == null) return;
+
+        Duration since = Duration.between(last, Instant.now());
+        if (since.compareTo(PASSWORD_RESET_COOLDOWN) < 0) {
+            long wait = PASSWORD_RESET_COOLDOWN.minus(since).toSeconds() + 1;
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Aguarde " + wait + "s para pedir outra redefinição.");
+        }
+    }
+
+    public void recordPasswordResetRequested(String ip) {
+        lastOtpSend.put("pwreset:" + ip, Instant.now());
     }
 
     // ── Reenvio de OTP ───────────────────────────────────────────────────────
