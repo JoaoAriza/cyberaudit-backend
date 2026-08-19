@@ -3,17 +3,13 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.exception.EmailDeliveryException;
 import com.joao.cyberaudit.model.Feedback;
 import com.joao.cyberaudit.model.ScanResult;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 @Service
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    private final EmailSender emailSender;
 
     @Value("${mail.enabled:false}")
     private boolean enabled;
@@ -21,8 +17,8 @@ public class EmailService {
     @Value("${mail.from:noreply@cyberaudit.app}")
     private String from;
 
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
+    public EmailService(EmailSender emailSender) {
+        this.emailSender = emailSender;
     }
 
     /**
@@ -41,15 +37,9 @@ public class EmailService {
             String subject = "CyberAudit — Scan concluído: " + host + " (" + score + "/100)";
             String html    = buildHtml(toName, host, score, risk, color, result);
 
-            MimeMessage msg = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
-            helper.setFrom(from);
-            helper.setTo(toEmail);
-            helper.setSubject(subject);
-            helper.setText(html, true);
-            mailSender.send(msg);
+            emailSender.send(from, toEmail, subject, html);
 
-        } catch (MessagingException | RuntimeException e) {
+        } catch (RuntimeException e) {
             // Não propaga — falha de email nunca deve derrubar o scan
             System.err.println("[EmailService] Falha ao enviar notificação: " + e.getMessage());
         }
@@ -168,13 +158,7 @@ public class EmailService {
                 """.formatted(escHtml(firstName), escHtml(host), oldScore, drop, color, newScore,
                               color, color, newRisk, escHtml(reason), findingsSection);
 
-            MimeMessage msg = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
-            helper.setFrom(from);
-            helper.setTo(toEmail);
-            helper.setSubject("⚠ CyberAudit — Degradação detectada: " + host + " (" + oldScore + " → " + newScore + ")");
-            helper.setText(html, true);
-            mailSender.send(msg);
+            emailSender.send(from, toEmail, "⚠ CyberAudit — Degradação detectada: " + host + " (" + oldScore + " → " + newScore + ")", html);
         } catch (Exception e) {
             System.err.println("[EmailService] Falha ao enviar alerta de degradação: " + e.getMessage());
         }
@@ -229,15 +213,12 @@ public class EmailService {
                 </body></html>
                 """.formatted(escHtml(firstName), formattedCode);
 
-            MimeMessage msg = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
-            helper.setFrom(from);
-            helper.setTo(toEmail);
-            helper.setSubject("CyberAudit — Código de verificação 2FA");
-            helper.setText(html, true);
-            mailSender.send(msg);
-        } catch (MessagingException | RuntimeException e) {
+            emailSender.send(from, toEmail, "CyberAudit — Código de verificação 2FA", html);
+        } catch (RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar OTP: " + e.getMessage());
+            // O transporte já reporta a causa concreta (código SMTP, resposta do
+            // Resend). Reembrulhar só afastaria essa informação do log.
+            if (e instanceof EmailDeliveryException ede) throw ede;
             throw new EmailDeliveryException(
                     "Não foi possível enviar o código por e-mail: " + e.getMessage(), e);
         }
@@ -292,14 +273,8 @@ public class EmailService {
                 </body></html>
                 """.formatted(escHtml(sender), escHtml(fb.getHost()), escHtml(target), escHtml(fb.getMessage()));
 
-            MimeMessage msg = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(msg, false, "UTF-8");
-            helper.setFrom(from);
-            helper.setTo(toEmail);
-            helper.setSubject("CyberAudit — Novo feedback: " + fb.getHost());
-            helper.setText(html, true);
-            mailSender.send(msg);
-        } catch (MessagingException | RuntimeException e) {
+            emailSender.send(from, toEmail, "CyberAudit — Novo feedback: " + fb.getHost(), html);
+        } catch (RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar notificação de feedback: " + e.getMessage());
         }
     }

@@ -69,7 +69,14 @@ public class StartupConfigCheck implements EnvironmentPostProcessor {
         }
 
         if ("true".equalsIgnoreCase(read(env, "mail.enabled"))) {
-            if (isBlank(read(env, "spring.mail.password"))) {
+            String provider = read(env, "mail.provider");
+
+            if ("resend".equalsIgnoreCase(provider)) {
+                if (isBlank(read(env, "resend.api-key"))) {
+                    warnings.add("MAIL_PROVIDER=resend mas RESEND_API_KEY vazio: 2FA por e-mail "
+                            + "e convites vão falhar no envio.");
+                }
+            } else if (isBlank(read(env, "spring.mail.password"))) {
                 warnings.add("MAIL_ENABLED=true mas MAIL_PASSWORD vazio: 2FA por e-mail e "
                         + "convites vão falhar no envio.");
             }

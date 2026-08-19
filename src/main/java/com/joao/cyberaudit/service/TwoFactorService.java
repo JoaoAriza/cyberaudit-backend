@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.exception.EmailDeliveryException;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.OtpCode;
 import com.joao.cyberaudit.repository.AppUserRepository;
@@ -99,7 +100,7 @@ public class TwoFactorService {
      * conta. O código enviado aqui é válido: serve como confirmação de que o
      * caminho inteiro funciona.
      */
-    @Transactional
+    @Transactional(noRollbackFor = EmailDeliveryException.class)
     public void enableEmailOtp(AppUser user) {
         sendEmailOtp(user);   // lança EmailDeliveryException se não sair
         user.setEmailOtpEnabled(true);
@@ -117,8 +118,20 @@ public class TwoFactorService {
     /**
      * Gera e envia um código OTP por email.
      * Limpa códigos anteriores do mesmo usuário para evitar acúmulo.
+     *
+     * <p>O código precisa sobreviver à falha de envio.
+     *
+     * Ele é gerado e gravado antes da tentativa de SMTP, mas com o
+     * {@code @Transactional} padrão a exceção derrubava a transação inteira e
+     * levava o registro junto — deixando o usuário sem código nenhum e sem a
+     * saída de emergência de ler o valor direto da tabela. Como não existe código
+     * de backup no sistema, essa saída é a única recuperação possível quando o
+     * e-mail está quebrado.
+     *
+     * {@code noRollbackFor} mantém o commit do código e ainda assim propaga o
+     * erro para quem chamou — que é o comportamento desejado nos dois lados.
      */
-    @Transactional
+    @Transactional(noRollbackFor = EmailDeliveryException.class)
     public void sendEmailOtp(AppUser user) {
         otpCodeRepository.deleteByUserId(user.getId());
 

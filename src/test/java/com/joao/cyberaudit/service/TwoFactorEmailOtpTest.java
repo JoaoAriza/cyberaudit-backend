@@ -83,8 +83,19 @@ class TwoFactorEmailOtpTest {
 
         assertThrows(EmailDeliveryException.class, () -> service().sendEmailOtp(usuario()));
 
-        // Mesmo com o envio falhando, o OtpCode já está persistido: foi assim que
-        // deu para recuperar a conta trancada, lendo o código direto da tabela.
         verify(otpRepo).save(any(OtpCode.class));
     }
+
+    /*
+     * ATENÇÃO ao teste acima: ele prova a ORDEM das chamadas, não que a linha
+     * sobreviva no banco. Com mocks não há transação, então o rollback não
+     * aparece aqui — e foi exatamente esse o furo: `sendEmailOtp` é
+     * @Transactional, a exceção derrubava a transação e o OtpCode ia junto,
+     * apesar de este teste passar.
+     *
+     * O que garante a persistência é o `noRollbackFor = EmailDeliveryException`
+     * na anotação. Isso é comportamento do proxy do Spring e só um teste com
+     * contexto e banco de verdade cobriria (hoje não há infraestrutura para
+     * isso no projeto — ver a pendência de spring-security-test + H2).
+     */
 }
