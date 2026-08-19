@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -52,7 +53,7 @@ class TwoFactorEmailOtpTest {
     @DisplayName("e-mail falhando: a ativação falha e a flag NÃO é gravada")
     void naoAtivaQuandoEnvioFalha() {
         doThrow(new EmailDeliveryException("SMTP recusou"))
-                .when(email).sendOtpEmail(anyString(), anyString(), anyString());
+                .when(email).sendOtpEmail(anyString(), anyString(), anyString(), anyBoolean());
 
         AppUser user = usuario();
 
@@ -79,7 +80,7 @@ class TwoFactorEmailOtpTest {
     @DisplayName("o código é gravado antes do envio — é o que permite destravar pelo banco")
     void codigoEGravadoAntesDoEnvio() {
         doThrow(new EmailDeliveryException("SMTP recusou"))
-                .when(email).sendOtpEmail(anyString(), anyString(), anyString());
+                .when(email).sendOtpEmail(anyString(), anyString(), anyString(), anyBoolean());
 
         assertThrows(EmailDeliveryException.class, () -> service().sendEmailOtp(usuario()));
 

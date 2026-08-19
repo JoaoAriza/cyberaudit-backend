@@ -102,7 +102,7 @@ public class TwoFactorService {
      */
     @Transactional(noRollbackFor = EmailDeliveryException.class)
     public void enableEmailOtp(AppUser user) {
-        sendEmailOtp(user);   // lança EmailDeliveryException se não sair
+        sendEmailOtp(user, true);   // lança EmailDeliveryException se não sair
         user.setEmailOtpEnabled(true);
         userRepository.save(user);
     }
@@ -131,8 +131,13 @@ public class TwoFactorService {
      * {@code noRollbackFor} mantém o commit do código e ainda assim propaga o
      * erro para quem chamou — que é o comportamento desejado nos dois lados.
      */
-    @Transactional(noRollbackFor = EmailDeliveryException.class)
     public void sendEmailOtp(AppUser user) {
+        sendEmailOtp(user, false);
+    }
+
+    /** @param ativacao muda o assunto do e-mail — ver EmailService.sendOtpEmail. */
+    @Transactional(noRollbackFor = EmailDeliveryException.class)
+    public void sendEmailOtp(AppUser user, boolean ativacao) {
         otpCodeRepository.deleteByUserId(user.getId());
 
         String code = String.format("%06d", random.nextInt(1_000_000));
@@ -146,7 +151,7 @@ public class TwoFactorService {
                 .build();
         otpCodeRepository.save(otp);
 
-        emailService.sendOtpEmail(user.getEmail(), user.getName(), code);
+        emailService.sendOtpEmail(user.getEmail(), user.getName(), code, ativacao);
     }
 
     /**

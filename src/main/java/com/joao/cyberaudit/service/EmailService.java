@@ -172,6 +172,18 @@ public class EmailService {
      * falha: ver {@link EmailDeliveryException} para o porquê.
      */
     public void sendOtpEmail(String toEmail, String toName, String code) {
+        sendOtpEmail(toEmail, toName, code, false);
+    }
+
+    /**
+     * @param ativacao true quando o código confirma a ativação do 2FA, false no login.
+     *
+     * O assunto e o texto mudam por um motivo prático: só um código vale por vez
+     * (cada envio invalida o anterior), e ativar o 2FA e logar em seguida produz
+     * dois e-mails em poucos minutos. Idênticos, era impossível saber qual estava
+     * valendo — e usar o mais antigo dá "código inválido" sem explicar por quê.
+     */
+    public void sendOtpEmail(String toEmail, String toName, String code, boolean ativacao) {
         if (!enabled) {
             throw new EmailDeliveryException(
                     "Envio de e-mail desativado (MAIL_ENABLED). O 2FA por e-mail depende dele.");
@@ -196,13 +208,14 @@ public class EmailService {
                         </td></tr>
                         <tr><td style="padding:32px 28px;text-align:center;">
                           <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">Olá, <strong style="color:#e0eaf4;">%s</strong>.</p>
-                          <p style="margin:0 0 28px;color:#5a7a96;font-size:14px;">Seu código de verificação 2FA:</p>
+                          <p style="margin:0 0 28px;color:#5a7a96;font-size:14px;">%s</p>
                           <div style="display:inline-block;padding:18px 36px;background:#0a1520;border:2px solid #00d4a0;
                                       border-radius:8px;margin-bottom:20px;">
                             <span style="font-family:monospace;font-size:36px;font-weight:700;
                                          letter-spacing:.25em;color:#00d4a0;">%s</span>
                           </div>
                           <p style="margin:0;color:#344d62;font-size:12px;">Válido por 10 minutos. Não compartilhe este código.</p>
+                          <p style="margin:12px 0 0;color:#344d62;font-size:11px;">%s</p>
                         </td></tr>
                         <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
                           Se você não tentou fazer login, ignore este email.
@@ -211,9 +224,19 @@ public class EmailService {
                     </td></tr>
                   </table>
                 </body></html>
-                """.formatted(escHtml(firstName), formattedCode);
+                """.formatted(
+                        escHtml(firstName),
+                        ativacao ? "Código de teste da ativação do 2FA:"
+                                 : "Seu código de verificação 2FA:",
+                        formattedCode,
+                        // Só um código vale por vez: avisar disso aqui evita a
+                        // tentativa de usar um e-mail antigo que ainda está na caixa.
+                        "Cada novo envio cancela o código anterior — use sempre o e-mail mais recente.");
 
-            emailSender.send(from, toEmail, "CyberAudit — Código de verificação 2FA", html);
+            emailSender.send(from, toEmail,
+                    ativacao ? "CyberAudit — Código de teste (ativação do 2FA)"
+                             : "CyberAudit — Código de verificação 2FA",
+                    html);
         } catch (RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar OTP: " + e.getMessage());
             // O transporte já reporta a causa concreta (código SMTP, resposta do
