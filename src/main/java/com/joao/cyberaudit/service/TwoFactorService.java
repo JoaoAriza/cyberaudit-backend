@@ -86,9 +86,22 @@ public class TwoFactorService {
 
     // ── Email OTP ─────────────────────────────────────────────────────────────
 
-    /** Ativa Email OTP para o usuário. */
+    /**
+     * Ativa Email OTP — mas só depois de provar que o e-mail chega.
+     *
+     * A ordem importa e é o ponto todo deste método. Ativar primeiro e descobrir
+     * depois que o SMTP não funciona deixa a conta inacessível: o login passa a
+     * exigir um código que nunca chega, e desativar o 2FA exige estar logado.
+     * Não há código de backup no sistema, então não existe saída pelo produto.
+     *
+     * Enviando antes, uma configuração de e-mail quebrada faz a ATIVAÇÃO falhar —
+     * que é reversível e acontece com o usuário logado — em vez de trancar a
+     * conta. O código enviado aqui é válido: serve como confirmação de que o
+     * caminho inteiro funciona.
+     */
     @Transactional
     public void enableEmailOtp(AppUser user) {
+        sendEmailOtp(user);   // lança EmailDeliveryException se não sair
         user.setEmailOtpEnabled(true);
         userRepository.save(user);
     }

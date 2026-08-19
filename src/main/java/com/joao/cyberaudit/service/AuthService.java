@@ -117,7 +117,17 @@ public class AuthService {
         // 2FA habilitado → retorna pre-auth token (login real registrado em verify2fa)
         if (twoFactorService.isEnabled(user)) {
             if (user.isEmailOtpEnabled()) {
-                twoFactorService.sendEmailOtp(user);
+                try {
+                    twoFactorService.sendEmailOtp(user);
+                } catch (com.joao.cyberaudit.exception.EmailDeliveryException e) {
+                    // Com TOTP também ativo, o e-mail é só uma das opções: seguir em
+                    // frente deixa o usuário entrar pelo app autenticador. Se o e-mail
+                    // era o único fator, a falha tem de aparecer — devolver a tela de
+                    // código escondendo isso é o que trancava a conta.
+                    if (!user.isTotpEnabled()) throw e;
+                    System.err.println("[Auth] OTP por e-mail falhou, seguindo com TOTP: "
+                            + e.getMessage());
+                }
             }
             String preAuthToken = jwtUtil.generatePreAuthToken(user);
             return new AuthResponse(preAuthToken, twoFactorService.getMethods(user));

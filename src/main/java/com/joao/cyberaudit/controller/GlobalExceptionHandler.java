@@ -57,6 +57,24 @@ public class GlobalExceptionHandler {
                 ));
     }
 
+    /**
+     * O detalhe do SMTP (host, usuário, motivo da recusa) fica só no log do
+     * servidor — para quem está na tela de login, isso não ajuda e ainda descreve
+     * a nossa infraestrutura. A mensagem aqui diz o que fazer, não o que quebrou.
+     */
+    @ExceptionHandler(com.joao.cyberaudit.exception.EmailDeliveryException.class)
+    public ResponseEntity<Map<String, Object>> handleEmailDelivery(
+            com.joao.cyberaudit.exception.EmailDeliveryException ex) {
+        System.err.println("[EmailDelivery] " + ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "error",     "EMAIL_DELIVERY_FAILED",
+                "message",   "Não foi possível enviar o código por e-mail. "
+                           + "Use o app autenticador, se estiver configurado, "
+                           + "ou contate o suporte.",
+                "timestamp", LocalDateTime.now().toString()
+        ));
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(
             ResponseStatusException ex) {

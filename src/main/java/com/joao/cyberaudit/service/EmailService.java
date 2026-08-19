@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.exception.EmailDeliveryException;
 import com.joao.cyberaudit.model.Feedback;
 import com.joao.cyberaudit.model.ScanResult;
 import jakarta.mail.MessagingException;
@@ -182,8 +183,18 @@ public class EmailService {
     /**
      * Envia o código OTP de 6 dígitos para verificação 2FA via email.
      */
+    /**
+     * Envia o código 2FA. Diferente dos outros e-mails desta classe, NÃO engole
+     * falha: ver {@link EmailDeliveryException} para o porquê.
+     */
     public void sendOtpEmail(String toEmail, String toName, String code) {
-        if (!enabled || toEmail == null || toEmail.isBlank()) return;
+        if (!enabled) {
+            throw new EmailDeliveryException(
+                    "Envio de e-mail desativado (MAIL_ENABLED). O 2FA por e-mail depende dele.");
+        }
+        if (toEmail == null || toEmail.isBlank()) {
+            throw new EmailDeliveryException("Usuário sem e-mail cadastrado para receber o código.");
+        }
         try {
             String firstName = toName != null && toName.contains(" ")
                     ? toName.substring(0, toName.indexOf(' ')) : (toName != null ? toName : "usuário");
@@ -227,6 +238,8 @@ public class EmailService {
             mailSender.send(msg);
         } catch (MessagingException | RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar OTP: " + e.getMessage());
+            throw new EmailDeliveryException(
+                    "Não foi possível enviar o código por e-mail: " + e.getMessage(), e);
         }
     }
 
