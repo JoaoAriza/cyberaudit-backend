@@ -11,6 +11,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
@@ -20,6 +22,7 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Redefinição de senha por link enviado ao e-mail cadastrado.
@@ -81,8 +84,20 @@ public class PasswordResetService {
      * A falha de envio também é engolida de propósito: propagá-la diria ao
      * chamador "este e-mail existe, só não consegui mandar" — mesmo vazamento que
      * a resposta uniforme evita. O erro fica no log do servidor.
+     *
+     * <h2>Por que este método NÃO é @Transactional</h2>
+     *
+     * O e-mail sai da aplicação e não volta. Enviá-lo dentro de uma transação
+     * significa que qualquer falha posterior — inclusive uma que o código engole,
+     * porque marcar rollback-only não é a mesma coisa que lançar — desfaz a
+     * gravação do token e deixa no mundo um link que aponta para nada. Foi
+     * exatamente o que aconteceu: o e-mail chegou, a tela deu erro e o link
+     * nasceu inválido.
+     *
+     * Sem transação envolvendo tudo, o token é gravado e confirmado ANTES do
+     * envio. Se o e-mail falhar depois, o token existe sem ter sido entregue —
+     * inofensivo, expira em 30 minutos. O contrário não é recuperável.
      */
-    @Transactional
     public void requestReset(String rawEmail) {
         if (rawEmail == null || rawEmail.isBlank()) return;
         String email = rawEmail.toLowerCase().trim();
@@ -142,8 +157,29 @@ public class PasswordResetService {
         prt.setUsed(true);
         tokenRepository.save(prt);
 
-        auditService.log(null, user.getId(), user.getEmail(), user.getName(),
+        // Auditoria só DEPOIS do commit. Dentro da transação, uma falha ao gravar
+        // o log (constraint, coluna, indisponibilidade) marca a transação como
+        // rollback-only mesmo sendo engolida em Java — e derruba a troca de senha
+        // que já tinha dado certo. O registro é importante, mas não às custas da
+        // operação que ele apenas descreve.
+        UUID   userId    = user.getId();
+        String userEmail = user.getEmail();
+        String userName  = user.getName();
+        Runnable registrar = () -> auditService.log(null, userId, userEmail, userName,
                 AuditAction.PASSWORD_RESET_COMPLETED, null, true);
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    registrar.run();
+                }
+            });
+        } else {
+            // Sem transação em volta (teste unitário, ou chamada direta): não há
+            // commit para esperar, então registra na hora.
+            registrar.run();
+        }
     }
 
     private String sha256(String valor) {

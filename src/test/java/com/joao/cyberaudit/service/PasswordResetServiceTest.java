@@ -122,6 +122,20 @@ class PasswordResetServiceTest {
     }
 
     @Test
+    @DisplayName("o token é gravado ANTES do e-mail sair — link enviado nunca aponta para nada")
+    void tokenGravadoAntesDoEnvio() {
+        when(userRepo.findByEmail(EMAIL)).thenReturn(Optional.of(usuario()));
+
+        service().requestReset(EMAIL);
+
+        // A ordem é o que impede o cenário que ocorreu em produção: e-mail entregue
+        // e token descartado depois, deixando um link morto na caixa do usuário.
+        var ordem = org.mockito.Mockito.inOrder(tokenRepo, email);
+        ordem.verify(tokenRepo).save(any(PasswordResetToken.class));
+        ordem.verify(email).sendPasswordResetEmail(anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
     @DisplayName("falha de envio não propaga — propagar diria que a conta existe")
     void falhaDeEnvioNaoVaza() {
         when(userRepo.findByEmail(EMAIL)).thenReturn(Optional.of(usuario()));
