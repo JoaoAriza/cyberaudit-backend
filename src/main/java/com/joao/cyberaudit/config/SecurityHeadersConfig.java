@@ -1,6 +1,8 @@
 package com.joao.cyberaudit.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,7 +17,22 @@ import java.io.IOException;
  * script ou seja embutida em um frame de terceiro. A CSP do SPA é separada e vive
  * no frontend.
  */
+/**
+ * Precedência máxima porque, sem ela, as respostas que mais precisam desses
+ * headers ficavam sem eles.
+ *
+ * Um bean Filter sem ordem definida entra no fim da cadeia, depois do Spring
+ * Security. Quando a autorização rejeita (401/403), ela encerra a resposta ali —
+ * o filtro nunca roda, e a resposta sai só com o que o próprio Security escreve
+ * (X-Frame-Options e X-Content-Type-Options). Era o que acontecia em
+ * {@code GET /}: HSTS, CSP, Referrer-Policy e Permissions-Policy sumiam
+ * justamente na resposta que um scanner externo encontra primeiro.
+ *
+ * Rodando antes de tudo, os headers são gravados na resposta e permanecem
+ * independentemente de quem a finalize.
+ */
 @Configuration
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public class SecurityHeadersConfig implements Filter {
 
     /**
