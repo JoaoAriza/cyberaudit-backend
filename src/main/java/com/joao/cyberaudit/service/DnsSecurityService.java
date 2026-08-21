@@ -52,6 +52,10 @@ public class DnsSecurityService {
             "mailjet",
             // SparkPost
             "scph",
+            // Resend — publica em `resend._domainkey`. Sem este seletor o scanner
+            // reportava DKIM ausente em domínios que o têm corretamente
+            // configurado, e ainda inflava o risco de spoofing por tabela.
+            "resend",
             // Brevo (Sendinblue)
             "brevo",
             // ConvertKit
