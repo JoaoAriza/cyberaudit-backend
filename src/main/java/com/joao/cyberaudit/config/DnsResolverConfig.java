@@ -5,42 +5,54 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.xbill.DNS.DohResolver;
 import org.xbill.DNS.Lookup;
+import org.xbill.DNS.Resolver;
 import org.xbill.DNS.Type;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
- * Resolvedor DNS da aplicação.
+ * Resolvedor DNS da aplicação, escolhido por teste no boot.
  *
- * <h2>Por que DNS-over-HTTPS e não o resolvedor do sistema</h2>
+ * <h2>O problema que isto resolve</h2>
  *
- * O dnsjava consulta por UDP/53 por padrão. Em PaaS essa saída costuma ser
- * bloqueada, e o sintoma é traiçoeiro: {@code Lookup.run()} devolve null em vez
- * de lançar erro, então o scanner conclui "registro ausente" e segue com
- * {@code moduleStatus: OK}. Nada aparece no log.
+ * O dnsjava consulta por UDP/53 por padrão, e o PaaS bloqueia essa saída. O
+ * sintoma é traiçoeiro: {@code Lookup.run()} devolve null em vez de lançar, o
+ * scanner conclui "registro ausente" e segue com {@code moduleStatus: OK}. Todo
+ * domínio auditado vinha sem SPF, DMARC, DKIM e CAA — google.com incluso.
  *
- * O efeito em produção era o pior possível para um produto de auditoria: TODO
- * domínio escaneado voltava sem SPF, sem DMARC, sem DKIM e sem CAA, com risco de
- * spoofing CRITICAL. Verificado escaneando google.com — que tem os quatro — e
- * recebendo o mesmo veredito. O cliente lê um laudo errado e vai "corrigir" algo
- * que já está certo.
+ * A saída natural seria DNS-over-HTTPS na 443, que é a porta que o resto do
+ * scanner já usa. Só que bloquear resolvedores DoH conhecidos também é prática
+ * comum de rede: no Render, {@code cloudflare-dns.com} responde "network error"
+ * enquanto {@code api.certspotter.com} responde 200 na mesma execução. Ou seja,
+ * não é a porta — é o destino.
  *
- * Saindo pela 443, a consulta usa o mesmo caminho que todo o resto do scanner já
- * usa com sucesso (HTTP, crt.sh, robots.txt). Se essa porta fechasse, nenhum
- * módulo funcionaria — ou seja, não introduz um novo ponto de falha silenciosa.
+ * <h2>Por que testar em vez de configurar</h2>
  *
- * {@code DNS_RESOLVER=system} volta ao comportamento antigo, para quem roda em
- * infraestrutura própria onde a 53 está liberada e o resolvedor local é mais
- * rápido.
+ * Qualquer endpoint fixo é um palpite sobre a rede de quem hospeda, e errar o
+ * palpite não dá erro: dá laudo errado. Aqui a aplicação PERGUNTA à própria rede
+ * qual caminho funciona, no boot, e registra a resposta no log. Trocar de
+ * provedor de hospedagem deixa de exigir investigação.
+ *
+ * A ordem da lista é a preferência; o sistema (UDP/53) fica por último porque é
+ * o que falha nos ambientes que motivaram tudo isto.
  */
 @Configuration
 public class DnsResolverConfig {
 
-    @Value("${dns.resolver:doh}")
+    /** Curto: são sondas de boot, não consultas reais. */
+    private static final Duration TIMEOUT_SONDA = Duration.ofSeconds(3);
+
+    /** Nome com registros estáveis e variados, bom para validar um resolvedor. */
+    private static final String NOME_SONDA = "cloudflare.com";
+
+    @Value("${dns.resolver:auto}")
     private String modo;
 
-    @Value("${dns.doh-endpoint:https://cloudflare-dns.com/dns-query}")
-    private String dohEndpoint;
+    @Value("${dns.doh-endpoints:https://cloudflare-dns.com/dns-query,https://dns.google/dns-query,https://dns.quad9.net/dns-query}")
+    private String endpointsRaw;
 
     @Value("${dns.timeout-seconds:5}")
     private int timeoutSeconds;
@@ -48,45 +60,64 @@ public class DnsResolverConfig {
     @PostConstruct
     public void configurar() {
         if ("system".equalsIgnoreCase(modo)) {
-            System.out.println("[DnsResolver] modo=system — consultas por UDP/53.");
+            System.out.println("[DnsResolver] modo=system (forçado) — consultas por UDP/53.");
+            avisarSeSondaFalhar("system");
             return;
         }
 
-        DohResolver resolver = new DohResolver(dohEndpoint);
-        resolver.setTimeout(Duration.ofSeconds(timeoutSeconds));
+        List<String> endpoints = Arrays.stream(endpointsRaw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
 
-        // Lookup.setDefaultResolver afeta todo uso de Lookup na JVM, que é
-        // justamente o alcance desejado: DnsSecurityService e
-        // SubdomainTakeoverService passam a resolver pelo mesmo caminho.
-        Lookup.setDefaultResolver(resolver);
+        List<String> recusados = new ArrayList<>();
 
-        System.out.println("[DnsResolver] modo=doh — consultas via " + dohEndpoint);
-        autoTeste();
+        for (String endpoint : endpoints) {
+            DohResolver resolver = new DohResolver(endpoint);
+            resolver.setTimeout(TIMEOUT_SONDA);
+
+            if (sondaFunciona(resolver)) {
+                resolver.setTimeout(Duration.ofSeconds(timeoutSeconds));
+                Lookup.setDefaultResolver(resolver);
+                System.out.println("[DnsResolver] usando DoH em " + endpoint
+                        + (recusados.isEmpty() ? "" : " (sem resposta: " + String.join(", ", recusados) + ")"));
+                return;
+            }
+            recusados.add(endpoint);
+        }
+
+        // Nenhum DoH respondeu. O resolvedor do sistema vira a última tentativa —
+        // em rede que libera UDP/53 ele funciona, e é melhor que desistir.
+        System.err.println("[DnsResolver] nenhum endpoint DoH respondeu (" + String.join(", ", recusados)
+                + "). Caindo para o resolvedor do sistema (UDP/53).");
+        avisarSeSondaFalhar("system");
+    }
+
+    /** Uma consulta real: é a única forma honesta de saber se o caminho existe. */
+    private boolean sondaFunciona(Resolver resolver) {
+        try {
+            Lookup lookup = new Lookup(NOME_SONDA, Type.TXT);
+            if (resolver != null) lookup.setResolver(resolver);
+            org.xbill.DNS.Record[] registros = lookup.run();
+            return registros != null && registros.length > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
-     * Uma consulta conhecida no boot, para o log dizer se DNS funciona AQUI.
-     *
-     * Sem isto, descobrir que a resolução estava quebrada exigiu escanear o
-     * google.com e reparar que ele vinha sem SPF. O ambiente é que decide se a
-     * saída de rede existe, então o ambiente é que precisa responder — no boot,
-     * em uma linha, antes de qualquer cliente receber um laudo errado.
+     * O log precisa dizer se DNS funciona AQUI. Sem isso, descobrir que a
+     * resolução estava quebrada exigiu escanear o google.com e reparar que ele
+     * voltava sem SPF — o tipo de investigação que nenhum operador deveria
+     * precisar fazer para saber que o ambiente não coopera.
      */
-    private void autoTeste() {
-        try {
-            Lookup lookup = new Lookup("cloudflare.com", Type.TXT);
-            org.xbill.DNS.Record[] registros = lookup.run();
-
-            if (registros != null && registros.length > 0) {
-                System.out.println("[DnsResolver] autoteste OK — "
-                        + registros.length + " registro(s) para cloudflare.com.");
-            } else {
-                System.err.println("[DnsResolver] AUTOTESTE FALHOU (" + lookup.getErrorString()
-                        + "). Os módulos de DNS vão reportar resultado inconclusivo. "
-                        + "Verifique a saída de rede ou troque dns.doh-endpoint.");
-            }
-        } catch (Exception e) {
-            System.err.println("[DnsResolver] AUTOTESTE FALHOU: " + e.getMessage());
+    private void avisarSeSondaFalhar(String qual) {
+        if (sondaFunciona(null)) {
+            System.out.println("[DnsResolver] autoteste OK com resolvedor " + qual + ".");
+        } else {
+            System.err.println("[DnsResolver] AUTOTESTE FALHOU com resolvedor " + qual
+                    + ". Os módulos de DNS vão reportar resultado INCONCLUSIVO (não penalizam o score). "
+                    + "Libere a saída de rede ou aponte dns.doh-endpoints para um resolvedor alcançável.");
         }
     }
 }
