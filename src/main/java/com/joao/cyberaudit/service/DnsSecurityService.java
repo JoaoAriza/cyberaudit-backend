@@ -1,6 +1,8 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.DnsSecurityResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.xbill.DNS.Lookup;
 import org.xbill.DNS.MXRecord;
@@ -11,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -72,31 +75,71 @@ public class DnsSecurityService {
             "(?:^|;)\\s*p=([^;\\s]+)", Pattern.CASE_INSENSITIVE
     );
 
+    private static final Logger log = LoggerFactory.getLogger(DnsSecurityService.class);
+
     private final PublicSuffixService publicSuffixService;
 
     public DnsSecurityService(PublicSuffixService publicSuffixService) {
         this.publicSuffixService = publicSuffixService;
     }
 
+    /**
+     * Executa a consulta e diferencia ausência de indisponibilidade.
+     *
+     * O dnsjava devolve {@code null} de {@code run()} nos dois casos. O código de
+     * {@link Lookup#getResult()} é o que separa:
+     * {@code TYPE_NOT_FOUND}/{@code HOST_NOT_FOUND} significam que perguntamos e
+     * o registro não existe; {@code TRY_AGAIN}/{@code UNRECOVERABLE} significam
+     * que a pergunta não chegou — e aí afirmar "ausente" é inventar resultado.
+     *
+     * @param falhou marcado quando a causa foi de rede
+     * @return registros encontrados, ou null se não existem / não deu para saber
+     */
+    private org.xbill.DNS.Record[] consultar(String nome, int tipo, AtomicBoolean falhou) {
+        try {
+            Lookup lookup = new Lookup(nome, tipo);
+            org.xbill.DNS.Record[] registros = lookup.run();
+
+            if (registros == null
+                    && (lookup.getResult() == Lookup.TRY_AGAIN
+                     || lookup.getResult() == Lookup.UNRECOVERABLE)) {
+                falhou.set(true);
+                log.warn("Consulta DNS falhou para {} tipo {}: {} — o resultado NÃO significa "
+                        + "registro ausente. Verifique dns.resolver/saída de rede.",
+                        nome, tipo, lookup.getErrorString());
+            }
+            return registros;
+        } catch (Exception e) {
+            falhou.set(true);
+            log.warn("Consulta DNS lançou para {} tipo {}: {}", nome, tipo, e.getMessage());
+            return null;
+        }
+    }
+
     public DnsSecurityResult scan(String host) {
         DnsSecurityResult.DnsSecurityResultBuilder b = DnsSecurityResult.builder();
+        // Por execução e compartilhado entre as cinco análises paralelas:
+        // qualquer uma delas pode ser a que não conseguiu perguntar.
+        AtomicBoolean falhou = new AtomicBoolean(false);
         ExecutorService pool = Executors.newFixedThreadPool(5);
         try {
-            var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, b),   pool);
-            var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, b), pool);
-            var dkimFuture  = CompletableFuture.runAsync(() -> analyzeDkim(host, b),  pool);
-            var caaFuture   = CompletableFuture.runAsync(() -> analyzeCaa(host, b),   pool);
-            var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, b),    pool);
+            var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, falhou, b),   pool);
+            var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, falhou, b), pool);
+            var dkimFuture  = CompletableFuture.runAsync(() -> analyzeDkim(host, falhou, b),  pool);
+            var caaFuture   = CompletableFuture.runAsync(() -> analyzeCaa(host, falhou, b),   pool);
+            var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, falhou, b),    pool);
 
             CompletableFuture.allOf(spfFuture, dmarcFuture, dkimFuture, caaFuture, mxFuture)
                     .get(8, TimeUnit.SECONDS);
 
         } catch (Exception e) {
+            falhou.set(true);
             b.summary("Erro ao consultar DNS: " + e.getMessage());
         } finally {
             pool.shutdownNow();
         }
 
+        b.lookupFailed(falhou.get());
         DnsSecurityResult result = b.build();
         result.setEmailSpoofingRisk(calculateRisk(result));
         result.setSummary(buildSummary(result));
@@ -105,14 +148,14 @@ public class DnsSecurityService {
 
     // ── SPF ───────────────────────────────────────────────────────────────────
 
-    private void analyzeSpf(String host,
+    private void analyzeSpf(String host, AtomicBoolean falhou,
                             DnsSecurityResult.DnsSecurityResultBuilder b) {
         // SPF normalmente fica no apex. Tenta o host, depois o domínio registrável (apex).
-        if (querySpf(host, b)) return;
+        if (querySpf(host, falhou, b)) return;
 
         String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
-            querySpf(parent, b);
+            querySpf(parent, falhou, b);
         }
         // querySpf marca MISSING se nada for encontrado
     }
@@ -121,10 +164,10 @@ public class DnsSecurityService {
      * Consulta SPF no domínio dado e popula o builder.
      * @return true se um registro v=spf1 válido foi encontrado
      */
-    private boolean querySpf(String domain,
+    private boolean querySpf(String domain, AtomicBoolean falhou,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup(domain, Type.TXT).run();
+            org.xbill.DNS.Record[] records = consultar(domain, Type.TXT, falhou);
             if (records == null) { b.spfPresent(false).spfPolicy("MISSING"); return false; }
 
             for (org.xbill.DNS.Record r : records) {
@@ -153,15 +196,15 @@ public class DnsSecurityService {
 
     // ── DMARC ─────────────────────────────────────────────────────────────────
 
-    private void analyzeDmarc(String host,
+    private void analyzeDmarc(String host, AtomicBoolean falhou,
                               DnsSecurityResult.DnsSecurityResultBuilder b) {
         // RFC 7489 §6.6.3: receivers fall back to org domain if subdomain has no record.
         // We mirror this: try the host first, then the parent domain.
-        if (queryDmarc(host, b)) return;
+        if (queryDmarc(host, falhou, b)) return;
 
         String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
-            queryDmarc(parent, b);
+            queryDmarc(parent, falhou, b);
         }
         // queryDmarc sets MISSING if nothing was found
     }
@@ -170,10 +213,10 @@ public class DnsSecurityService {
      * Queries _dmarc.<domain> and populates the builder.
      * @return true if a valid DMARC record was found and parsed
      */
-    private boolean queryDmarc(String domain,
+    private boolean queryDmarc(String domain, AtomicBoolean falhou,
                                DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup("_dmarc." + domain, Type.TXT).run();
+            org.xbill.DNS.Record[] records = consultar("_dmarc." + domain, Type.TXT, falhou);
             if (records == null) { b.dmarcPresent(false).dmarcPolicy("MISSING"); return false; }
 
             for (org.xbill.DNS.Record r : records) {
@@ -206,7 +249,7 @@ public class DnsSecurityService {
 
     // ── DKIM — seletores testados em paralelo ─────────────────────────────────
 
-    private void analyzeDkim(String host,
+    private void analyzeDkim(String host, AtomicBoolean falhou,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
         // Proba os seletores no host e no apex (DKIM costuma estar em
         // selector._domainkey.<apex>), num único batch paralelo.
@@ -228,7 +271,7 @@ public class DnsSecurityService {
                     .map(p -> CompletableFuture.supplyAsync(() -> {
                         try {
                             org.xbill.DNS.Record[] records =
-                                    new Lookup(p[0] + "._domainkey." + p[1], Type.TXT).run();
+                                    consultar(p[0] + "._domainkey." + p[1], Type.TXT, falhou);
                             return (records != null && records.length > 0) ? p[0] : null;
                         } catch (Exception e) { return null; }
                     }, pool))
@@ -261,10 +304,10 @@ public class DnsSecurityService {
 
     // ── CAA ───────────────────────────────────────────────────────────────────
 
-    private void analyzeCaa(String host,
+    private void analyzeCaa(String host, AtomicBoolean falhou,
                             DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup(host, Type.CAA).run();
+            org.xbill.DNS.Record[] records = consultar(host, Type.CAA, falhou);
             if (records == null || records.length == 0) { b.caaPresent(false); return; }
             b.caaPresent(true).caaRecord(records[0].toString());
         } catch (Exception e) {
@@ -274,14 +317,14 @@ public class DnsSecurityService {
 
     // ── MX ────────────────────────────────────────────────────────────────────
 
-    private void analyzeMx(String host,
+    private void analyzeMx(String host, AtomicBoolean falhou,
                            DnsSecurityResult.DnsSecurityResultBuilder b) {
         // MX normalmente fica no apex. Tenta o host, depois o domínio registrável (apex).
-        if (queryMx(host, b)) return;
+        if (queryMx(host, falhou, b)) return;
 
         String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
-            queryMx(parent, b);
+            queryMx(parent, falhou, b);
         }
     }
 
@@ -289,10 +332,10 @@ public class DnsSecurityService {
      * Consulta MX no domínio dado e popula o builder.
      * @return true se ao menos um registro MX foi encontrado
      */
-    private boolean queryMx(String domain,
+    private boolean queryMx(String domain, AtomicBoolean falhou,
                             DnsSecurityResult.DnsSecurityResultBuilder b) {
         try {
-            org.xbill.DNS.Record[] records = new Lookup(domain, Type.MX).run();
+            org.xbill.DNS.Record[] records = consultar(domain, Type.MX, falhou);
             if (records == null || records.length == 0) {
                 b.mxPresent(false).mxRecords(List.of());
                 return false;
@@ -313,6 +356,11 @@ public class DnsSecurityService {
     // ── Risk + Summary ────────────────────────────────────────────────────────
 
     private String calculateRisk(DnsSecurityResult r) {
+        // Consulta que não chegou não é registro ausente. Afirmar risco aqui
+        // produziria o laudo que quebrou este scanner em produção: domínios com
+        // SPF e DMARC corretos aparecendo como vulneráveis a spoofing.
+        if (r.isLookupFailed()) return "UNKNOWN";
+
         if (!r.isSpfPresent() && !r.isDmarcPresent()) {
             // Domínio sem MX não envia email por design — risco real existe mas é
             // menor que um domínio ativo sem proteção. HIGH é mais calibrado.
@@ -330,6 +378,8 @@ public class DnsSecurityService {
                     (!r.isSpfPresent() ? "SPF" : "DMARC") + " para mitigar.";
             case "MEDIUM"   -> "Proteção parcial contra spoofing. Reforce SPF com -all e DMARC com p=reject para máxima proteção.";
             case "LOW"      -> "Boa configuração de segurança de email. SPF e DMARC configurados corretamente.";
+            case "UNKNOWN"  -> "Não foi possível consultar o DNS deste domínio — os registros podem existir. "
+                    + "Este resultado é inconclusivo, não um achado.";
             default         -> "Não foi possível determinar o risco.";
         };
     }

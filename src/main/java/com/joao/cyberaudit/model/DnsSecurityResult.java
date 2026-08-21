@@ -30,4 +30,16 @@ public class DnsSecurityResult {
 
     private String emailSpoofingRisk;
     private String summary;
+
+    /**
+     * Alguma consulta falhou por rede, não por ausência de registro.
+     *
+     * Sem esta distinção, "não encontrei o registro" e "não consegui perguntar"
+     * produziam exatamente o mesmo laudo — e o segundo caso vinha marcado como
+     * módulo OK. Foi assim que um bloqueio de UDP/53 no host fez todo domínio
+     * escaneado, inclusive google.com, aparecer sem SPF, DMARC, DKIM e CAA.
+     *
+     * Um scanner de segurança não pode afirmar ausência quando falhou em olhar.
+     */
+    private boolean lookupFailed;
 }
