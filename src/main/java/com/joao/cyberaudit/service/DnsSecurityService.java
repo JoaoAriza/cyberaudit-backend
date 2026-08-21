@@ -125,7 +125,7 @@ public class DnsSecurityService {
         try {
             var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, falhou, b),   pool);
             var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, falhou, b), pool);
-            var dkimFuture  = CompletableFuture.runAsync(() -> analyzeDkim(host, falhou, b),  pool);
+            var dkimFuture  = CompletableFuture.runAsync(() -> analyzeDkim(host, b),  pool);
             var caaFuture   = CompletableFuture.runAsync(() -> analyzeCaa(host, falhou, b),   pool);
             var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, falhou, b),    pool);
 
@@ -249,8 +249,23 @@ public class DnsSecurityService {
 
     // ── DKIM — seletores testados em paralelo ─────────────────────────────────
 
-    private void analyzeDkim(String host, AtomicBoolean falhou,
+    /**
+     * O DKIM sonda ~40 seletores em 2 domínios: mais de 80 consultas especulativas
+     * de uma vez, contra nomes que na maioria não existem.
+     *
+     * Por isso ele NÃO alimenta o sinal de falha global. Se algumas dessas sondas
+     * estouram o tempo — o que é esperado num lote grande, ainda mais em instância
+     * com CPU limitada —, isso não diz nada sobre a saúde do DNS: o SPF e o DMARC
+     * podem ter resolvido perfeitamente em uma consulta cada.
+     *
+     * Deixar o lote de DKIM marcar falha global fazia o resultado inteiro virar
+     * UNKNOWN por causa da parte mais especulativa da análise. O DKIM já tem seu
+     * próprio estado honesto para isso: NOT_DETECTED.
+     */
+    private void analyzeDkim(String host,
                              DnsSecurityResult.DnsSecurityResultBuilder b) {
+        // Isolado do sinal global: ver javadoc acima.
+        AtomicBoolean falhou = new AtomicBoolean(false);
         // Proba os seletores no host e no apex (DKIM costuma estar em
         // selector._domainkey.<apex>), num único batch paralelo.
         List<String> domains = new ArrayList<>();

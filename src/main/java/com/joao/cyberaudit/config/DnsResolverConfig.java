@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.xbill.DNS.DohResolver;
 import org.xbill.DNS.Lookup;
+import org.xbill.DNS.Type;
 
 import java.time.Duration;
 
@@ -60,5 +61,32 @@ public class DnsResolverConfig {
         Lookup.setDefaultResolver(resolver);
 
         System.out.println("[DnsResolver] modo=doh — consultas via " + dohEndpoint);
+        autoTeste();
+    }
+
+    /**
+     * Uma consulta conhecida no boot, para o log dizer se DNS funciona AQUI.
+     *
+     * Sem isto, descobrir que a resolução estava quebrada exigiu escanear o
+     * google.com e reparar que ele vinha sem SPF. O ambiente é que decide se a
+     * saída de rede existe, então o ambiente é que precisa responder — no boot,
+     * em uma linha, antes de qualquer cliente receber um laudo errado.
+     */
+    private void autoTeste() {
+        try {
+            Lookup lookup = new Lookup("cloudflare.com", Type.TXT);
+            org.xbill.DNS.Record[] registros = lookup.run();
+
+            if (registros != null && registros.length > 0) {
+                System.out.println("[DnsResolver] autoteste OK — "
+                        + registros.length + " registro(s) para cloudflare.com.");
+            } else {
+                System.err.println("[DnsResolver] AUTOTESTE FALHOU (" + lookup.getErrorString()
+                        + "). Os módulos de DNS vão reportar resultado inconclusivo. "
+                        + "Verifique a saída de rede ou troque dns.doh-endpoint.");
+            }
+        } catch (Exception e) {
+            System.err.println("[DnsResolver] AUTOTESTE FALHOU: " + e.getMessage());
+        }
     }
 }
