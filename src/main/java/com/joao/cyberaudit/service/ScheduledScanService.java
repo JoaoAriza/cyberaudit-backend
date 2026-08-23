@@ -19,19 +19,22 @@ import java.util.UUID;
 @Service
 public class ScheduledScanService {
 
-    private final ScheduledScanRepository repo;
-    private final ScanOrchestrator        orchestrator;
-    private final EmailService            emailService;
-    private final PlanLimitService        planLimitService;
+    private final ScheduledScanRepository  repo;
+    private final ScanOrchestrator         orchestrator;
+    private final EmailService             emailService;
+    private final PlanLimitService         planLimitService;
+    private final ScanEntitlementService   scanEntitlement;
 
     public ScheduledScanService(ScheduledScanRepository repo,
                                 ScanOrchestrator orchestrator,
                                 EmailService emailService,
-                                PlanLimitService planLimitService) {
+                                PlanLimitService planLimitService,
+                                ScanEntitlementService scanEntitlement) {
         this.repo             = repo;
         this.orchestrator     = orchestrator;
         this.emailService     = emailService;
         this.planLimitService = planLimitService;
+        this.scanEntitlement  = scanEntitlement;
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -103,10 +106,14 @@ public class ScheduledScanService {
                 markSuccess(scan.getId(), calcNextRun(scan.getFrequency(), scan.getPreferredHour()));
 
                 if (scan.isNotifyEmail()) {
+                    // Mesmo gating da tela: o e-mail é canal de entrega, não atalho
+                    // para o resultado cru. Hoje agendamento já exige PRO+, então na
+                    // prática não trava nada — é o que garante que continue assim se
+                    // o limite do FREE mudar.
                     emailService.sendScanComplete(
                             scan.getUser().getEmail(),
                             scan.getUser().getName(),
-                            result);
+                            scanEntitlement.applyEntitlement(result, scan.getUser()));
                 }
             } catch (Exception e) {
                 // Não deixa falha de um scan cancelar os demais

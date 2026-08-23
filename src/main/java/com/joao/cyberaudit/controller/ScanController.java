@@ -128,7 +128,11 @@ public class ScanController {
         checkRateLimit(request, currentUser);
         // Re-scan completo: consome limite diário como qualquer outro scan.
         enforceScanLimits(url, active, currentUser, request);
-        ScanResult result = scanOrchestrator.execute(url, active, currentUser, false);
+        // Caminho de re-scan: o resultado sai cru do orchestrator, ao contrário do
+        // PDF por scanId, que lê o status já travado pelo AsyncScanService. Sem isto
+        // o PDF virava a porta dos fundos para o detalhe que a tela esconde.
+        ScanResult result = scanEntitlement.applyEntitlement(
+                scanOrchestrator.execute(url, active, currentUser, false), currentUser);
         return pdfReportService.generatePdf(
                 result, reportService.generateReport(result), currentUser.getAccount());
     }

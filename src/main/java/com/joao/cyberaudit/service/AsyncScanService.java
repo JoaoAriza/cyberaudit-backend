@@ -97,18 +97,21 @@ public class AsyncScanService {
 
             ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh);
 
-            // E-mail pessoal (ao próprio usuário) usa o resultado completo.
-            if (notify && currentUser != null && result != null) {
+            // O gating vale para QUALQUER canal de entrega, não só para a tela.
+            // O e-mail mandava o resultado cru: um FREE via na caixa de entrada os
+            // títulos MEDIUM/HIGH que a UI borrava ao lado. Era a trava do produto
+            // inteira contornável marcando um checkbox.
+            ScanResult visivel = scanEntitlement.applyEntitlement(result, currentUser);
+
+            if (notify && currentUser != null && visivel != null) {
                 emailService.sendScanComplete(
                         currentUser.getEmail(),
                         currentUser.getName(),
-                        result);
+                        visivel);
             }
 
-            // A UI recebe o resultado já com gating por plano (guest/FREE não veem
-            // impacto/correção/breakdown). applyEntitlement nunca muta o cache.
-            put(scanId, new AsyncScanStatus(scanId, State.DONE,
-                    scanEntitlement.applyEntitlement(result, currentUser), null), ownerKey);
+            // applyEntitlement nunca muta o cache — `visivel` é cópia quando trava.
+            put(scanId, new AsyncScanStatus(scanId, State.DONE, visivel, null), ownerKey);
         } catch (Exception e) {
             put(scanId, new AsyncScanStatus(scanId, State.ERROR, null,
                     safeErrorMessage(e)), ownerKey);
