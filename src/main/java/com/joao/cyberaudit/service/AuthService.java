@@ -9,6 +9,8 @@ import com.joao.cyberaudit.util.CnpjUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -95,6 +97,16 @@ public class AuthService {
             authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(email, req.getPassword())
             );
+        } catch (DisabledException | LockedException e) {
+            // AppUser.isEnabled()/isAccountNonLocked() devolvem `active`, então o
+            // Spring Security barra a conta desativada AQUI — antes de chegar na
+            // checagem explícita mais abaixo, que por isso nunca executava. O
+            // usuário recebia "Credenciais inválidas" e ficava trocando a senha
+            // sem parar, porque o problema nunca foi a senha.
+            auditService.log(null, null, email, null,
+                    AuditAction.LOGIN_FAILED, "Conta desativada", false);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Conta desativada. Entre em contato com o administrador.");
         } catch (AuthenticationException e) {
             authThrottleService.recordLoginFailure(email, clientIp);
             auditService.log(null, null, email, null,
