@@ -43,6 +43,18 @@ public class MercadoPagoService {
         return accessToken != null && !accessToken.isBlank();
     }
 
+    /**
+     * Token sem espaço/quebra de linha nas pontas.
+     *
+     * Copiar a credencial do painel para a variável de ambiente arrasta espaço ou
+     * newline com facilidade. O header sai malformado e o Mercado Pago responde
+     * 401 — indistinguível de token errado, e sem pista nenhuma de que o problema
+     * é um caractere invisível.
+     */
+    private String tokenLimpo() {
+        return accessToken == null ? "" : accessToken.trim();
+    }
+
     // ── Resultados ──────────────────────────────────────────────────────────────
 
     public record PreapprovalResult(String id, String initPoint, String status) {}
@@ -108,7 +120,7 @@ public class MercadoPagoService {
             HttpRequest.Builder req = HttpRequest.newBuilder()
                     .uri(URI.create(BASE + path))
                     .timeout(Duration.ofSeconds(15))
-                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Authorization", "Bearer " + tokenLimpo())
                     .header("Content-Type", "application/json");
 
             HttpRequest.BodyPublisher pub = payload != null
