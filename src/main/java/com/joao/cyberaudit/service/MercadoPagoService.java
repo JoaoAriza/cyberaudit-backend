@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,39 @@ public class MercadoPagoService {
      */
     private String tokenLimpo() {
         return accessToken == null ? "" : accessToken.trim();
+    }
+
+    /**
+     * Registra QUAL credencial está em uso, sem expor o segredo.
+     *
+     * Trocar a variável no painel e esquecer de reiniciar — ou editar o valor no
+     * lugar errado — produz exatamente o mesmo 401 de um token inválido. Sem um
+     * sinal no log, não há como distinguir "credencial errada" de "credencial
+     * certa que não chegou até aqui", e a investigação vira tentativa e erro.
+     *
+     * Prefixo e tamanho bastam para reconhecer a credencial e não são segredo: o
+     * prefixo é público por natureza (APP_USR-/TEST-) e o tamanho não ajuda a
+     * adivinhar o resto.
+     */
+    @PostConstruct
+    public void registrarCredencialEmUso() {
+        String t = tokenLimpo();
+        if (t.isEmpty()) {
+            System.out.println("[MercadoPago] MP_ACCESS_TOKEN ausente — pagamentos desativados.");
+            return;
+        }
+        String prefixo = t.length() >= 12 ? t.substring(0, 12) : t.substring(0, Math.min(4, t.length()));
+        String ambiente = t.startsWith("TEST-") ? "TESTE" : t.startsWith("APP_USR-") ? "PRODUÇÃO" : "DESCONHECIDO";
+
+        System.out.println("[MercadoPago] credencial em uso: " + prefixo + "… ("
+                + t.length() + " caracteres, ambiente " + ambiente + ")");
+
+        // Public Key tem cara de UUID logo após o prefixo e é bem mais curta que
+        // o Access Token. Confundir as duas é o erro mais comum da integração.
+        if (t.length() < 60) {
+            System.err.println("[MercadoPago] ATENÇÃO: credencial curta demais para um Access Token. "
+                    + "Confira se não é a Public Key — ela não autentica chamadas de servidor.");
+        }
     }
 
     // ── Resultados ──────────────────────────────────────────────────────────────
