@@ -65,6 +65,16 @@ public class DnsResolverConfig {
             return;
         }
 
+        // O resolvedor do sistema vem primeiro por ser o mais BARATO: um pacote
+        // UDP, sem handshake TLS nem requisição HTTP por consulta. O módulo de
+        // DNS dispara dezenas de consultas por scan, e o custo por consulta é o
+        // que decide se elas cabem no tempo numa instância com CPU limitada.
+        // DoH fica como alternativa para rede que bloqueia a 53.
+        if (!"doh".equalsIgnoreCase(modo) && sondaFunciona(null)) {
+            System.out.println("[DnsResolver] usando o resolvedor do sistema (UDP/53).");
+            return;
+        }
+
         List<String> endpoints = Arrays.stream(endpointsRaw.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
@@ -86,10 +96,8 @@ public class DnsResolverConfig {
             recusados.add(endpoint);
         }
 
-        // Nenhum DoH respondeu. O resolvedor do sistema vira a última tentativa —
-        // em rede que libera UDP/53 ele funciona, e é melhor que desistir.
-        System.err.println("[DnsResolver] nenhum endpoint DoH respondeu (" + String.join(", ", recusados)
-                + "). Caindo para o resolvedor do sistema (UDP/53).");
+        System.err.println("[DnsResolver] nem o resolvedor do sistema nem os endpoints DoH ("
+                + String.join(", ", recusados) + ") responderam.");
         avisarSeSondaFalhar("system");
     }
 

@@ -116,21 +116,37 @@ public class DnsSecurityService {
         }
     }
 
+    /**
+     * As análises rodam em DUAS FASES, e a ordem é o ponto principal deste método.
+     *
+     * SPF, DMARC, CAA e MX somam ~8 consultas e são as que decidem o veredito. A
+     * sondagem de DKIM são ~84 consultas especulativas contra nomes que, na
+     * esmagadora maioria, não existem — ela só tenta adivinhar o seletor.
+     *
+     * Rodando tudo junto, as 8 essenciais disputavam conexão com as 84
+     * descartáveis. Em instância com CPU limitada elas perdiam a disputa e
+     * voltavam com timeout, e o scanner concluía "sem SPF, sem DMARC" para
+     * domínios que têm ambos. O sintoma era intermitente e variava por domínio —
+     * assinatura de contenção de recurso, não de rede bloqueada.
+     *
+     * Separando as fases, o que importa consulta com banda livre. O DKIM continua
+     * sendo feito, depois e com concorrência baixa: se não couber no tempo, o
+     * resultado honesto dele já é NOT_DETECTED.
+     */
     public DnsSecurityResult scan(String host) {
         DnsSecurityResult.DnsSecurityResultBuilder b = DnsSecurityResult.builder();
-        // Por execução e compartilhado entre as cinco análises paralelas:
-        // qualquer uma delas pode ser a que não conseguiu perguntar.
         AtomicBoolean falhou = new AtomicBoolean(false);
-        ExecutorService pool = Executors.newFixedThreadPool(5);
+
+        // ── Fase 1: o que decide o risco ──────────────────────────────────
+        ExecutorService pool = Executors.newFixedThreadPool(4);
         try {
             var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, falhou, b),   pool);
             var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, falhou, b), pool);
-            var dkimFuture  = CompletableFuture.runAsync(() -> analyzeDkim(host, b),  pool);
             var caaFuture   = CompletableFuture.runAsync(() -> analyzeCaa(host, falhou, b),   pool);
             var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, falhou, b),    pool);
 
-            CompletableFuture.allOf(spfFuture, dmarcFuture, dkimFuture, caaFuture, mxFuture)
-                    .get(8, TimeUnit.SECONDS);
+            CompletableFuture.allOf(spfFuture, dmarcFuture, caaFuture, mxFuture)
+                    .get(10, TimeUnit.SECONDS);
 
         } catch (Exception e) {
             falhou.set(true);
@@ -138,6 +154,10 @@ public class DnsSecurityService {
         } finally {
             pool.shutdownNow();
         }
+
+        // ── Fase 2: DKIM, melhor-esforço ──────────────────────────────────
+        // Fora do try acima de propósito: falha aqui não é falha do módulo.
+        analyzeDkim(host, b);
 
         b.lookupFailed(falhou.get());
         DnsSecurityResult result = b.build();
@@ -278,8 +298,11 @@ public class DnsSecurityService {
             for (String selector : DKIM_SELECTORS)
                 probes.add(new String[]{ selector, domain });
 
-        // Cap de 20 threads — DNS é rápido e os lookups rodam em paralelo
-        int poolSize = Math.min(Math.max(probes.size(), 1), 20);
+        // Concorrência baixa de propósito: 20 threads disparando 84 consultas de
+        // uma vez saturavam o cliente HTTP (no modo DoH, cada uma é uma requisição)
+        // e derrubavam por timeout até as consultas de SPF e DMARC. Adivinhar
+        // seletor não justifica atrapalhar o que decide o veredito.
+        int poolSize = Math.min(Math.max(probes.size(), 1), 4);
         ExecutorService pool = Executors.newFixedThreadPool(poolSize);
         try {
             List<CompletableFuture<String>> futures = probes.stream()
@@ -293,7 +316,7 @@ public class DnsSecurityService {
                     .toList();
 
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(5, TimeUnit.SECONDS);
+                    .get(8, TimeUnit.SECONDS);
 
             List<String> found = futures.stream()
                     .map(f -> f.getNow(null))
