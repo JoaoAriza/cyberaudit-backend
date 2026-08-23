@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.joao.cyberaudit.dto.SubscriptionDto;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.service.BillingService;
 import com.joao.cyberaudit.service.ClientIpResolver;
 import com.joao.cyberaudit.service.MercadoPagoService;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -58,9 +60,24 @@ public class BillingController {
 
     // ── Cliente ──────────────────────────────────────────────────────────────────
 
+    /**
+     * Body opcional: {"plan":"PRO"} ou {"plan":"ENTERPRISE"}.
+     * Sem body, cai no plano sugerido pelo tipo da conta.
+     */
     @PostMapping("/billing/subscribe")
-    public Map<String, String> subscribe(@AuthenticationPrincipal AppUser caller) {
-        return Map.of("initPoint", billingService.startSubscription(caller));
+    public Map<String, String> subscribe(@AuthenticationPrincipal AppUser caller,
+                                         @RequestBody(required = false) Map<String, String> body) {
+        Plan escolhido = null;
+        String bruto = body == null ? null : body.get("plan");
+        if (bruto != null && !bruto.isBlank()) {
+            try {
+                escolhido = Plan.valueOf(bruto.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Plano inválido: " + bruto + ". Use PRO ou ENTERPRISE.");
+            }
+        }
+        return Map.of("initPoint", billingService.startSubscription(caller, escolhido));
     }
 
     @GetMapping("/billing/subscription")

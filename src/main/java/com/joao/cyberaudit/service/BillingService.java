@@ -50,15 +50,28 @@ public class BillingService {
     /** Cria a assinatura no MP e devolve o init_point (URL de checkout) para redirecionar. */
     @Transactional
     public String startSubscription(AppUser user) {
+        return startSubscription(user, null);
+    }
+
+    /** @param escolhido plano pedido pelo cliente; null usa o padrão do tipo de conta. */
+    public String startSubscription(AppUser user, Plan escolhido) {
         Account account = user.getAccount();
         if (account == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
         }
-        Plan target  = targetPlan(account);
+        Plan target  = targetPlan(account, escolhido);
         Plan current = account.getPlan() != null ? account.getPlan() : Plan.FREE;
-        if (current == target || current == Plan.ENTERPRISE) {
+
+        if (current == target) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Sua conta já está no plano " + current + ".");
+        }
+        // Impede DOWNGRADE por nova assinatura: sair de ENTERPRISE para PRO assim
+        // criaria uma segunda cobrança sem cancelar a primeira. Downgrade se faz
+        // cancelando a assinatura atual e contratando de novo.
+        if (current == Plan.ENTERPRISE && target == Plan.PRO) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Para trocar de ENTERPRISE para PRO, cancele a assinatura atual primeiro.");
         }
 
         BigDecimal amount = amountFor(target);
@@ -129,12 +142,24 @@ public class BillingService {
             // preapproval sem assinatura local — associa via external_reference (accountId)
             Account account = resolveAccount(info.externalReference());
             if (account == null) return;
+
+            // Preapproval sem registro local (assinatura criada fora do fluxo, ou
+            // registro perdido). O plano vem do VALOR que o MP está cobrando, não
+            // do tipo da conta: o valor é o que o cliente de fato contratou, e
+            // adivinhar pelo tipo daria ENTERPRISE a quem pagou por PRO.
+            Plan planoPago = planoPeloValor(info.amount());
+            if (planoPago == null) {
+                System.err.println("[BillingService] preapproval " + preapprovalId
+                        + " com valor " + info.amount() + " não corresponde a nenhum plano da tabela.");
+                return;
+            }
+
             sub = Subscription.builder()
                     .account(account)
-                    .plan(targetPlan(account))
+                    .plan(planoPago)
                     .mpPreapprovalId(preapprovalId)
                     .status(SubscriptionStatus.PENDING)
-                    .amount(amountFor(targetPlan(account)))
+                    .amount(amountFor(planoPago))
                     .currency(currency)
                     .createdAt(LocalDateTime.now())
                     .build();
@@ -184,8 +209,36 @@ public class BillingService {
         }
     }
 
-    private Plan targetPlan(Account account) {
-        return account.getType() == AccountType.COMPANY ? Plan.ENTERPRISE : Plan.PRO;
+    /**
+     * Plano a contratar: o escolhido pelo cliente, ou o sugerido pelo tipo de conta.
+     *
+     * O padrão por tipo continua porque é o palpite certo na maioria dos casos —
+     * mas não pode ser imposição: uma conta EMPRESA pequena pode querer o PRO, e
+     * uma conta pessoal pode querer os recursos do ENTERPRISE. Só FREE é recusado:
+     * não é algo que se assine.
+     */
+    private Plan targetPlan(Account account, Plan escolhido) {
+        if (escolhido == null) {
+            return account.getType() == AccountType.COMPANY ? Plan.ENTERPRISE : Plan.PRO;
+        }
+        if (escolhido == Plan.FREE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "FREE não é um plano contratável. Escolha PRO ou ENTERPRISE.");
+        }
+        return escolhido;
+    }
+
+    /**
+     * Qual plano o valor cobrado paga. Null quando não alcança nem o mais barato.
+     *
+     * Compara do mais caro para o mais barato para que um valor acima do
+     * ENTERPRISE não seja classificado como PRO.
+     */
+    private Plan planoPeloValor(BigDecimal valor) {
+        if (valor == null) return null;
+        if (valor.compareTo(enterpriseAmount) >= 0) return Plan.ENTERPRISE;
+        if (valor.compareTo(proAmount)        >= 0) return Plan.PRO;
+        return null;
     }
 
     private BigDecimal amountFor(Plan plan) {

@@ -86,6 +86,13 @@ public class StartupConfigCheck implements EnvironmentPostProcessor {
             }
         }
 
+        // Valor de assinatura com vírgula decimal (29,90) é erro fácil de cometer
+        // no Brasil e o Spring falha ao converter para BigDecimal — com stack
+        // trace de conversão, sem dizer QUAL variável nem o quê. Aqui a mensagem
+        // sai antes de qualquer bean ser criado.
+        validarValor(env, "billing.pro.amount",        "BILLING_PRO_AMOUNT",        errors);
+        validarValor(env, "billing.enterprise.amount", "BILLING_ENTERPRISE_AMOUNT", errors);
+
         boolean mpAtivo = !isBlank(read(env, "mp.access-token"));
         if (mpAtivo && isBlank(read(env, "mp.webhook-secret"))) {
             warnings.add("MP_ACCESS_TOKEN definido mas MP_WEBHOOK_SECRET vazio: o webhook vai "
@@ -131,6 +138,21 @@ public class StartupConfigCheck implements EnvironmentPostProcessor {
      * este try/catch, esta classe estourava com stack trace cru exatamente no
      * caso que ela existe para diagnosticar: variável de ambiente ausente.
      */
+    /**
+     * O valor precisa ser um decimal com PONTO. Vazio é aceito: cai no default.
+     */
+    private static void validarValor(ConfigurableEnvironment env, String chave,
+                                     String variavel, java.util.List<String> errors) {
+        String valor = read(env, chave);
+        if (isBlank(valor)) return;
+        try {
+            new java.math.BigDecimal(valor.trim());
+        } catch (NumberFormatException e) {
+            errors.add(variavel + "=" + valor + " não é um número válido. Use PONTO como "
+                    + "separador decimal (ex.: 29.90, não 29,90).");
+        }
+    }
+
     private static String read(ConfigurableEnvironment env, String key) {
         try {
             return env.getProperty(key);
