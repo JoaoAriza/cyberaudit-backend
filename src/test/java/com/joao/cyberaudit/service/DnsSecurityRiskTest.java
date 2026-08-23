@@ -70,6 +70,59 @@ class DnsSecurityRiskTest {
     }
 
     @Test
+    @DisplayName("consulta usa nome absoluto — a search list do host não pode entrar")
+    void nomeSempreAbsoluto() {
+        // Sem o ponto final, o dnsjava aplica a search list do /etc/resolv.conf e
+        // pergunta por "santander.com.<search-do-cluster>", que volta NXDOMAIN.
+        // Funciona na estação de trabalho e falha no container — a pior classe de bug.
+        assertEquals("santander.com.", service.nomeAbsoluto("santander.com"));
+        assertEquals("_dmarc.exemplo.com.", service.nomeAbsoluto("_dmarc.exemplo.com"));
+        assertEquals("ja.absoluto.com.", service.nomeAbsoluto("ja.absoluto.com."),
+                "não pode duplicar o ponto de quem já veio absoluto");
+        assertEquals("com.espaco.", service.nomeAbsoluto("  com.espaco  "));
+    }
+
+    @Test
+    @DisplayName("SPF duplicado não protege — RFC 7208 manda o receptor descartar todos")
+    void spfDuplicadoNaoProtege() {
+        DnsSecurityResult r = DnsSecurityResult.builder()
+                .lookupFailed(false)
+                .spfPresent(true).spfPolicy("INVALID")     // dois registros v=spf1
+                .dmarcPresent(true).dmarcPolicy("STRONG")
+                .mxPresent(true)
+                .build();
+
+        assertEquals("HIGH", risco(r),
+                "registro que existe mas o receptor descarta equivale a não ter");
+    }
+
+    @Test
+    @DisplayName("DMARC duplicado também não protege — RFC 7489")
+    void dmarcDuplicadoNaoProtege() {
+        DnsSecurityResult r = DnsSecurityResult.builder()
+                .lookupFailed(false)
+                .spfPresent(true).spfPolicy("STRONG")
+                .dmarcPresent(true).dmarcPolicy("INVALID")
+                .mxPresent(true)
+                .build();
+
+        assertEquals("HIGH", risco(r));
+    }
+
+    @Test
+    @DisplayName("SPF e DMARC ambos duplicados caem no pior caso, como se faltassem")
+    void ambosDuplicadosEhOPiorCaso() {
+        DnsSecurityResult r = DnsSecurityResult.builder()
+                .lookupFailed(false)
+                .spfPresent(true).spfPolicy("INVALID")
+                .dmarcPresent(true).dmarcPolicy("INVALID")
+                .mxPresent(true)
+                .build();
+
+        assertEquals("CRITICAL", risco(r));
+    }
+
+    @Test
     @DisplayName("SPF -all + DMARC p=reject continua sendo o melhor caso")
     void configuracaoCorretaDaLow() {
         DnsSecurityResult r = DnsSecurityResult.builder()
