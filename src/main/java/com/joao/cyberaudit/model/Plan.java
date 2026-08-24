@@ -61,4 +61,18 @@ public enum Plan {
 
     /** @return true se o plano não tem limite diário de scans */
     public boolean isUnlimited() { return dailyScanLimit < 0; }
+
+    /**
+     * Fronteira do "só no que é seu": scan ativo e entrega de laudo (PDF e e-mail)
+     * valem apenas sobre domínio verificado da conta.
+     *
+     * Vale para o PRO pessoal. Conta COMPANY e ENTERPRISE não têm a restrição.
+     *
+     * Mora aqui porque a mesma expressão estava copiada em AccountDto e
+     * PlanLimitService, e o catálogo de planos seria a terceira cópia — que é
+     * exatamente o tipo de duplicação que deixou o cardápio mentir antes.
+     */
+    public boolean verifiedDomainOnly(boolean companyAccount) {
+        return this == PRO && !companyAccount;
+    }
 }

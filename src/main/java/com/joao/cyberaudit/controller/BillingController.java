@@ -2,12 +2,14 @@ package com.joao.cyberaudit.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.joao.cyberaudit.dto.PlanCatalogDto;
 import com.joao.cyberaudit.dto.SubscriptionDto;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.service.BillingService;
 import com.joao.cyberaudit.service.ClientIpResolver;
 import com.joao.cyberaudit.service.MercadoPagoService;
+import com.joao.cyberaudit.service.PlanCatalogService;
 import com.joao.cyberaudit.service.RateLimitService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,11 +25,13 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Endpoints de billing/assinatura.
  * /billing/subscribe|subscription|cancel → autenticados (regra /billing/** no SecurityConfig).
+ * /billing/plans → público: é o cardápio, e visitante precisa vê-lo antes de ter conta.
  * /billing/webhook → público (Mercado Pago), mas confirma tudo contra a API do MP e valida
  * a assinatura x-signature quando o secret está configurado.
  */
@@ -42,6 +46,7 @@ public class BillingController {
     private final RateLimitService   rateLimitService;
     private final ObjectMapper       mapper;
     private final ClientIpResolver   clientIpResolver;
+    private final PlanCatalogService planCatalogService;
 
     @Value("${mp.webhook-secret:}")
     private String webhookSecret;
@@ -50,12 +55,25 @@ public class BillingController {
                              MercadoPagoService mercadoPagoService,
                              RateLimitService rateLimitService,
                              ObjectMapper mapper,
-                             ClientIpResolver clientIpResolver) {
+                             ClientIpResolver clientIpResolver,
+                             PlanCatalogService planCatalogService) {
         this.billingService     = billingService;
         this.mercadoPagoService = mercadoPagoService;
         this.rateLimitService   = rateLimitService;
         this.mapper             = mapper;
         this.clientIpResolver   = clientIpResolver;
+        this.planCatalogService = planCatalogService;
+    }
+
+    // ── Cardápio ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Público: o cardápio aparece para visitante, antes de existir conta. Não diz
+     * nada sobre quem chama — é a tabela de planos, igual para todo mundo.
+     */
+    @GetMapping("/billing/plans")
+    public List<PlanCatalogDto> plans() {
+        return planCatalogService.catalogo();
     }
 
     // ── Cliente ──────────────────────────────────────────────────────────────────

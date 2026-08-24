@@ -124,6 +124,15 @@ class SecurityChainIntegrationTest {
     }
 
     @Test
+    @DisplayName("cardápio de planos é público — visitante precisa vê-lo antes de ter conta")
+    void cardapioEPublico() throws Exception {
+        // Fica sob /billing/**, que é `.authenticated()`. Sem a exceção explícita
+        // no SecurityConfig, a tela de planos ficaria invisível para quem não tem
+        // conta — justamente o público que ela existe para converter.
+        mvc.perform(get("/billing/plans")).andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("rota pública chega no controller — 400 por parâmetro faltando, não 401")
     void rotaPublicaChegaNoController() throws Exception {
         // /scan/verify-check é permitAll e exige o parâmetro `host`. O 400 do MVC

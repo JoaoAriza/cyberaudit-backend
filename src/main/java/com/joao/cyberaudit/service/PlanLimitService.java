@@ -244,7 +244,7 @@ public class PlanLimitService {
         }
 
         // Só o PRO pessoal fica preso ao próprio domínio.
-        if (plan != Plan.PRO || account.getType() == AccountType.COMPANY) return;
+        if (!plan.verifiedDomainOnly(account.getType() == AccountType.COMPANY)) return;
 
         if (targetHost == null || targetHost.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,

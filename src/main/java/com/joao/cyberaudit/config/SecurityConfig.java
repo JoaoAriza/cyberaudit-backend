@@ -90,6 +90,8 @@ public class SecurityConfig {
 
                         // ── Webhook do Mercado Pago (público; validado contra a API do MP) ─
                         .requestMatchers(HttpMethod.POST, "/billing/webhook").permitAll()
+                        // ── Cardápio de planos: público, é o que o visitante vem ver ─
+                        .requestMatchers(HttpMethod.GET, "/billing/plans").permitAll()
                         // ── Assinatura (autenticado) ───────────────────────────────
                         .requestMatchers("/billing/**").authenticated()
 

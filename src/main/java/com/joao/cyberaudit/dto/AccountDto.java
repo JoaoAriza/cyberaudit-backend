@@ -76,7 +76,7 @@ public class AccountDto {
         boolean isCompany = a.getType() == AccountType.COMPANY;
         // PRO pode fazer active scan em domínios verificados; COMPANY/ENTERPRISE pode em qualquer
         boolean canActiveScan = usedPlan.activeScanAllowed || usedPlan == Plan.PRO;
-        boolean verifiedOnly  = usedPlan == Plan.PRO && !isCompany;
+        boolean verifiedOnly  = usedPlan.verifiedDomainOnly(isCompany);
 
         dto.setDailyScanLimit(usedPlan.dailyScanLimit);
         dto.setScheduledScanLimit(usedPlan.scheduledScanLimit);
