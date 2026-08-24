@@ -47,6 +47,23 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Sobe a cadeia de filtros do Spring Security no teste. Sem isso não há
+             como provar ordem de filtro — foi por onde passou o preflight 403 de
+             CORS, que os testes de unidade não tinham como pegar. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Banco em memória só para o contexto de teste subir; o de produção é
+             Postgres. Modo de compatibilidade fica no application-test.properties. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>

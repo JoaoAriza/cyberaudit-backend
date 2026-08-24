@@ -8,6 +8,8 @@ import com.joao.cyberaudit.service.ApiKeyService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -59,6 +61,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                .exceptionHandling(e -> e.authenticationEntryPoint(restAuthenticationEntryPoint()))
                 // Sem isto o preflight (OPTIONS, sempre sem credencial) é julgado pelas
                 // regras abaixo e volta 403 — o navegador aborta antes da requisição
                 // real e o front só enxerga "Network Error". Usa o
@@ -125,6 +128,28 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * Sem entry point próprio, o ExceptionTranslationFilter responde 403 a quem
+     * chega sem credencial. Além de errado na semântica HTTP (401 é "não sei quem
+     * você é"; 403 é "sei, e você não pode"), isso tinha efeito prático: o
+     * interceptor do frontend só derruba a sessão em 401, então um token expirado
+     * no meio da navegação deixava o usuário preso — toda chamada falhando, sem
+     * ser mandado para o login, até recarregar a página. O que mascarava o
+     * problema é /auth/me devolver 401 por conta própria, o que fazia o caminho
+     * do boot funcionar e só esse.
+     *
+     * Quem está autenticado e não tem o papel continua recebendo 403, pelo
+     * AccessDeniedHandler padrão.
+     */
+    @Bean
+    public AuthenticationEntryPoint restAuthenticationEntryPoint() {
+        return (request, response, ex) -> {
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"error\":\"Autenticação necessária.\"}");
+        };
     }
 
     @Bean
