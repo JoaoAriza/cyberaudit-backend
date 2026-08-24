@@ -88,6 +88,19 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest req, String clientIp) {
+        // O register já fazia esta conferência; o login era o único endpoint de
+        // autenticação sem ela, e {"email":null} estourava NPE no toLowerCase()
+        // abaixo — 500 e stack trace no log para quem só mandou corpo torto.
+        //
+        // Antes do throttle de propósito: requisição malformada não é tentativa de
+        // login e não deve gastar o crédito de ninguém.
+        if (req == null || req.getEmail() == null || req.getEmail().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email é obrigatório.");
+        }
+        if (req.getPassword() == null || req.getPassword().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Senha é obrigatória.");
+        }
+
         String email = req.getEmail().toLowerCase().trim();
 
         // Antes da senha: conta ou IP já travados por tentativas anteriores.
