@@ -183,11 +183,83 @@ public class PlanLimitService {
         return host.substring(dot + 1);
     }
 
-    /** Verifica se o plano permite exportação de PDF. Lança 402 se não permitido. */
-    public void checkPdfExport(AppUser user) {
-        if (!effectivePlan(user).pdfExportAllowed) {
+    /**
+     * Verifica se o usuário pode exportar o PDF do laudo do host-alvo.
+     * Ver {@link #checkReportDelivery} para as regras.
+     */
+    public void checkPdfExport(AppUser user, String targetHost) {
+        Plan plan = effectivePlan(user);
+        checkReportDelivery(user, plan, plan.pdfExportAllowed, targetHost, "Exportação de PDF");
+    }
+
+    /** Verifica se o usuário pode receber por e-mail o laudo do host-alvo. */
+    public void checkEmailNotify(AppUser user, String targetHost) {
+        Plan plan = effectivePlan(user);
+        checkReportDelivery(user, plan, plan.emailNotifyAllowed, targetHost,
+                "Notificação por e-mail");
+    }
+
+    /**
+     * Variante que não lança — para o agendador, onde a exceção mataria a rodada.
+     * O plano pode ter caído entre a criação do agendamento e a execução dele.
+     */
+    public boolean canEmailNotify(AppUser user, String targetHost) {
+        try {
+            checkEmailNotify(user, targetHost);
+            return true;
+        } catch (ResponseStatusException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Regra única de entrega de laudo, para PDF e e-mail.
+     *
+     *  FREE                     → bloqueado; o detalhe do achado é o produto pago
+     *  PRO PESSOAL              → só sobre domínio verificado da própria conta
+     *  PRO EMPRESA / ENTERPRISE → sem restrição de domínio
+     *
+     * A tela pode mostrar o laudo de qualquer site — é consulta. O que a posse
+     * governa é o ENTREGÁVEL: sem ela, a assinatura pessoal de R$ 29,90 viraria
+     * gerador de auditoria de site de terceiro em PDF timbrado.
+     *
+     * Não há check de staff aqui: {@link #effectivePlan(AppUser)} já promove a
+     * equipe da plataforma a ENTERPRISE, que não cai na restrição de domínio.
+     */
+    private void checkReportDelivery(AppUser user, Plan plan, boolean allowedByPlan,
+                                     String targetHost, String canal) {
+        if (user == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    canal + " requer autenticação.");
+        }
+        if (!allowedByPlan) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "Exportação de PDF requer login.");
+                    canal + " requer plano PRO ou superior.");
+        }
+
+        Account account = user.getAccount();
+        if (account == null) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    "Conta não encontrada.");
+        }
+
+        // Só o PRO pessoal fica preso ao próprio domínio.
+        if (plan != Plan.PRO || account.getType() == AccountType.COMPANY) return;
+
+        if (targetHost == null || targetHost.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Host inválido para " + canal.toLowerCase() + ".");
+        }
+
+        String host = normalizeHost(targetHost);
+        boolean owned = isVerifiedForAccount(account, host)
+                || isVerifiedForAccount(account, parentDomain(host));
+
+        if (!owned) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    canal + " no plano Pessoal Pro vale apenas para domínios verificados "
+                    + "na sua conta. Acesse Domínios, cadastre e verifique \"" + host
+                    + "\" para continuar.");
         }
     }
 

@@ -90,8 +90,6 @@ public class ScanController {
                     "Geração de PDF requer autenticação. Faça login para continuar.");
         }
 
-        planLimitService.checkPdfExport(currentUser);
-
         // Só o autor do scan exporta o PDF dele — o scanId é um UUID, não uma credencial.
         AsyncScanStatus status = asyncScanService.getStatusFor(scanId,
                 AsyncScanService.ownerKey(currentUser, clientIpResolver.resolve(request)));
@@ -101,6 +99,9 @@ public class ScanController {
         }
 
         ScanResult result = status.getResult();
+        // A trava de plano depende do host, então só dá para conferir depois de
+        // saber qual scan é. O status guardado já vem com o gating de detalhe.
+        planLimitService.checkPdfExport(currentUser, result.getUrl());
         byte[] pdf = pdfReportService.generatePdf(
                 result, reportService.generateReport(result), currentUser.getAccount());
 
@@ -124,7 +125,7 @@ public class ScanController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Geração de PDF requer autenticação. Faça login para continuar.");
         }
-        planLimitService.checkPdfExport(currentUser);
+        planLimitService.checkPdfExport(currentUser, url);
         checkRateLimit(request, currentUser);
         // Re-scan completo: consome limite diário como qualquer outro scan.
         enforceScanLimits(url, active, currentUser, request);
@@ -150,6 +151,9 @@ public class ScanController {
         AppUser currentUser = getCurrentUser();
         checkRateLimit(request, currentUser);
         enforceScanLimits(url, active, currentUser, request);
+        // Recusa aqui, na submissão: o scan roda em thread assíncrona e uma falha
+        // lá vira scan perdido em vez de mensagem na tela.
+        if (notify) planLimitService.checkEmailNotify(currentUser, url);
 
         String scanId = asyncScanService.submit(url, active, currentUser, refresh, notify,
                 AsyncScanService.ownerKey(currentUser, clientIpResolver.resolve(request)));

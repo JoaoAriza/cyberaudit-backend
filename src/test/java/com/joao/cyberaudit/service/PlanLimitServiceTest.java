@@ -18,7 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Plano efetivo por usuário.
@@ -88,7 +91,7 @@ class PlanLimitServiceTest {
     }
 
     @Test
-    @DisplayName("FREE logado não tem Changes nem gráfico de histórico, e tem limite diário")
+    @DisplayName("FREE logado só tem os 10 scans do dia — nem módulo, nem entrega de laudo")
     void freeMantemLimitesDoTier() {
         var service = service("");
         Plan plano  = service.effectivePlan(cadastroComum(Plan.FREE));
@@ -96,8 +99,87 @@ class PlanLimitServiceTest {
         assertFalse(plano.changesModuleAllowed, "Changes é PRO+");
         assertFalse(plano.historyChartAllowed,  "gráfico de histórico é PRO+");
         assertFalse(plano.activeScanAllowed,    "active scan é ENTERPRISE");
-        assertTrue(plano.pdfExportAllowed,      "PDF é liberado para quem loga");
+        assertFalse(plano.pdfExportAllowed,     "PDF virou recurso pago");
+        assertFalse(plano.emailNotifyAllowed,   "notificação por e-mail virou recurso pago");
         assertEquals(10, plano.dailyScanLimit,  "FREE tem limite diário, não ilimitado");
+    }
+
+    // ── Entrega de laudo: PDF e e-mail ───────────────────────────────────────
+
+    /**
+     * O que falhou em produção: o gating de detalhe vivia só no caminho da tela.
+     * O e-mail do scan mandava o resultado cru, então uma conta FREE recebia na
+     * caixa de entrada os títulos MEDIUM/HIGH que a tela mostrava borrados. A
+     * política que saiu dali: entrega de laudo é paga, e no Pro pessoal só vale
+     * sobre domínio que a conta provou possuir.
+     */
+    private PlanLimitService serviceComVerificados(String... hosts) {
+        DomainRepository repo = mock(DomainRepository.class);
+        for (String host : hosts) {
+            when(repo.existsByAccountAndHostAndVerifiedTrue(any(), eq(host))).thenReturn(true);
+        }
+        return new PlanLimitService(repo, new PlatformStaffService(""));
+    }
+
+    @Test
+    @DisplayName("FREE não exporta PDF nem recebe e-mail — 402 nos dois")
+    void freeNaoRecebeLaudo() {
+        var service = service("");
+        var free    = cadastroComum(Plan.FREE);
+
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, assertThrows(ResponseStatusException.class,
+                () -> service.checkPdfExport(free, "exemplo.com")).getStatusCode());
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, assertThrows(ResponseStatusException.class,
+                () -> service.checkEmailNotify(free, "exemplo.com")).getStatusCode());
+    }
+
+    @Test
+    @DisplayName("Pro pessoal entrega laudo do domínio verificado, e do subdomínio dele")
+    void proPessoalEntregaNoProprioDominio() {
+        var service = serviceComVerificados("empresa.com.br");
+        var pro     = cadastroComum(Plan.PRO);
+
+        assertDoesNotThrow(() -> service.checkPdfExport(pro, "https://empresa.com.br/rota"));
+        assertDoesNotThrow(() -> service.checkEmailNotify(pro, "empresa.com.br"));
+        // parentDomain: o verificado é o pai, o alvo é o subdomínio
+        assertDoesNotThrow(() -> service.checkPdfExport(pro, "api.empresa.com.br"));
+    }
+
+    @Test
+    @DisplayName("Pro pessoal não gera laudo de site de terceiro — 403")
+    void proPessoalNaoEntregaDeTerceiro() {
+        var service = serviceComVerificados("empresa.com.br");
+        var pro     = cadastroComum(Plan.PRO);
+
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+                () -> service.checkPdfExport(pro, "site-do-cliente.com")).getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+                () -> service.checkEmailNotify(pro, "site-do-cliente.com")).getStatusCode());
+    }
+
+    @Test
+    @DisplayName("conta Empresa e ENTERPRISE entregam laudo de qualquer domínio")
+    void empresaNaoTemRestricaoDeDominio() {
+        var service = serviceComVerificados();   // nenhum domínio verificado
+
+        var proEmpresa = usuario(CLIENTE, Role.OWNER, Plan.PRO,        AccountType.COMPANY);
+        var enterprise = usuario(CLIENTE, Role.OWNER, Plan.ENTERPRISE, AccountType.INDIVIDUAL);
+
+        assertDoesNotThrow(() -> service.checkPdfExport(proEmpresa,   "site-qualquer.com"));
+        assertDoesNotThrow(() -> service.checkEmailNotify(proEmpresa, "site-qualquer.com"));
+        assertDoesNotThrow(() -> service.checkPdfExport(enterprise,   "site-qualquer.com"));
+        assertDoesNotThrow(() -> service.checkEmailNotify(enterprise, "site-qualquer.com"));
+    }
+
+    @Test
+    @DisplayName("canEmailNotify devolve false em vez de lançar — o agendador não pode quebrar")
+    void agendadorNaoQuebraQuandoOPlanoCai() {
+        var service = serviceComVerificados();
+
+        assertFalse(service.canEmailNotify(cadastroComum(Plan.FREE), "exemplo.com"));
+        assertFalse(service.canEmailNotify(cadastroComum(Plan.PRO),  "site-de-terceiro.com"));
+        assertTrue(serviceComVerificados("meu.com")
+                .canEmailNotify(cadastroComum(Plan.PRO), "meu.com"));
     }
 
     // ── Agendamentos e domínio próprio ───────────────────────────────────────

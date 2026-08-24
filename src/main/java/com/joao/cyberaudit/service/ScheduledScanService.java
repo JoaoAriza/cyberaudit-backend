@@ -44,6 +44,11 @@ public class ScheduledScanService {
         // Verifica se o plano permite mais agendamentos
         int currentCount = repo.findByUserOrderByCreatedAtDesc(user).size();
         planLimitService.checkScheduledScanSlots(user, currentCount);
+        // Agendar já é PRO+, mas notificar por e-mail carrega a regra de domínio:
+        // o Pro pessoal só recebe laudo do que é dele.
+        if (req.isNotifyEmail()) {
+            planLimitService.checkEmailNotify(user, req.getHost());
+        }
 
         Frequency freq = Frequency.valueOf(req.getFrequency().toUpperCase());
 
@@ -105,11 +110,13 @@ public class ScheduledScanService {
                 // Persiste nextRun e lastRun em transação curta separada
                 markSuccess(scan.getId(), calcNextRun(scan.getFrequency(), scan.getPreferredHour()));
 
-                if (scan.isNotifyEmail()) {
+                // Reconfere o plano na hora de enviar: entre a criação do agendamento
+                // e esta rodada a assinatura pode ter caído. Variante que não lança —
+                // exceção aqui mataria as demais notificações da rodada.
+                if (scan.isNotifyEmail()
+                        && planLimitService.canEmailNotify(scan.getUser(), scan.getHost())) {
                     // Mesmo gating da tela: o e-mail é canal de entrega, não atalho
-                    // para o resultado cru. Hoje agendamento já exige PRO+, então na
-                    // prática não trava nada — é o que garante que continue assim se
-                    // o limite do FREE mudar.
+                    // para o resultado cru.
                     emailService.sendScanComplete(
                             scan.getUser().getEmail(),
                             scan.getUser().getName(),

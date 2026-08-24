@@ -30,6 +30,14 @@ public class AccountDto {
     /** true = PRO INDIVIDUAL — scan ativo permitido apenas em domínios verificados */
     private boolean activeScanOnVerifiedOnly;
     private boolean pdfExportAllowed;
+    /** Notificação por e-mail do scan concluído — PRO+ */
+    private boolean emailNotifyAllowed;
+    /**
+     * true = PRO PESSOAL — PDF e e-mail só sobre domínios verificados da conta.
+     * O laudo exportável é o entregável do produto: sem prova de posse, a
+     * assinatura pessoal viraria gerador de auditoria de site alheio.
+     */
+    private boolean reportOnVerifiedOnly;
     private boolean changesModuleAllowed;
     private boolean historyChartAllowed;
     /** Cadastrar domínio próprio — PRO ou superior */
@@ -75,6 +83,9 @@ public class AccountDto {
         dto.setActiveScanAllowed(canActiveScan);
         dto.setActiveScanOnVerifiedOnly(verifiedOnly);
         dto.setPdfExportAllowed(usedPlan.pdfExportAllowed);
+        dto.setEmailNotifyAllowed(usedPlan.emailNotifyAllowed);
+        // Mesma fronteira do active scan: PRO pessoal entrega só sobre o que é dele.
+        dto.setReportOnVerifiedOnly(verifiedOnly);
         dto.setChangesModuleAllowed(usedPlan.changesModuleAllowed);
         dto.setHistoryChartAllowed(usedPlan.historyChartAllowed);
         dto.setDomainRegistrationAllowed(usedPlan.domainRegistrationAllowed);
