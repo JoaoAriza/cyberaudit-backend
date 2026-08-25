@@ -46,6 +46,16 @@ class CorsConfigTest {
     }
 
     @Test
+    @DisplayName("Accept-Language é aceito — é como a interface pede o idioma do laudo")
+    void permiteHeaderAcceptLanguage() {
+        var config = configComOrigens("https://cyberauditapp.com");
+
+        // Safelisted pelo CORS não basta: a chamada já leva Authorization, então há
+        // preflight, e o preflight exige que TODO header pedido esteja na allowlist.
+        assertTrue(config.getAllowedHeaders().contains("Accept-Language"));
+    }
+
+    @Test
     @DisplayName("OPTIONS está entre os métodos permitidos")
     void permiteOptions() {
         var config = configComOrigens("https://cyberauditapp.com");

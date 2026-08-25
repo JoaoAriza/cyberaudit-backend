@@ -71,6 +71,22 @@ class SecurityChainIntegrationTest {
     }
 
     @Test
+    @DisplayName("preflight aceita Accept-Language junto do Authorization")
+    void preflightAceitaAcceptLanguage() throws Exception {
+        // O seletor de idioma manda Accept-Language em toda chamada, inclusive nas
+        // autenticadas. O preflight lista os DOIS headers, e basta um não estar na
+        // allowlist para ele ser recusado inteiro — a API pararia de responder.
+        mvc.perform(options("/history/scans")
+                        .header("Origin", ORIGEM_PERMITIDA)
+                        .header("Access-Control-Request-Method", "GET")
+                        .header("Access-Control-Request-Headers", "authorization,accept-language"))
+                .andExpect(status().isOk())
+                .andExpect(header().stringValues("Access-Control-Allow-Headers",
+                        org.hamcrest.Matchers.hasItem(
+                                org.hamcrest.Matchers.containsStringIgnoringCase("accept-language"))));
+    }
+
+    @Test
     @DisplayName("origem desconhecida não ganha permissão no preflight")
     void preflightDeOrigemEstranhaNaoPassa() throws Exception {
         mvc.perform(options("/billing/subscription")

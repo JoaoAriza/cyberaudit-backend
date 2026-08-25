@@ -61,7 +61,13 @@ public class CorsConfig {
         // setAllowedOrigins (não ...Patterns): comparação exata, sem curinga.
         config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Api-Key", "Accept"));
+        // Accept-Language é como o Frontend pede o idioma do laudo. Ele é
+        // safelisted pelo CORS, mas isso não basta: a requisição já leva
+        // Authorization, então há preflight, e o preflight só passa se TODOS os
+        // headers pedidos estiverem nesta lista. Sem ele aqui, ligar o seletor de
+        // idioma na tela derrubaria a API inteira com 403 no preflight.
+        config.setAllowedHeaders(List.of(
+                "Authorization", "Content-Type", "X-Api-Key", "Accept", "Accept-Language"));
         // Nada de exposedHeaders("*") — o browser só precisa ver o que a UI usa.
         config.setExposedHeaders(List.of("Content-Disposition", "Retry-After"));
         config.setAllowCredentials(false);
