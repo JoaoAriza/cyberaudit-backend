@@ -5,6 +5,7 @@ import com.joao.cyberaudit.model.AsyncScanStatus;
 import com.joao.cyberaudit.model.AsyncScanStatus.State;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.repository.AppUserRepository;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -64,7 +66,12 @@ public class AsyncScanService {
         evictStale();
         String scanId = UUID.randomUUID().toString();
         put(scanId, new AsyncScanStatus(scanId, State.PENDING, null, null), ownerKey);
-        executeAsync(scanId, url, active, currentUser, refresh, notify, ownerKey);
+        // O idioma tem de ser capturado AQUI, na thread da requisição. O
+        // LocaleContextHolder é ThreadLocal e o scan roda em outra thread: sem
+        // carregá-lo junto, todo scan assíncrono sairia no idioma padrão — e este
+        // é o caminho que a interface usa.
+        executeAsync(scanId, url, active, currentUser, refresh, notify, ownerKey,
+                LocaleContextHolder.getLocale());
         return scanId;
     }
 
@@ -82,8 +89,11 @@ public class AsyncScanService {
     @Async
     public void executeAsync(String scanId, String url, boolean active,
                              AppUser currentUser, boolean refresh, boolean notify,
-                             String ownerKey) {
+                             String ownerKey, Locale idioma) {
         put(scanId, new AsyncScanStatus(scanId, State.RUNNING, null, null), ownerKey);
+        // Reinstala o idioma da requisição nesta thread; o finally limpa porque a
+        // thread volta para o pool e serviria outro scan com o idioma errado.
+        LocaleContextHolder.setLocale(idioma);
         try {
             // Re-fetch user WITH eager account (JOIN FETCH) in the async thread's own JPA session.
             // The principal from Spring Security is a detached entity — its lazy account proxy
@@ -115,6 +125,8 @@ public class AsyncScanService {
         } catch (Exception e) {
             put(scanId, new AsyncScanStatus(scanId, State.ERROR, null,
                     safeErrorMessage(e)), ownerKey);
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
         }
     }
 

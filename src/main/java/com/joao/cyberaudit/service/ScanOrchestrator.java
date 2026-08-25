@@ -4,6 +4,7 @@ import com.joao.cyberaudit.model.*;
 import java.util.Collections;
 import com.joao.cyberaudit.exception.DomainBlockedException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -627,8 +628,22 @@ public class ScanOrchestrator {
         catch (Exception e) { return null; }
     }
     private static final String CACHE_VERSION = "v3";
+
+    /**
+     * O idioma entra na chave porque o resultado guardado já tem o TEXTO montado:
+     * sem isso, um scan feito em português seria devolvido a quem pediu inglês,
+     * pelos 2 minutos de TTL.
+     *
+     * Custa refazer o scan uma vez por idioma no mesmo host dentro da janela. O
+     * conserto sem esse custo é o resultado guardar ID + parâmetros e o texto ser
+     * montado na saída — mudança de contrato, grande, e que esta etapa não faz.
+     *
+     * Usa só o idioma, não o locale inteiro: en-US e en-GB leem o mesmo catálogo e
+     * não têm motivo para ocupar entradas separadas.
+     */
     private String buildCacheKey(String url, boolean active) {
         String h = extractHostSafe(url);
-        return CACHE_VERSION + ":scan:" + (h != null ? h : url) + ":active=" + active;
+        return CACHE_VERSION + ":scan:" + (h != null ? h : url) + ":active=" + active
+                + ":lang=" + LocaleContextHolder.getLocale().getLanguage();
     }
 }
