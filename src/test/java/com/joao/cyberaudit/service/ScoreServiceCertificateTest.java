@@ -29,12 +29,12 @@ class ScoreServiceCertificateTest {
      * Assim o teste também falha se uma chave sumir do arquivo — o texto passou a
      * viver fora do código, e nada mais garantiria que ele existe.
      */
-    private static IssueCatalog catalogoReal() {
+    private static MessageCatalog catalogoReal() {
         var fonte = new ResourceBundleMessageSource();
         fonte.setBasename("messages");
         fonte.setDefaultEncoding("UTF-8");
         fonte.setFallbackToSystemLocale(false);
-        return new IssueCatalog(fonte);
+        return new MessageCatalog(fonte);
     }
 
     /** Headers "todos presentes", para isolar o efeito do certificado no score. */

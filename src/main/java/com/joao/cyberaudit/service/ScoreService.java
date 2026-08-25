@@ -10,9 +10,9 @@ import java.util.Map;
 @Service
 public class ScoreService {
 
-    private final IssueCatalog catalog;
+    private final MessageCatalog catalog;
 
-    public ScoreService(IssueCatalog catalog) {
+    public ScoreService(MessageCatalog catalog) {
         this.catalog = catalog;
     }
 

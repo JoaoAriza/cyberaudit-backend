@@ -9,7 +9,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class EmailService {
 
-    private final EmailSender emailSender;
+    private final EmailSender    emailSender;
+    private final MessageCatalog catalog;
 
     @Value("${mail.enabled:false}")
     private boolean enabled;
@@ -17,8 +18,29 @@ public class EmailService {
     @Value("${mail.from:noreply@cyberaudit.app}")
     private String from;
 
-    public EmailService(EmailSender emailSender) {
+    public EmailService(EmailSender emailSender, MessageCatalog catalog) {
         this.emailSender = emailSender;
+        this.catalog     = catalog;
+    }
+
+    /**
+     * A saudação inteira, com o primeiro nome já escapado e estilizado.
+     *
+     * O nome entra como PARÂMETRO de uma frase completa, em vez de a frase ser
+     * partida em "Olá, " + nome + ".": a ordem das palavras muda de idioma para
+     * idioma, e frase picada não sobrevive à tradução.
+     */
+    private String saudacao(String nome) {
+        String primeiro = nome != null && nome.contains(" ")
+                ? nome.substring(0, nome.indexOf(' '))
+                : (nome != null && !nome.isBlank() ? nome : catalog.email("defaultName"));
+        return catalog.email("greeting",
+                "<strong style=\"color:#e0eaf4;\">" + escHtml(primeiro) + "</strong>");
+    }
+
+    /** Idioma da mensagem, para o atributo lang do HTML. */
+    private String tagDeIdioma() {
+        return org.springframework.context.i18n.LocaleContextHolder.getLocale().toLanguageTag();
     }
 
     /**
@@ -34,7 +56,7 @@ public class EmailService {
             String risk  = result.getScore() != null ? result.getScore().getRiskLevel().name() : "UNKNOWN";
             String color = riskColor(risk);
 
-            String subject = "CyberAudit — Scan concluído: " + host + " (" + score + "/100)";
+            String subject = catalog.email("scan.subject", host, score);
             String html    = buildHtml(toName, host, score, risk, color, result);
 
             emailSender.send(from, toEmail, subject, html);
@@ -53,8 +75,6 @@ public class EmailService {
                                      String reason, ScanResult result) {
         if (!enabled || toEmail == null || toEmail.isBlank()) return;
         try {
-            String firstName = toName != null && toName.contains(" ")
-                    ? toName.substring(0, toName.indexOf(' ')) : (toName != null ? toName : "usuário");
             int    drop      = oldScore - newScore;
             String color     = riskColor(newRisk);
 
@@ -85,12 +105,13 @@ public class EmailService {
                         });
             }
             String findingsSection = findings.length() > 0
-                    ? "<p style='margin:0 0 6px;font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;'>Issues críticos/altos</p>"
+                    ? "<p style='margin:0 0 6px;font-size:11px;color:#5a7a96;text-transform:uppercase;"
+                      + "letter-spacing:.08em;'>" + catalog.email("degradation.criticalFindings") + "</p>"
                       + "<table width='100%' cellpadding='0' cellspacing='0'>" + findings + "</table>"
                     : "";
 
             String html = """
-                <!DOCTYPE html><html lang="pt-BR">
+                <!DOCTYPE html><html lang="%s">
                 <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
                   <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
                     <tr><td align="center">
@@ -98,37 +119,37 @@ public class EmailService {
                              style="background:#0d1b2a;border:1px solid #1c2a3a;border-radius:8px;overflow:hidden;">
                         <tr><td style="background:#0a1520;padding:20px 28px;border-bottom:3px solid #ff4040;">
                           <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
-                          <span style="margin-left:16px;font-size:12px;color:#ff4040;font-weight:700;letter-spacing:.08em;">⚠ ALERTA DE DEGRADAÇÃO</span>
+                          <span style="margin-left:16px;font-size:12px;color:#ff4040;font-weight:700;letter-spacing:.08em;">%s</span>
                         </td></tr>
                         <tr><td style="padding:28px;">
                           <p style="margin:0 0 16px;color:#b8ccde;font-size:15px;">
-                            Olá, <strong style="color:#e0eaf4;">%s</strong>.
+                            %s
                           </p>
                           <p style="margin:0 0 20px;color:#5a7a96;font-size:14px;">
-                            O score de segurança do domínio abaixo piorou significativamente:
+                            %s
                           </p>
                           <table width="100%%" cellpadding="0" cellspacing="0"
                                  style="background:#0a1520;border:1px solid #ff4040;border-radius:6px;margin-bottom:20px;">
                             <tr><td style="padding:20px 24px;">
                               <div style="font-size:12px;color:#5a7a96;text-transform:uppercase;
-                                          letter-spacing:.08em;margin-bottom:4px;">Domínio</div>
+                                          letter-spacing:.08em;margin-bottom:4px;">%s</div>
                               <div style="font-size:17px;font-weight:600;color:#e0eaf4;
                                           font-family:monospace;margin-bottom:16px;">%s</div>
                               <table cellpadding="0" cellspacing="0">
                                 <tr>
                                   <td style="padding-right:28px;">
-                                    <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Score anterior</div>
+                                    <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">%s</div>
                                     <div style="font-size:24px;font-weight:700;color:#5a7a96;">%d<span style="font-size:12px;">/100</span></div>
                                   </td>
                                   <td style="padding-right:28px;">
                                     <div style="font-size:18px;color:#ff4040;font-weight:700;">▼ %d</div>
                                   </td>
                                   <td style="padding-right:28px;">
-                                    <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Score atual</div>
+                                    <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">%s</div>
                                     <div style="font-size:24px;font-weight:700;color:%s;">%d<span style="font-size:12px;">/100</span></div>
                                   </td>
                                   <td>
-                                    <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Risco</div>
+                                    <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">%s</div>
                                     <div style="display:inline-block;padding:4px 10px;border-radius:4px;
                                                 font-size:12px;font-weight:700;color:%s;border:1px solid %s;">%s</div>
                                   </td>
@@ -136,29 +157,42 @@ public class EmailService {
                               </table>
                             </td></tr>
                           </table>
-                          <p style="margin:0 0 16px;color:#b8ccde;font-size:13px;"><strong>Motivo:</strong> %s</p>
+                          <p style="margin:0 0 16px;color:#b8ccde;font-size:13px;"><strong>%s</strong> %s</p>
                           %s
                           <p style="margin:24px 0 0;text-align:center;">
                             <a href="https://cyberaudit.app"
                                style="display:inline-block;padding:11px 28px;background:#ff4040;
                                       color:#fff;font-weight:700;font-size:14px;border-radius:5px;
                                       text-decoration:none;">
-                              Ver relatório completo →
+                              %s
                             </a>
                           </p>
                         </td></tr>
                         <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;
                                        color:#344d62;font-size:11px;text-align:center;">
-                          Você recebeu este alerta como administrador do CyberAudit.
+                          %s
                         </td></tr>
                       </table>
                     </td></tr>
                   </table>
                 </body></html>
-                """.formatted(escHtml(firstName), escHtml(host), oldScore, drop, color, newScore,
-                              color, color, newRisk, escHtml(reason), findingsSection);
+                """.formatted(
+                        tagDeIdioma(),
+                        catalog.email("degradation.badge"),
+                        saudacao(toName),
+                        catalog.email("degradation.intro"),
+                        catalog.email("degradation.domain"),   escHtml(host),
+                        catalog.email("degradation.previousScore"), oldScore,
+                        drop,
+                        catalog.email("degradation.currentScore"),  color, newScore,
+                        catalog.email("degradation.risk"),     color, color, newRisk,
+                        catalog.email("degradation.reason"),   escHtml(reason),
+                        findingsSection,
+                        catalog.email("degradation.cta"),
+                        catalog.email("degradation.footer"));
 
-            emailSender.send(from, toEmail, "⚠ CyberAudit — Degradação detectada: " + host + " (" + oldScore + " → " + newScore + ")", html);
+            emailSender.send(from, toEmail,
+                    catalog.email("degradation.subject", host, oldScore, newScore), html);
         } catch (Exception e) {
             System.err.println("[EmailService] Falha ao enviar alerta de degradação: " + e.getMessage());
         }
@@ -192,12 +226,10 @@ public class EmailService {
             throw new EmailDeliveryException("Usuário sem e-mail cadastrado para receber o código.");
         }
         try {
-            String firstName = toName != null && toName.contains(" ")
-                    ? toName.substring(0, toName.indexOf(' ')) : (toName != null ? toName : "usuário");
             String formattedCode = code.substring(0, 3) + " " + code.substring(3);
             String html = """
                 <!DOCTYPE html>
-                <html lang="pt-BR">
+                <html lang="%s">
                 <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
                   <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
                     <tr><td align="center">
@@ -207,35 +239,36 @@ public class EmailService {
                           <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
                         </td></tr>
                         <tr><td style="padding:32px 28px;text-align:center;">
-                          <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">Olá, <strong style="color:#e0eaf4;">%s</strong>.</p>
+                          <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">%s</p>
                           <p style="margin:0 0 28px;color:#5a7a96;font-size:14px;">%s</p>
                           <div style="display:inline-block;padding:18px 36px;background:#0a1520;border:2px solid #00d4a0;
                                       border-radius:8px;margin-bottom:20px;">
                             <span style="font-family:monospace;font-size:36px;font-weight:700;
                                          letter-spacing:.25em;color:#00d4a0;">%s</span>
                           </div>
-                          <p style="margin:0;color:#344d62;font-size:12px;">Válido por 10 minutos. Não compartilhe este código.</p>
+                          <p style="margin:0;color:#344d62;font-size:12px;">%s</p>
                           <p style="margin:12px 0 0;color:#344d62;font-size:11px;">%s</p>
                         </td></tr>
                         <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
-                          Se você não tentou fazer login, ignore este email.
+                          %s
                         </td></tr>
                       </table>
                     </td></tr>
                   </table>
                 </body></html>
                 """.formatted(
-                        escHtml(firstName),
-                        ativacao ? "Código de teste da ativação do 2FA:"
-                                 : "Seu código de verificação 2FA:",
+                        tagDeIdioma(),
+                        saudacao(toName),
+                        catalog.email(ativacao ? "otp.introTest" : "otp.intro"),
                         formattedCode,
+                        catalog.email("otp.validity"),
                         // Só um código vale por vez: avisar disso aqui evita a
                         // tentativa de usar um e-mail antigo que ainda está na caixa.
-                        "Cada novo envio cancela o código anterior — use sempre o e-mail mais recente.");
+                        catalog.email("otp.latestOnly"),
+                        catalog.email("otp.footer"));
 
             emailSender.send(from, toEmail,
-                    ativacao ? "CyberAudit — Código de teste (ativação do 2FA)"
-                             : "CyberAudit — Código de verificação 2FA",
+                    catalog.email(ativacao ? "otp.subjectTest" : "otp.subject"),
                     html);
         } catch (RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar OTP: " + e.getMessage());
@@ -264,12 +297,10 @@ public class EmailService {
             throw new EmailDeliveryException(
                     "Envio de e-mail desativado (MAIL_ENABLED). A redefinição de senha depende dele.");
         }
-        String firstName = toName != null && toName.contains(" ")
-                ? toName.substring(0, toName.indexOf(' ')) : (toName != null ? toName : "usuário");
 
         String html = """
             <!DOCTYPE html>
-            <html lang="pt-BR">
+            <html lang="%s">
             <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
               <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
                 <tr><td align="center">
@@ -279,28 +310,35 @@ public class EmailService {
                       <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
                     </td></tr>
                     <tr><td style="padding:32px 28px;text-align:center;">
-                      <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">Olá, <strong style="color:#e0eaf4;">%s</strong>.</p>
+                      <p style="margin:0 0 8px;color:#b8ccde;font-size:15px;">%s</p>
                       <p style="margin:0 0 28px;color:#5a7a96;font-size:14px;">
-                        Recebemos um pedido para redefinir a senha da sua conta.
+                        %s
                       </p>
                       <a href="%s" style="display:inline-block;padding:14px 32px;background:#00d4a0;color:#0a1520;
                                           font-size:15px;font-weight:700;text-decoration:none;border-radius:8px;">
-                        Redefinir minha senha
+                        %s
                       </a>
                       <p style="margin:24px 0 0;color:#344d62;font-size:12px;">
-                        O link vale por %d minutos e só pode ser usado uma vez.
+                        %s
                       </p>
                     </td></tr>
                     <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
-                      Se você não pediu isso, ignore este email — sua senha continua a mesma.
+                      %s
                     </td></tr>
                   </table>
                 </td></tr>
               </table>
             </body></html>
-            """.formatted(escHtml(firstName), escHtml(link), minutos);
+            """.formatted(
+                    tagDeIdioma(),
+                    saudacao(toName),
+                    catalog.email("reset.intro"),
+                    escHtml(link),
+                    catalog.email("reset.cta"),
+                    catalog.email("reset.validity", minutos),
+                    catalog.email("reset.footer"));
 
-        emailSender.send(from, toEmail, "CyberAudit — Redefinição de senha", html);
+        emailSender.send(from, toEmail, catalog.email("reset.subject"), html);
     }
 
     public void sendFeedbackNotification(String toEmail, String fromUserName, Feedback fb) {
@@ -309,10 +347,10 @@ public class EmailService {
             String sender = fromUserName != null && !fromUserName.isBlank() ? fromUserName : "Um cliente";
             String target = fb.getFindingLabel() != null && !fb.getFindingLabel().isBlank()
                     ? fb.getFindingLabel()
-                    : (fb.getModule() != null && !fb.getModule().isBlank() ? fb.getModule() : "scan inteiro");
+                    : (fb.getModule() != null && !fb.getModule().isBlank() ? fb.getModule() : catalog.email("feedback.wholeScan"));
 
             String html = """
-                <!DOCTYPE html><html lang="pt-BR">
+                <!DOCTYPE html><html lang="%s">
                 <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
                   <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
                     <tr><td align="center">
@@ -320,35 +358,44 @@ public class EmailService {
                              style="background:#0d1b2a;border:1px solid #1c2a3a;border-radius:8px;overflow:hidden;">
                         <tr><td style="background:#0a1520;padding:20px 28px;border-bottom:3px solid #00d4a0;">
                           <span style="font-size:20px;font-weight:700;color:#00d4a0;letter-spacing:.05em;">◈ CyberAudit</span>
-                          <span style="margin-left:16px;font-size:12px;color:#00d4a0;font-weight:700;letter-spacing:.08em;">✎ NOVO FEEDBACK</span>
+                          <span style="margin-left:16px;font-size:12px;color:#00d4a0;font-weight:700;letter-spacing:.08em;">%s</span>
                         </td></tr>
                         <tr><td style="padding:28px;">
                           <p style="margin:0 0 20px;color:#b8ccde;font-size:15px;">
-                            <strong style="color:#e0eaf4;">%s</strong> contestou um resultado de scan.
+                            %s
                           </p>
                           <table width="100%%" cellpadding="0" cellspacing="0"
                                  style="background:#0a1520;border:1px solid #1c2a3a;border-radius:6px;margin-bottom:20px;">
                             <tr><td style="padding:18px 22px;">
-                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Host</div>
+                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">%s</div>
                               <div style="font-size:16px;font-weight:600;color:#e0eaf4;font-family:monospace;margin-bottom:14px;">%s</div>
-                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Alvo contestado</div>
+                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">%s</div>
                               <div style="font-size:14px;color:#e0eaf4;margin-bottom:14px;">%s</div>
-                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Mensagem</div>
+                              <div style="font-size:11px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">%s</div>
                               <div style="font-size:14px;color:#b8ccde;line-height:1.5;white-space:pre-wrap;">%s</div>
                             </td></tr>
                           </table>
-                          <p style="margin:0;color:#5a7a96;font-size:13px;">Abra o painel de administração para triar este feedback.</p>
+                          <p style="margin:0;color:#5a7a96;font-size:13px;">%s</p>
                         </td></tr>
                         <tr><td style="padding:16px 28px;border-top:1px solid #1c2a3a;color:#344d62;font-size:11px;text-align:center;">
-                          Você recebeu este e-mail como administrador do CyberAudit.
+                          %s
                         </td></tr>
                       </table>
                     </td></tr>
                   </table>
                 </body></html>
-                """.formatted(escHtml(sender), escHtml(fb.getHost()), escHtml(target), escHtml(fb.getMessage()));
+                """.formatted(
+                        tagDeIdioma(),
+                        catalog.email("feedback.badge"),
+                        catalog.email("feedback.intro",
+                                "<strong style=\"color:#e0eaf4;\">" + escHtml(sender) + "</strong>"),
+                        catalog.email("feedback.host"),    escHtml(fb.getHost()),
+                        catalog.email("feedback.target"),  escHtml(target),
+                        catalog.email("feedback.message"), escHtml(fb.getMessage()),
+                        catalog.email("feedback.action"),
+                        catalog.email("feedback.footer"));
 
-            emailSender.send(from, toEmail, "CyberAudit — Novo feedback: " + fb.getHost(), html);
+            emailSender.send(from, toEmail, catalog.email("feedback.subject", fb.getHost()), html);
         } catch (RuntimeException e) {
             System.err.println("[EmailService] Falha ao enviar notificação de feedback: " + e.getMessage());
         }
@@ -360,8 +407,6 @@ public class EmailService {
                              String color, ScanResult result) {
         var    scoreResult = result.getScore();
         int    issueCount = (scoreResult != null && scoreResult.getIssues() != null) ? scoreResult.getIssues().size() : 0;
-        String firstName  = name != null && name.contains(" ")
-                ? name.substring(0, name.indexOf(' ')) : (name != null ? name : "usuário");
 
         StringBuilder findings = new StringBuilder();
         if (scoreResult != null && scoreResult.getIssues() != null) {
@@ -389,15 +434,15 @@ public class EmailService {
             if (issueCount > 5) {
                 findings.append("""
                     <tr><td colspan="2" style="padding:6px 0;color:#5a7a96;font-size:12px;">
-                      + %d outros findings no relatório completo
+                      %s
                     </td></tr>
-                    """.formatted(issueCount - 5));
+                    """.formatted(catalog.email("scan.more", issueCount - 5)));
             }
         }
 
         return """
             <!DOCTYPE html>
-            <html lang="pt-BR">
+            <html lang="%s">
             <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
             <body style="margin:0;padding:0;background:#0a1520;font-family:'Segoe UI',Arial,sans-serif;">
               <table width="100%%" cellpadding="0" cellspacing="0" style="background:#0a1520;padding:32px 16px;">
@@ -419,10 +464,10 @@ public class EmailService {
                       <td style="padding:28px;">
 
                         <p style="margin:0 0 16px;color:#b8ccde;font-size:15px;">
-                          Olá, <strong style="color:#e0eaf4;">%s</strong>.
+                          %s
                         </p>
                         <p style="margin:0 0 24px;color:#5a7a96;font-size:14px;">
-                          O scan do domínio abaixo foi concluído:
+                          %s
                         </p>
 
                         <!-- Score card -->
@@ -432,19 +477,19 @@ public class EmailService {
                           <tr>
                             <td style="padding:20px 24px;">
                               <div style="font-size:12px;color:#5a7a96;text-transform:uppercase;
-                                          letter-spacing:.08em;margin-bottom:4px;">Domínio</div>
+                                          letter-spacing:.08em;margin-bottom:4px;">%s</div>
                               <div style="font-size:17px;font-weight:600;color:#e0eaf4;
                                           font-family:monospace;margin-bottom:16px;">%s</div>
                               <table cellpadding="0" cellspacing="0">
                                 <tr>
                                   <td style="padding-right:24px;">
                                     <div style="font-size:12px;color:#5a7a96;text-transform:uppercase;
-                                                letter-spacing:.08em;margin-bottom:4px;">Score</div>
+                                                letter-spacing:.08em;margin-bottom:4px;">%s</div>
                                     <div style="font-size:32px;font-weight:700;color:%s;">%d<span style="font-size:14px;color:#5a7a96;">/100</span></div>
                                   </td>
                                   <td>
                                     <div style="font-size:12px;color:#5a7a96;text-transform:uppercase;
-                                                letter-spacing:.08em;margin-bottom:4px;">Risco</div>
+                                                letter-spacing:.08em;margin-bottom:4px;">%s</div>
                                     <div style="display:inline-block;padding:4px 12px;border-radius:4px;
                                                 font-size:13px;font-weight:700;color:%s;
                                                 border:1px solid %s;">%s</div>
@@ -464,7 +509,7 @@ public class EmailService {
                              style="display:inline-block;padding:11px 28px;background:#00d4a0;
                                     color:#0a1520;font-weight:700;font-size:14px;border-radius:5px;
                                     text-decoration:none;">
-                            Ver relatório completo →
+                            %s
                           </a>
                         </p>
 
@@ -475,8 +520,8 @@ public class EmailService {
                     <tr>
                       <td style="padding:16px 28px;border-top:1px solid #1c2a3a;
                                  color:#344d62;font-size:11px;text-align:center;">
-                        Você recebeu este email porque solicitou notificação de scan no CyberAudit.
-                        Para desativar, desmarque "Notificar por email" antes de iniciar o próximo scan.
+                        %s
+                        %s
                       </td>
                     </tr>
 
@@ -489,12 +534,22 @@ public class EmailService {
                 // `host` aqui é a URL COMPLETA do scan (result.getUrl()): o SsrfGuard
                 // valida esquema e host, mas path e query seguem livres, então é dado
                 // de usuário indo direto para dentro do HTML.
-                escHtml(firstName), escHtml(host),
-                color, score,
-                color, color, risk,
+                tagDeIdioma(),
+                saudacao(name),
+                catalog.email("scan.intro"),
+                catalog.email("scan.domain"), escHtml(host),
+                catalog.email("scan.score"),  color, score,
+                catalog.email("scan.risk"),   color, color, risk,
                 issueCount > 0
-                    ? "<p style='margin:0 0 8px;font-size:12px;color:#5a7a96;text-transform:uppercase;letter-spacing:.08em;'>Principais findings</p><table width='100%%' cellpadding='0' cellspacing='0'>" + findings + "</table>"
-                    : "<p style='color:#00c87a;font-size:14px;'>✓ Nenhum problema encontrado.</p>"
+                    // `100%` sem duplicar: esta String é ARGUMENTO do formatted, não o
+                    // template — o `%%` que estava aqui saía literal no HTML.
+                    ? "<p style='margin:0 0 8px;font-size:12px;color:#5a7a96;text-transform:uppercase;"
+                      + "letter-spacing:.08em;'>" + catalog.email("scan.topFindings") + "</p>"
+                      + "<table width='100%' cellpadding='0' cellspacing='0'>" + findings + "</table>"
+                    : "<p style='color:#00c87a;font-size:14px;'>" + catalog.email("scan.noIssues") + "</p>",
+                catalog.email("scan.cta"),
+                catalog.email("scan.footer1"),
+                catalog.email("scan.footer2")
         );
     }
 

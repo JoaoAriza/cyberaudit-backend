@@ -15,19 +15,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * O texto saiu do código e foi para messages.properties. Isso cria um risco novo
  * que o compilador não pega: chave com erro de digitação, ou chave que alguém
- * apaga do arquivo. O {@link IssueCatalog} devolve a própria chave nesse caso —
+ * apaga do arquivo. O {@link MessageCatalog} devolve a própria chave nesse caso —
  * visível no laudo, mas só se alguém olhar. Estes testes olham.
  */
-class IssueCatalogTest {
+class MessageCatalogTest {
 
-    private final IssueCatalog catalog = catalogoReal();
+    private final MessageCatalog catalog = catalogoReal();
 
-    private static IssueCatalog catalogoReal() {
+    private static MessageCatalog catalogoReal() {
         var fonte = new ResourceBundleMessageSource();
         fonte.setBasename("messages");
         fonte.setDefaultEncoding("UTF-8");
         fonte.setFallbackToSystemLocale(false);
-        return new IssueCatalog(fonte);
+        return new MessageCatalog(fonte);
     }
 
     /**

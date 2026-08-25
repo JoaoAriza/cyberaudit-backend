@@ -26,16 +26,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * despercebido. Um laudo metade em cada idioma é pior que um erro, porque parece
  * funcionar. {@link #inglesCobreTodoOPortugues()} existe para isso.
  */
-class IssueCatalogEnglishTest {
+class MessageCatalogEnglishTest {
 
-    private final IssueCatalog catalog = catalogoReal();
+    private final MessageCatalog catalog = catalogoReal();
 
-    private static IssueCatalog catalogoReal() {
+    private static MessageCatalog catalogoReal() {
         var fonte = new ResourceBundleMessageSource();
         fonte.setBasename("messages");
         fonte.setDefaultEncoding("UTF-8");
         fonte.setFallbackToSystemLocale(false);
-        return new IssueCatalog(fonte);
+        return new MessageCatalog(fonte);
     }
 
     @AfterEach
@@ -142,7 +142,7 @@ class IssueCatalogEnglishTest {
 
     private static Properties carregar(String arquivo) {
         Properties p = new Properties();
-        try (InputStream in = IssueCatalogEnglishTest.class.getClassLoader()
+        try (InputStream in = MessageCatalogEnglishTest.class.getClassLoader()
                 .getResourceAsStream(arquivo)) {
             if (in == null) throw new AssertionError("arquivo não encontrado: " + arquivo);
             p.load(new InputStreamReader(in, StandardCharsets.UTF_8));

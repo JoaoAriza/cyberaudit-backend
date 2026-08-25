@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.config.LocaleConfig;
 import com.joao.cyberaudit.dto.ScheduledScanDto;
 import com.joao.cyberaudit.dto.ScheduledScanRequest;
 import com.joao.cyberaudit.model.AppUser;
@@ -7,6 +8,7 @@ import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScheduledScan;
 import com.joao.cyberaudit.model.ScheduledScan.Frequency;
 import com.joao.cyberaudit.repository.ScheduledScanRepository;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -60,6 +63,8 @@ public class ScheduledScanService {
                 .nextRun(calcNextRun(freq, req.getPreferredHour()))
                 .enabled(true)
                 .notifyEmail(req.isNotifyEmail())
+                // Capturado aqui porque a execução roda fora de requisição.
+                .locale(LocaleContextHolder.getLocale().toLanguageTag())
                 .user(user)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -103,6 +108,11 @@ public class ScheduledScanService {
         List<ScheduledScan> due = loadDueScans();
         for (ScheduledScan scan : due) {
             try {
+                // Idioma de quem criou o agendamento. Vale para o laudo e para o
+                // e-mail; sem isto, os dois sairiam no padrão. O finally limpa: a
+                // thread do agendador é a mesma para todos os scans da rodada.
+                LocaleContextHolder.setLocale(idiomaDe(scan));
+
                 // Executa scan fora de qualquer transação — pode durar longos segundos
                 var result = orchestrator.execute(
                         scan.getHost(), scan.isActive(), scan.getUser(), true, ScanOrigin.SCHEDULED);
@@ -128,8 +138,19 @@ public class ScheduledScanService {
                         + scan.getHost() + ": " + e.getMessage());
                 // Avança nextRun para evitar retry imediato infinito
                 markRetry(scan.getId());
+            } finally {
+                LocaleContextHolder.resetLocaleContext();
             }
         }
+    }
+
+    /**
+     * Idioma do agendamento. Agendamento criado antes da coluna existir tem locale
+     * nulo e cai no padrão — que é o que ele já recebia.
+     */
+    private static Locale idiomaDe(ScheduledScan scan) {
+        String tag = scan.getLocale();
+        return tag == null || tag.isBlank() ? LocaleConfig.PADRAO : Locale.forLanguageTag(tag);
     }
 
     @Transactional(readOnly = true)

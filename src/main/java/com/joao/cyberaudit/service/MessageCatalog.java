@@ -22,11 +22,11 @@ import org.springframework.stereotype.Component;
  * no lugar certo.
  */
 @Component
-public class IssueCatalog {
+public class MessageCatalog {
 
     private final MessageSource messages;
 
-    public IssueCatalog(MessageSource messages) {
+    public MessageCatalog(MessageSource messages) {
         this.messages = messages;
     }
 
@@ -55,7 +55,22 @@ public class IssueCatalog {
      * (não descontou nada) e uma nota sem achado (bônus de WAF, "OK" do SSL).
      */
     public String note(String chave, Object... args) {
-        String id = "note." + chave;
+        return prefixado("note.", chave, args);
+    }
+
+    /**
+     * Texto dos e-mails — assunto e corpo.
+     *
+     * A estrutura HTML fica no {@link EmailService}: só a prosa vem daqui. Marcação
+     * em arquivo de mensagens não é traduzível na prática (o tradutor teria de
+     * mexer em tags) e some do controle de versão do código, onde ela pertence.
+     */
+    public String email(String chave, Object... args) {
+        return prefixado("email.", chave, args);
+    }
+
+    private String prefixado(String prefixo, String chave, Object[] args) {
+        String id = prefixo + chave;
         return messages.getMessage(id, args, id, LocaleContextHolder.getLocale());
     }
 
