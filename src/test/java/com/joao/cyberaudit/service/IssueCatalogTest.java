@@ -124,6 +124,66 @@ class IssueCatalogTest {
         }
     }
 
+    // ── Notas do breakdown ───────────────────────────────────────────────────
+
+    /**
+     * Chaves de nota. Nem toda nota tem achado correspondente — SSL_OK e
+     * WAF_DETECTED existem só no breakdown — e nem todo achado desconta ponto,
+     * então as duas listas não coincidem de propósito.
+     */
+    private static final List<String> NOTAS = List.of(
+            "NO_HTTPS_SUPPORT", "SSL_INVALID", "SSL_OK", "SSL_EXPIRED", "SSL_EXPIRING_SOON",
+            "WEAK_TLS_PROTOCOL", "HTTP_NOT_REDIRECTING",
+            "HEADERS_UNVERIFIED", "SERVER_VERSION_EXPOSED",
+            "HSTS_MISSING", "HSTS_WEAK", "CONTENT_TYPE_MISSING", "CSP_MISSING", "CSP_WEAK",
+            "XFRAME_MISSING", "REFERRER_POLICY_MISSING", "REFERRER_POLICY_WEAK",
+            "PERMISSIONS_POLICY_MISSING",
+            "CORS_REFLECTION_WITH_CREDENTIALS", "CORS_ORIGIN_REFLECTION",
+            "CORS_WILDCARD_CREDENTIALS", "CORS_NULL_ORIGIN",
+            "INSECURE_COOKIES", "INPUT_SURFACE", "DB_ERROR_LEAKAGE_SUSPECTED",
+            "REFLECTED_XSS_SUSPECTED", "RISKY_PORTS", "SENSITIVE_ROBOTS_PATHS",
+            "SENSITIVE_FILE_EXPOSED", "DANGEROUS_HTTP_METHOD", "SECURITY_TXT_MISSING",
+            "OPEN_REDIRECT", "DIRECTORY_LISTING", "PATH_TRAVERSAL", "SSRF", "HOST_HEADER",
+            "SOURCE_MAP", "CRLF", "JWT", "API_DOCS",
+            "GRAPHQL_PLAYGROUND", "GRAPHQL_INTROSPECTION",
+            "DNS_EMAIL_SPOOFING", "NO_WAF_DETECTED", "WAF_DETECTED", "WAF_PROBE_BLOCKED",
+            "CDN_DETECTED", "CVE"
+    );
+
+    @Test
+    @DisplayName("toda nota do breakdown existe e não sobra parâmetro")
+    void notasResolvemEPreenchem() {
+        for (String chave : NOTAS) {
+            String texto = catalog.note(chave, "a", "b", "c");
+            assertFalse(texto.startsWith("note."),
+                    "falta note." + chave + " em messages.properties");
+            assertFalse(texto.contains("{"),
+                    chave + " deixou parâmetro sem preencher: " + texto);
+        }
+    }
+
+    @Test
+    @DisplayName("a nota preserva o desconto — é ele que explica o score")
+    void notaPreservaODesconto() {
+        // Amostra copiada do ScoreService antes da extração. O número no texto é o
+        // que justifica a conta na tela; perder isso quebra o breakdown em silêncio.
+        assertEquals("HTTPS não suportado: -40", catalog.note("NO_HTTPS_SUPPORT"));
+        assertEquals("HTTPS e certificado válido: OK", catalog.note("SSL_OK"));
+        assertEquals("Cookies com flags de segurança ausentes: -10", catalog.note("INSECURE_COOKIES", 10));
+        assertEquals("Protocolo TLS deprecated (TLSv1.0): -20", catalog.note("WEAK_TLS_PROTOCOL", "TLSv1.0"));
+        assertEquals("SSRF (2 param(s)): -12", catalog.note("SSRF", 2, 12));
+    }
+
+    @Test
+    @DisplayName("o fragmento do WAF entra na frase quando a sonda foi bloqueada")
+    void fragmentoDoWafSeEncaixa() {
+        // {1} recebe o fragmento ou vazio: WAF pode ser detectado sem bloquear a sonda.
+        assertEquals("WAF detectado (Cloudflare, probe bloqueado): +3",
+                catalog.note("WAF_DETECTED", "Cloudflare", catalog.note("WAF_PROBE_BLOCKED"), 3));
+        assertEquals("WAF detectado (Cloudflare): +1",
+                catalog.note("WAF_DETECTED", "Cloudflare", "", 1));
+    }
+
     // ── A migração não reescreveu nada ───────────────────────────────────────
 
     @Test

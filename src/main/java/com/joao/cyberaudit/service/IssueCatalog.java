@@ -47,6 +47,18 @@ public class IssueCatalog {
         return texto(chave, sufixo, args);
     }
 
+    /**
+     * Nota do breakdown do score — "HTTPS não suportado: -40" e afins.
+     *
+     * Prefixo próprio (`note.`) porque é outra família de texto: o achado descreve
+     * o problema, a nota justifica o desconto. Um achado pode existir sem nota
+     * (não descontou nada) e uma nota sem achado (bônus de WAF, "OK" do SSL).
+     */
+    public String note(String chave, Object... args) {
+        String id = "note." + chave;
+        return messages.getMessage(id, args, id, LocaleContextHolder.getLocale());
+    }
+
     private String texto(String chave, String campo, Object[] args) {
         String id = "issue." + chave + "." + campo;
         // Chave ausente devolve a própria chave, que aparece feia no laudo. É o
