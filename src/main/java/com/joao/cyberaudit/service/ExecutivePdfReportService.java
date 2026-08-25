@@ -30,6 +30,21 @@ import java.util.stream.Collectors;
  * capa com resumo geral → seção por domínio → tabela de issues críticos/altos.
  *
  * Thread-safety: synchronized no ponto de entrada (geração é rápida).
+ *
+ * DOCUMENTO EM INGLÊS, POR DECISÃO — não passa pelo MessageCatalog.
+ *
+ * A interface é bilíngue (ver LocaleConfig); os relatórios exportáveis, não. É o
+ * arquivo que o cliente encaminha para auditor, área de compliance ou cliente
+ * dele, e inglês é a língua franca de laudo técnico de segurança. Um PDF que muda
+ * de idioma conforme quem clicou "exportar" atrapalha justamente esse uso.
+ *
+ * Consequência conhecida: o TEXTO DOS ACHADOS dentro do documento vem do
+ * ScanResult, que é montado no idioma da requisição. Um cliente navegando em
+ * português exporta PDF com moldura em inglês e achados em português — como
+ * sempre foi. Deixar tudo em inglês exigiria o resultado guardar ID + parâmetros
+ * em vez de texto pronto, que é mudança de contrato registrada no PLANO_EXECUCAO.
+ *
+ * Ao adicionar texto aqui: escreva em inglês.
  */
 @Service
 public class ExecutivePdfReportService {
@@ -141,7 +156,7 @@ public class ExecutivePdfReportService {
             doc.close();
             return out.toByteArray();
         } catch (Exception e) {
-            throw new RuntimeException("Erro ao gerar PDF executivo: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to generate executive PDF: " + e.getMessage(), e);
         }
     }
 
@@ -300,28 +315,28 @@ public class ExecutivePdfReportService {
         fill(0, PH - 80, PW, 80, NAVY);
         fill(0, PH - 80, 5, 80, ACCENT);
         txt("CYBERAUDIT", M + 10, PH - 24, bold, 22, ACCENT);
-        txt("Relatorio Executivo de Seguranca", M + 10, PH - 44, normal, 11, WHITE);
+        txt("Executive Security Report", M + 10, PH - 44, normal, 11, WHITE);
         String now = java.time.LocalDateTime.now().format(DT_FMT);
-        txtR("Gerado em " + now, PW - M, PH - 28, normal, 8, MUTED);
-        txtR("CONFIDENCIAL", PW - M, PH - 42, bold, 8, MUTED);
+        txtR("Generated on " + now, PW - M, PH - 28, normal, 8, MUTED);
+        txtR("CONFIDENTIAL", PW - M, PH - 42, bold, 8, MUTED);
         String scopeLabel = switch (scope) {
-            case TEAM_SCANS -> "Scans da Equipe";
-            case BOTH       -> "Dominios + Equipe";
-            default         -> "Dominios Cadastrados";
+            case TEAM_SCANS -> "Team Scans";
+            case BOTH       -> "Domains + Team";
+            default         -> "Registered Domains";
         };
         txtR(scopeLabel, PW - M, PH - 56, bold, 8, ACCENT);
 
         // Período do filtro
         String periodoStr;
         if (from != null && to != null) {
-            periodoStr = "Periodo: " + from.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+            periodoStr = "Period: " + from.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
                        + " a " + to.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
         } else if (from != null) {
-            periodoStr = "Periodo: a partir de " + from.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+            periodoStr = "Period: from " + from.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
         } else if (to != null) {
-            periodoStr = "Periodo: ate " + to.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+            periodoStr = "Period: until " + to.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
         } else {
-            periodoStr = "Periodo: todos os registros";
+            periodoStr = "Period: all records";
         }
         txtR(periodoStr, PW - M, PH - 68, normal, 8, MUTED);
 
@@ -333,8 +348,8 @@ public class ExecutivePdfReportService {
         strokeRect(M, cy - 38, CW, 38, BORDER);
         fill(M, cy - 38, 4, 38, ACCENT);
         txt(account.getDisplayName(), M + 14, cy - 12, bold, 12, TEXT);
-        String accountMeta = "Conta " + account.getType().name()
-                + (account.getPlan() != null ? "  ·  Plano " + account.getPlan().name() : "")
+        String accountMeta = "Account " + account.getType().name()
+                + (account.getPlan() != null ? "  ·  Plan " + account.getPlan().name() : "")
                 + (account.getCompanyName() != null ? "  ·  " + account.getCompanyName() : "");
         txt(accountMeta, M + 14, cy - 28, normal, 8, MUTED);
         cy -= 44;
@@ -359,22 +374,22 @@ public class ExecutivePdfReportService {
                 .filter(i -> "HIGH".equals(i.getSeverity())).count();
 
         float boxW = (CW - 9) / 4f;
-        statBox(M,              cy, boxW, 54, String.valueOf(totalDomains),    "Alvos", null);
-        statBox(M + boxW + 3,   cy, boxW, 54, String.valueOf(scannedDomains), "Escaneados", ACCENT);
+        statBox(M,              cy, boxW, 54, String.valueOf(totalDomains),    "Targets", null);
+        statBox(M + boxW + 3,   cy, boxW, 54, String.valueOf(scannedDomains), "Scanned", ACCENT);
         statBox(M + 2*(boxW+3), cy, boxW, 54,
                 avgScore.isPresent() ? String.valueOf((int)avgScore.getAsDouble()) : "-",
-                "Score Medio",
+                "Average Score",
                 scoreColor(avgScore.isPresent() ? (int)avgScore.getAsDouble() : -1));
         statBox(M + 3*(boxW+3), cy, boxW, 54,
-                criticalCount + " / " + highCount, "Criticos / Altos",
+                criticalCount + " / " + highCount, "Critical / High",
                 criticalCount > 0 ? CRIT : highCount > 0 ? HIGH_C : OK);
         cy -= 60;
 
         if (scannedDomains == 0) {
             gap(8);
             String noDataMsg = scope == ReportScope.DOMAINS
-                    ? "Nenhum dominio registrado ou sem scans."
-                    : "Nenhum scan encontrado para esta conta no periodo selecionado.";
+                    ? "No domain registered, or none scanned yet."
+                    : "No scan found for this account in the selected period.";
             txt(noDataMsg, M, cy, normal, 9, MUTED);
             cy -= 14;
         }
@@ -406,9 +421,9 @@ public class ExecutivePdfReportService {
         };
 
         String titleLabel = switch (scope) {
-            case TEAM_SCANS -> "SCANS DA EQUIPE";
-            case BOTH       -> "DOMINIOS CADASTRADOS + SCANS DA EQUIPE";
-            default         -> "DOMINIOS CADASTRADOS";
+            case TEAM_SCANS -> "TEAM SCANS";
+            case BOTH       -> "REGISTERED DOMAINS + TEAM SCANS";
+            default         -> "REGISTERED DOMAINS";
         };
         sectionTitle(titleLabel);
         gap(8);
@@ -419,9 +434,9 @@ public class ExecutivePdfReportService {
         fill(M, cy - rowH, CW, rowH, BGDARK);
         txt("HOST",         xCols[0] + 4, cy - 7, bold, 8, MUTED);
         txt("SCORE",        xCols[1] + 4, cy - 7, bold, 8, MUTED);
-        txt("RISCO",        xCols[2] + 4, cy - 7, bold, 8, MUTED);
-        txt("ULTIMO SCAN",  xCols[3] + 4, cy - 7, bold, 8, MUTED);
-        txt("MODO",         xCols[4] + 4, cy - 7, bold, 8, MUTED);
+        txt("RISK",        xCols[2] + 4, cy - 7, bold, 8, MUTED);
+        txt("LAST SCAN",  xCols[3] + 4, cy - 7, bold, 8, MUTED);
+        txt("MODE",         xCols[4] + 4, cy - 7, bold, 8, MUTED);
         if (showVerified) txt("STATUS", xCols[5] + 4, cy - 7, bold, 8, MUTED);
         cy -= rowH;
 
@@ -454,22 +469,22 @@ public class ExecutivePdfReportService {
                     xCols[3] + 4, cy - 7, normal, 8, TEXT);
 
                 // MODO
-                String modo    = dr.latest().isActiveMode() ? "ATIVO" : "PASSIVO";
+                String modo    = dr.latest().isActiveMode() ? "ACTIVE" : "PASSIVE";
                 float[] modCol = dr.latest().isActiveMode() ? ACCENT : MUTED;
                 txt(modo, xCols[4] + 4, cy - 7, bold, 8, modCol);
             } else {
                 txt("—", xCols[1] + 4, cy - 7, normal, 8, MUTED);
                 txt("—", xCols[2] + 4, cy - 7, normal, 8, MUTED);
-                txt("Sem scan", xCols[3] + 4, cy - 7, normal, 8, MUTED);
+                txt("Never scanned", xCols[3] + 4, cy - 7, normal, 8, MUTED);
                 txt("—", xCols[4] + 4, cy - 7, normal, 8, MUTED);
             }
 
             // VERIFICADO
             if (showVerified) {
                 if (dr.verified()) {
-                    txt("Verificado", xCols[5] + 4, cy - 7, bold, 8, ACCENT);
+                    txt("Verified", xCols[5] + 4, cy - 7, bold, 8, ACCENT);
                 } else {
-                    txt("Pendente", xCols[5] + 4, cy - 7, normal, 8, MUTED);
+                    txt("Pending", xCols[5] + 4, cy - 7, normal, 8, MUTED);
                 }
             }
 
@@ -537,8 +552,8 @@ public class ExecutivePdfReportService {
 
     private void closePage() throws IOException {
         fill(M, 28, CW, 0.5f, BORDER);
-        txt("CyberAudit · Relatório Executivo  —  Confidencial", M, 18, normal, 7, MUTED);
-        txtR("Página " + pageNo, PW - M, 18, normal, 7, MUTED);
+        txt("CyberAudit · Executive Report  —  Confidential", M, 18, normal, 7, MUTED);
+        txtR("Page " + pageNo, PW - M, 18, normal, 7, MUTED);
         cs.close();
     }
 

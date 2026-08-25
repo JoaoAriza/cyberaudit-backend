@@ -6,6 +6,22 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * DOCUMENTO EM INGLÊS, POR DECISÃO — não passa pelo MessageCatalog.
+ *
+ * A interface é bilíngue (ver LocaleConfig); os relatórios exportáveis, não. É o
+ * arquivo que o cliente encaminha para auditor, área de compliance ou cliente
+ * dele, e inglês é a língua franca de laudo técnico de segurança. Um PDF que muda
+ * de idioma conforme quem clicou "exportar" atrapalha justamente esse uso.
+ *
+ * Consequência conhecida: o TEXTO DOS ACHADOS dentro do documento vem do
+ * ScanResult, que é montado no idioma da requisição. Um cliente navegando em
+ * português exporta PDF com moldura em inglês e achados em português — como
+ * sempre foi. Deixar tudo em inglês exigiria o resultado guardar ID + parâmetros
+ * em vez de texto pronto, que é mudança de contrato registrada no PLANO_EXECUCAO.
+ *
+ * Ao adicionar texto aqui: escreva em inglês.
+ */
 @Service
 public class ReportService {
 
@@ -30,8 +46,8 @@ public class ReportService {
                     .toList();
             if (!degraded.isEmpty()) {
                 s.append("\n== PARTIAL RESULT — checks not completed ==\n");
-                s.append("Estas verificações não concluíram (timeout/erro). A ausência de\n");
-                s.append("achados nesses módulos NÃO significa ausência de risco:\n");
+                s.append("These checks did not complete (timeout/error). The absence of\n");
+                s.append("findings in these modules does NOT mean the risk is absent:\n");
                 for (String d : degraded) s.append("  - ").append(d).append("\n");
             }
         }
@@ -69,7 +85,7 @@ public class ReportService {
 
         // ── Related Hosts (informativo, fora do score) ─────
         if (r.getRelatedHostHeaders() != null && !r.getRelatedHostHeaders().isEmpty()) {
-            s.append("== Related Hosts — Security Headers (informativo, fora do score) ==\n");
+            s.append("== Related Hosts — Security Headers (informational, not scored) ==\n");
             for (RelatedHostHeaders rh : r.getRelatedHostHeaders()) {
                 s.append("  ").append(rh.getHost())
                         .append("  — ").append(rh.getMissingCount()).append(" header(s) ausente(s)\n");
@@ -350,10 +366,10 @@ public class ReportService {
                     .sorted((a, b) -> Double.compare(b.getCvssScore(), a.getCvssScore()))
                     .toList();
             if (!highRisk.isEmpty()) {
-                s.append("== CVE Correlation (CVSS >= 7.0) — POTENCIAL ==\n");
-                s.append("   Correlação baseada na versão reportada no banner. Pode ser falso\n");
-                s.append("   positivo se houve backport da correção sem mudar o número da versão.\n");
-                s.append("   Confirme a versão exata antes de agir.\n");
+                s.append("== CVE Correlation (CVSS >= 7.0) — POTENTIAL ==\n");
+                s.append("   Correlation is based on the version reported in the banner. It may be\n");
+                s.append("   a false positive if the fix was backported without a version bump.\n");
+                s.append("   Confirm the exact version before acting.\n");
                 for (CVEFinding cve : highRisk) {
                     s.append("\n  [").append(cve.getSeverity()).append("] ")
                             .append(cve.getCveId())

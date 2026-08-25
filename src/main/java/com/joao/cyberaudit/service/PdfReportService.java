@@ -15,6 +15,22 @@ import java.util.*;
 import java.util.Base64;
 import java.util.stream.Collectors;
 
+/**
+ * DOCUMENTO EM INGLÊS, POR DECISÃO — não passa pelo MessageCatalog.
+ *
+ * A interface é bilíngue (ver LocaleConfig); os relatórios exportáveis, não. É o
+ * arquivo que o cliente encaminha para auditor, área de compliance ou cliente
+ * dele, e inglês é a língua franca de laudo técnico de segurança. Um PDF que muda
+ * de idioma conforme quem clicou "exportar" atrapalha justamente esse uso.
+ *
+ * Consequência conhecida: o TEXTO DOS ACHADOS dentro do documento vem do
+ * ScanResult, que é montado no idioma da requisição. Um cliente navegando em
+ * português exporta PDF com moldura em inglês e achados em português — como
+ * sempre foi. Deixar tudo em inglês exigiria o resultado guardar ID + parâmetros
+ * em vez de texto pronto, que é mudança de contrato registrada no PLANO_EXECUCAO.
+ *
+ * Ao adicionar texto aqui: escreva em inglês.
+ */
 @Service
 public class PdfReportService {
 
