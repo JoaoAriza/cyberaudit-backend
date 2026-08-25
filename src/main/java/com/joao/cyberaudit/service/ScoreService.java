@@ -10,6 +10,27 @@ import java.util.Map;
 @Service
 public class ScoreService {
 
+    private final IssueCatalog catalog;
+
+    public ScoreService(IssueCatalog catalog) {
+        this.catalog = catalog;
+    }
+
+    /**
+     * Achado cujo ID é a própria chave do catálogo e cujo texto sai inteiro dele.
+     * {@code argsTitulo} preenche os parâmetros do título, quando houver.
+     *
+     * Os achados que NÃO passam por aqui são os três casos que o catálogo não
+     * cobre sozinho: impacto vindo de outro serviço (DNS, HTTP methods, JWT, API
+     * docs, CVE), ID montado em tempo de execução, ou parâmetro no impacto em vez
+     * do título. Esses montam o SecurityIssue à mão, chamando o catálogo campo a
+     * campo.
+     */
+    private SecurityIssue achado(String chave, String severidade, Object... argsTitulo) {
+        return new SecurityIssue(chave, catalog.title(chave, argsTitulo), severidade,
+                catalog.impact(chave), catalog.recommendation(chave));
+    }
+
     public ScoreResult calculate(
             SSLInfo sslInfo,
             TlsDetails tlsDetails,
@@ -52,16 +73,12 @@ public class ScoreService {
         if (!sslInfo.isHttps()) {
             score -= 40;
             notes.add("HTTPS não suportado: -40");
-            issues.add(new SecurityIssue("NO_HTTPS_SUPPORT", "HTTPS não suportado", "HIGH",
-                    "Dados trafegam em plaintext — interceptação trivial.",
-                    "Habilitar HTTPS com certificado válido (ex: Let's Encrypt)."));
+            issues.add(achado("NO_HTTPS_SUPPORT", "HIGH"));
 
         } else if (!sslInfo.isValid()) {
             score -= 35;
             notes.add("Certificado SSL inválido/erro: -35");
-            issues.add(new SecurityIssue("SSL_INVALID", "Certificado SSL inválido", "HIGH",
-                    "Usuários recebem alerta de segurança; comunicação pode ser insegura.",
-                    "Renovar e configurar corretamente o certificado e a cadeia intermediária."));
+            issues.add(achado("SSL_INVALID", "HIGH"));
 
         } else {
             notes.add("HTTPS e certificado válido: OK");
@@ -70,18 +87,16 @@ public class ScoreService {
             if (days <= 0) {
                 score -= 35;
                 notes.add("Certificado expirado: -35");
-                issues.add(new SecurityIssue("SSL_EXPIRED", "Certificado SSL expirado", "HIGH",
-                        "Browsers bloqueiam ou alertam o usuário.",
-                        "Renovar o certificado imediatamente."));
+                issues.add(achado("SSL_EXPIRED", "HIGH"));
 
             } else if (days < renewalWarningThreshold(sslInfo.getTotalValidityDays())) {
                 score -= 15;
                 notes.add("Certificado muito próximo da expiração: -15");
+                // Único caso em que o parâmetro está no impacto, não no título.
                 issues.add(new SecurityIssue("SSL_EXPIRING_SOON",
-                        "Certificado próximo da expiração", "MEDIUM",
-                        "Restam " + days + " dia(s). Nesse ponto a renovação automática já "
-                                + "deveria ter ocorrido — o mais provável é que ela esteja falhando.",
-                        "Verificar o certbot/ACME client e os logs de renovação."));
+                        catalog.title("SSL_EXPIRING_SOON"), "MEDIUM",
+                        catalog.impact("SSL_EXPIRING_SOON", days),
+                        catalog.recommendation("SSL_EXPIRING_SOON")));
             }
         }
 
@@ -91,10 +106,7 @@ public class ScoreService {
         if (tlsDetails != null && tlsDetails.isWeakProtocol()) {
             score -= 20;
             notes.add("Protocolo TLS deprecated (" + tlsDetails.getNegotiatedProtocol() + "): -20");
-            issues.add(new SecurityIssue("WEAK_TLS_PROTOCOL",
-                    "Protocolo TLS deprecated: " + tlsDetails.getNegotiatedProtocol(), "HIGH",
-                    "TLS 1.0/1.1 são deprecated pelo RFC 8996 — vulneráveis a POODLE e BEAST.",
-                    "Desabilitar TLS 1.0 e 1.1 no servidor. Exigir mínimo TLS 1.2."));
+            issues.add(achado("WEAK_TLS_PROTOCOL", "HIGH", tlsDetails.getNegotiatedProtocol()));
         }
 
         // ═══════════════════════════════════════════
@@ -103,10 +115,7 @@ public class ScoreService {
         if (sslInfo.isHttps() && sslInfo.isValid() && !redirectsToHttps) {
             score -= 10;
             notes.add("Não força HTTPS a partir de HTTP: -10");
-            issues.add(new SecurityIssue("HTTP_NOT_REDIRECTING",
-                    "HTTP não redireciona para HTTPS", "MEDIUM",
-                    "Usuários que digitam http:// acessam sem criptografia.",
-                    "Configurar redirect 301 de HTTP para HTTPS e habilitar HSTS."));
+            issues.add(achado("HTTP_NOT_REDIRECTING", "MEDIUM"));
         }
 
         // ═══════════════════════════════════════════
@@ -122,11 +131,7 @@ public class ScoreService {
                 // representativa de "headers não verificados" + issue (resultado parcial).
                 score -= 35;
                 notes.add("Headers de segurança não verificados (falha ao buscar a página): -35");
-                issues.add(new SecurityIssue("HEADERS_UNVERIFIED",
-                        "Headers de segurança não verificados", "MEDIUM",
-                        "A página não respondeu, então nenhum header de segurança pôde ser avaliado. "
-                        + "O resultado é parcial e não confirma a presença de proteções.",
-                        "Verifique se o site está acessível (DNS, firewall, disponibilidade) e refaça o scan."));
+                issues.add(achado("HEADERS_UNVERIFIED", "MEDIUM"));
                 continue;
             }
 
@@ -136,10 +141,7 @@ public class ScoreService {
         if (serverVersionExposed) {
             score -= 5;
             notes.add("Versão de software exposta (Server/X-Powered-By): -5");
-            issues.add(new SecurityIssue("SERVER_VERSION_EXPOSED",
-                    "Versão de software exposta em Server ou X-Powered-By", "LOW",
-                    "Facilita fingerprinting e busca por CVEs conhecidos.",
-                    "Remover ou obscurecer os headers Server e X-Powered-By."));
+            issues.add(achado("SERVER_VERSION_EXPOSED", "LOW"));
         }
 
         // ═══════════════════════════════════════════
@@ -150,34 +152,22 @@ public class ScoreService {
             if (corsResult.isReflectsOrigin() && corsResult.isCredentialsAllowed()) {
                 score -= 30;
                 notes.add("CORS reflection + credentials: -30");
-                issues.add(new SecurityIssue("CORS_REFLECTION_WITH_CREDENTIALS",
-                        "CORS reflete origin com credentials habilitado", "CRITICAL",
-                        "Qualquer site faz requests autenticadas cross-origin em nome do usuário.",
-                        "Allowlist estrita de origens. Nunca combinar reflection com ACAC: true."));
+                issues.add(achado("CORS_REFLECTION_WITH_CREDENTIALS", "CRITICAL"));
 
             } else if (corsResult.isReflectsOrigin()) {
                 score -= 20;
                 notes.add("CORS reflete a origem do request: -20");
-                issues.add(new SecurityIssue("CORS_ORIGIN_REFLECTION",
-                        "CORS reflete a Origin do request", "HIGH",
-                        "Qualquer site acessa recursos como origem autorizada.",
-                        "Usar allowlist estrita em vez de espelhar o header Origin."));
+                issues.add(achado("CORS_ORIGIN_REFLECTION", "HIGH"));
 
             } else if (corsResult.isWildcardOrigin() && corsResult.isCredentialsAllowed()) {
                 score -= 15;
                 notes.add("CORS wildcard + credentials (config inválida): -15");
-                issues.add(new SecurityIssue("CORS_WILDCARD_CREDENTIALS",
-                        "ACAO: * com ACAC: true — configuração inválida", "HIGH",
-                        "Browsers rejeitam, mas indica CORS sem controle.",
-                        "Usar origens explícitas. Nunca wildcard com credentials."));
+                issues.add(achado("CORS_WILDCARD_CREDENTIALS", "HIGH"));
 
             } else if (corsResult.isNullOriginAccepted()) {
                 score -= 10;
                 notes.add("CORS aceita null origin: -10");
-                issues.add(new SecurityIssue("CORS_NULL_ORIGIN",
-                        "Aceita null origin", "MEDIUM",
-                        "Acesso via iframe sandboxado ou file:// — vetor de exfiltração.",
-                        "Não incluir 'null' na allowlist de origens."));
+                issues.add(achado("CORS_NULL_ORIGIN", "MEDIUM"));
             }
         }
 
@@ -193,10 +183,7 @@ public class ScoreService {
             if (penalty > 0) {
                 score -= penalty;
                 notes.add("Cookies com flags de segurança ausentes: -" + penalty);
-                issues.add(new SecurityIssue("INSECURE_COOKIES",
-                        cookieIssues.size() + " cookie(s) com problemas de segurança", "MEDIUM",
-                        "Sem Secure/HttpOnly/SameSite: facilita roubo de sessão via XSS ou redes inseguras.",
-                        "Adicionar Secure, HttpOnly e SameSite=Lax em todos os cookies de sessão."));
+                issues.add(achado("INSECURE_COOKIES", "MEDIUM", cookieIssues.size()));
             }
         }
 
@@ -210,19 +197,13 @@ public class ScoreService {
         if (activeMode && dbErrorLeakageSuspected) {
             score -= 15;
             notes.add("Possível exposição de erro de banco (modo ativo): -15");
-            issues.add(new SecurityIssue("DB_ERROR_LEAKAGE_SUSPECTED",
-                    "Possível exposição de erro de banco", "HIGH",
-                    "Mensagens de erro revelam estrutura do banco.",
-                    "Retornar mensagens genéricas em produção. Logar erros só no servidor."));
+            issues.add(achado("DB_ERROR_LEAKAGE_SUSPECTED", "HIGH"));
         }
 
         if (activeMode && xssProbePerformed && reflectedXssSuspected) {
             score -= 25;
             notes.add("Suspeita de Reflected XSS (marcador refletido): -25");
-            issues.add(new SecurityIssue("REFLECTED_XSS_SUSPECTED",
-                    "Suspeita de Reflected XSS", "HIGH",
-                    "Input parece refletido na página sem escape.",
-                    "Output encoding, validação de inputs e CSP restritiva."));
+            issues.add(achado("REFLECTED_XSS_SUSPECTED", "HIGH"));
         }
 
         // ═══════════════════════════════════════════
@@ -257,10 +238,7 @@ public class ScoreService {
         if (sensitiveRobotsPaths != null && !sensitiveRobotsPaths.isEmpty()) {
             score -= 5;
             notes.add("Paths sensíveis em robots.txt: -5");
-            issues.add(new SecurityIssue("SENSITIVE_ROBOTS_PATHS",
-                    sensitiveRobotsPaths.size() + " path(s) sensível(is) em robots.txt", "LOW",
-                    "robots.txt funciona como mapa da estrutura interna para atacantes.",
-                    "Não usar robots.txt para esconder paths. Use autenticação adequada."));
+            issues.add(achado("SENSITIVE_ROBOTS_PATHS", "LOW", sensitiveRobotsPaths.size()));
         }
 
         // ═══════════════════════════════════════════════════════
@@ -276,13 +254,7 @@ public class ScoreService {
                     };
                     score -= penalty;
                     notes.add("Arquivo sensível exposto (" + f.getPath() + "): -" + penalty);
-                    issues.add(new SecurityIssue(
-                            "SENSITIVE_FILE_EXPOSED",
-                            "Arquivo sensível acessível: " + f.getPath(),
-                            f.getSeverity(),
-                            "Exposição direta de configuração ou credenciais.",
-                            "Remover acesso público imediatamente. Verificar se credenciais foram comprometidas."
-                    ));
+                    issues.add(achado("SENSITIVE_FILE_EXPOSED", f.getSeverity(), f.getPath()));
                 }
             }
         }
@@ -300,12 +272,13 @@ public class ScoreService {
                 };
                 score -= penalty;
                 notes.add("Método HTTP perigoso habilitado (" + m.getMethod() + "): -" + penalty);
+                // O impacto é o risco que o HttpMethodService descreveu — não sai do catálogo.
                 issues.add(new SecurityIssue(
                         "DANGEROUS_HTTP_METHOD",
-                        "Método HTTP perigoso habilitado: " + m.getMethod(),
+                        catalog.title("DANGEROUS_HTTP_METHOD", m.getMethod()),
                         m.getSeverity(),
                         m.getRisk(),
-                        "Desabilitar métodos HTTP não necessários no servidor web."
+                        catalog.recommendation("DANGEROUS_HTTP_METHOD")
                 ));
             }
         }
@@ -316,13 +289,7 @@ public class ScoreService {
         if (!securityTxtPresent) {
             score -= 3;
             notes.add("security.txt ausente: -3");
-            issues.add(new SecurityIssue(
-                    "SECURITY_TXT_MISSING",
-                    "security.txt ausente (RFC 9116)",
-                    "LOW",
-                    "Dificulta reporte responsável de vulnerabilidades.",
-                    "Criar /.well-known/security.txt com campo Contact."
-            ));
+            issues.add(achado("SECURITY_TXT_MISSING", "LOW"));
         }
 
         // ═══════════════════════════════════════════════════════
@@ -335,13 +302,7 @@ public class ScoreService {
             if (vulnerable > 0) {
                 score -= 20;
                 notes.add("Open redirect detectado (" + vulnerable + " parâmetro(s)): -20");
-                issues.add(new SecurityIssue(
-                        "OPEN_REDIRECT",
-                        "Open Redirect detectado",
-                        "HIGH",
-                        "Atacantes podem usar seu domínio como intermediário em ataques de phishing.",
-                        "Validar e sanitizar todos os parâmetros de redirect. Usar allowlist de destinos."
-                ));
+                issues.add(achado("OPEN_REDIRECT", "HIGH"));
             }
         }
 
@@ -358,13 +319,7 @@ public class ScoreService {
                     };
                     score -= penalty;
                     notes.add("Directory listing em " + d.getPath() + ": -" + penalty);
-                    issues.add(new SecurityIssue(
-                            "DIRECTORY_LISTING",
-                            "Directory listing habilitado: " + d.getPath(),
-                            d.getSeverity(),
-                            "Exposição da estrutura de arquivos facilita reconhecimento e acesso a arquivos sensíveis.",
-                            "Desabilitar directory listing no servidor web (Options -Indexes no Apache, autoindex off no Nginx)."
-                    ));
+                    issues.add(achado("DIRECTORY_LISTING", d.getSeverity(), d.getPath()));
                 }
             }
         }
@@ -385,12 +340,13 @@ public class ScoreService {
                         + dnsSecurityResult.getEmailSpoofingRisk() + "): -" + penalty);
                 // Severidade da issue = nível de risco DNS (CRITICAL/HIGH/MEDIUM)
                 // Evita inconsistência entre o que o risco indica e o que a issue exibe
+                // O impacto é o resumo que o DnsSecurityService montou — não sai do catálogo.
                 issues.add(new SecurityIssue(
                         "DNS_EMAIL_SPOOFING",
-                        "Risco de email spoofing: " + dnsSecurityResult.getEmailSpoofingRisk(),
+                        catalog.title("DNS_EMAIL_SPOOFING", dnsSecurityResult.getEmailSpoofingRisk()),
                         dnsSecurityResult.getEmailSpoofingRisk(),
                         dnsSecurityResult.getSummary(),
-                        "Configure SPF com -all, DMARC com p=reject e DKIM em todos os seletores ativos."
+                        catalog.recommendation("DNS_EMAIL_SPOOFING")
                 ));
             }
         }
@@ -402,13 +358,7 @@ public class ScoreService {
             if (!wafDetectionResult.isDetected()) {
                 score -= 3;
                 notes.add("Sem WAF detectado: -3");
-                issues.add(new SecurityIssue(
-                        "NO_WAF_DETECTED",
-                        "Nenhum WAF (Web Application Firewall) detectado",
-                        "LOW",
-                        "Sem WAF, ataques como SQLi, XSS e brute-force chegam direto ao servidor de aplicação.",
-                        "Considere adicionar Cloudflare, AWS WAF ou similar como camada de proteção."
-                ));
+                issues.add(achado("NO_WAF_DETECTED", "LOW"));
             } else {
                 // WAF detectado — bônus apenas para WAFs reais.
                 // CDNs (Vercel, GitHub, Fastly, Google Cloud) não conferem proteção
@@ -462,16 +412,17 @@ public class ScoreService {
                     notes.add("CVE potencial tier " + tier + " detectado: -" + penalty);
                 }
 
-                String recommendation = "Confirme a versão exata de " + cve.getAffectedSoftware()
-                        + " antes de agir — a detecção parte da versão reportada no banner e pode ser"
-                        + " falso positivo se o fornecedor/distro aplicou backport da correção sem mudar"
-                        + " o número da versão. Se confirmada, atualize para uma versão não afetada."
-                        + (cve.getReferenceUrl() != null ? " Ref: " + cve.getReferenceUrl() : "");
+                // Chave base "CVE": o ID do achado carrega o número, que muda a cada
+                // achado. A descrição vem do NVD, em inglês na origem — não passa
+                // pelo catálogo porque não há o que traduzir do nosso lado.
+                String recommendation = catalog.recommendation("CVE", cve.getAffectedSoftware())
+                        + (cve.getReferenceUrl() != null
+                           ? catalog.fragment("CVE", "reference", cve.getReferenceUrl()) : "");
 
                 issues.add(new SecurityIssue(
                         "CVE_" + cve.getCveId().replace("-", "_"),
-                        "[Potencial] " + cve.getCveId() + " — " + cve.getAffectedSoftware()
-                                + " (CVSS " + String.format("%.1f", cve.getCvssScore()) + ")",
+                        catalog.title("CVE", cve.getCveId(), cve.getAffectedSoftware(),
+                                String.format("%.1f", cve.getCvssScore())),
                         downgradeOneTier(cve.getSeverity()),
                         cve.getDescription(),
                         recommendation
@@ -543,13 +494,14 @@ public class ScoreService {
                 };
                 jwtPenalty = Math.max(jwtPenalty, p); // pega o pior caso
                 String issueDesc = String.join("; ", jwt.getIssues());
+                // Chave base "JWT": o ID carrega a severidade. O impacto é a lista de
+                // problemas que o JwtSecurityService encontrou.
                 issues.add(new SecurityIssue(
                         "JWT_" + jwt.getSeverity(),
-                        "JWT inseguro em '" + jwt.getSource() + "' (alg=" + jwt.getAlgorithm() + ")",
+                        catalog.title("JWT", jwt.getSource(), jwt.getAlgorithm()),
                         jwt.getSeverity(),
                         issueDesc,
-                        "Usar algoritmo assimetrico (RS256/ES256), adicionar claims exp/iss/aud, "
-                        + "nunca usar alg=none em producao."
+                        catalog.recommendation("JWT")
                 ));
             }
             score -= jwtPenalty;
@@ -566,17 +518,17 @@ public class ScoreService {
                 score -= gqlPenalty;
                 notes.add("GraphQL " + (gql.isPlaygroundExposed() ? "playground exposto" : "introspection habilitada")
                         + " (" + gql.getEndpoint() + "): -" + gqlPenalty);
-                String tc = gql.getTypeCount() > 0 ? " (" + gql.getTypeCount() + " tipos no schema)" : "";
+                String tc = gql.getTypeCount() > 0
+                        ? catalog.fragment("GRAPHQL", "typeCount", gql.getTypeCount()) : "";
+                // Playground e introspection têm títulos e impactos diferentes, mas a
+                // mesma recomendação — daí a chave base separada só para ela.
+                String chave = "GRAPHQL_" + (gql.isPlaygroundExposed() ? "PLAYGROUND" : "INTROSPECTION");
                 issues.add(new SecurityIssue(
-                        "GRAPHQL_" + (gql.isPlaygroundExposed() ? "PLAYGROUND" : "INTROSPECTION"),
-                        "GraphQL " + (gql.isPlaygroundExposed() ? "playground publico" : "introspection habilitada")
-                                + " em " + gql.getEndpoint() + tc,
+                        chave,
+                        catalog.title(chave, gql.getEndpoint(), tc),
                         gql.getSeverity(),
-                        gql.isPlaygroundExposed()
-                                ? "Interface GraphQL interativa acessivel sem autenticacao — permite explorar e executar queries na API."
-                                : "Introspection habilitada em producao — expoe schema completo: queries, mutations, tipos e campos.",
-                        "Desabilitar introspection em producao (ex: spring.graphql.schema.introspection.enabled=false). "
-                        + "Restringir acesso ao playground a ambientes de desenvolvimento."
+                        catalog.impact(chave),
+                        catalog.recommendation("GRAPHQL")
                 ));
             }
         }
@@ -591,13 +543,14 @@ public class ScoreService {
             notes.add("API docs expostos (" + apiDocsExposure.size() + " endpoint(s)): -" + apiPenalty);
             for (ApiDocsExposureFinding f : apiDocsExposure) {
                 String issueSev = "HIGH".equals(f.getSeverity()) ? "MEDIUM" : "LOW";
+                // Chave base "API_DOCS": o ID carrega o tipo. O impacto vem do
+                // ApiDocsExposureService.
                 issues.add(new SecurityIssue(
                         "API_DOCS_" + f.getType(),
-                        "Documentacao de API exposta: " + f.getPath(),
+                        catalog.title("API_DOCS", f.getPath()),
                         issueSev,
                         f.getDescription(),
-                        "Restringir acesso a documentacao de API em producao via autenticacao " +
-                        "ou remover os endpoints /swagger-ui, /api-docs, /openapi.json."
+                        catalog.recommendation("API_DOCS")
                 ));
             }
         }
@@ -649,17 +602,11 @@ public class ScoreService {
             case "Strict-Transport-Security" -> {
                 if (status.startsWith("MISSING")) {
                     notes.add("HSTS ausente: -10");
-                    issues.add(new SecurityIssue("HSTS_MISSING",
-                            "Strict-Transport-Security ausente", "HIGH",
-                            "Ataques downgrade para HTTP são possíveis.",
-                            "Adicionar: Strict-Transport-Security: max-age=31536000; includeSubDomains"));
+                    issues.add(achado("HSTS_MISSING", "HIGH"));
                     yield score - 10;
                 } else if (status.startsWith("WEAK")) {
                     notes.add("HSTS fraco: -5");
-                    issues.add(new SecurityIssue("HSTS_WEAK",
-                            "Strict-Transport-Security fraco", "MEDIUM",
-                            "Configuração incompleta reduz a proteção.",
-                            "Garantir max-age >= 2592000 e considerar includeSubDomains."));
+                    issues.add(achado("HSTS_WEAK", "MEDIUM"));
                     yield score - 5;
                 }
                 yield score;
@@ -668,10 +615,7 @@ public class ScoreService {
             case "X-Content-Type-Options" -> {
                 if (status.startsWith("MISSING")) {
                     notes.add("X-Content-Type-Options ausente: -5");
-                    issues.add(new SecurityIssue("CONTENT_TYPE_MISSING",
-                            "X-Content-Type-Options ausente", "MEDIUM",
-                            "Pode permitir MIME sniffing.",
-                            "Adicionar: X-Content-Type-Options: nosniff"));
+                    issues.add(achado("CONTENT_TYPE_MISSING", "MEDIUM"));
                     yield score - 5;
                 }
                 yield score;
@@ -680,17 +624,11 @@ public class ScoreService {
             case "Content-Security-Policy" -> {
                 if (status.startsWith("MISSING")) {
                     notes.add("CSP ausente: -10");
-                    issues.add(new SecurityIssue("CSP_MISSING",
-                            "Content-Security-Policy ausente", "HIGH",
-                            "Sem barreira contra injeção de scripts externos.",
-                            "Implementar CSP com default-src 'self' como base."));
+                    issues.add(achado("CSP_MISSING", "HIGH"));
                     yield score - 10;
                 } else if (status.startsWith("WEAK")) {
                     notes.add("CSP fraca (unsafe-inline/eval): -5");
-                    issues.add(new SecurityIssue("CSP_WEAK",
-                            "Content-Security-Policy fraca", "MEDIUM",
-                            "unsafe-inline ou unsafe-eval anulam a proteção contra XSS.",
-                            "Remover 'unsafe-inline' e 'unsafe-eval'. Usar nonces ou hashes."));
+                    issues.add(achado("CSP_WEAK", "MEDIUM"));
                     yield score - 5;
                 }
                 yield score;
@@ -699,10 +637,7 @@ public class ScoreService {
             case "X-Frame-Options" -> {
                 if (status.startsWith("MISSING")) {
                     notes.add("X-Frame-Options ausente: -5");
-                    issues.add(new SecurityIssue("XFRAME_MISSING",
-                            "X-Frame-Options ausente", "MEDIUM",
-                            "Site pode ser embutido em iframes — risco de clickjacking.",
-                            "Adicionar X-Frame-Options: DENY ou usar frame-ancestors no CSP."));
+                    issues.add(achado("XFRAME_MISSING", "MEDIUM"));
                     yield score - 5;
                 }
                 yield score;
@@ -711,17 +646,11 @@ public class ScoreService {
             case "Referrer-Policy" -> {
                 if (status.startsWith("MISSING")) {
                     notes.add("Referrer-Policy ausente: -5");
-                    issues.add(new SecurityIssue("REFERRER_POLICY_MISSING",
-                            "Referrer-Policy ausente", "LOW",
-                            "URLs internas podem vazar para sites externos via header Referer.",
-                            "Adicionar: Referrer-Policy: strict-origin-when-cross-origin"));
+                    issues.add(achado("REFERRER_POLICY_MISSING", "LOW"));
                     yield score - 5;
                 } else if (status.startsWith("WEAK")) {
                     notes.add("Referrer-Policy insegura: -5");
-                    issues.add(new SecurityIssue("REFERRER_POLICY_WEAK",
-                            "Referrer-Policy insegura", "MEDIUM",
-                            "unsafe-url vaza URLs completas incluindo query strings.",
-                            "Usar strict-origin-when-cross-origin ou no-referrer."));
+                    issues.add(achado("REFERRER_POLICY_WEAK", "MEDIUM"));
                     yield score - 5;
                 }
                 yield score;
@@ -730,10 +659,7 @@ public class ScoreService {
             case "Permissions-Policy" -> {
                 if (status.startsWith("MISSING")) {
                     notes.add("Permissions-Policy ausente: -3");
-                    issues.add(new SecurityIssue("PERMISSIONS_POLICY_MISSING",
-                            "Permissions-Policy ausente", "LOW",
-                            "Sem restrição de APIs de browser (câmera, microfone, geolocalização).",
-                            "Adicionar Permissions-Policy restringindo features não usadas."));
+                    issues.add(achado("PERMISSIONS_POLICY_MISSING", "LOW"));
                     yield score - 3;
                 }
                 yield score;

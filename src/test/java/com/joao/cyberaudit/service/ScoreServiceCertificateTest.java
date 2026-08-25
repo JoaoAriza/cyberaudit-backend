@@ -4,6 +4,7 @@ import com.joao.cyberaudit.model.SSLInfo;
 import com.joao.cyberaudit.model.ScoreResult;
 import com.joao.cyberaudit.model.TlsDetails;
 import org.junit.jupiter.api.DisplayName;
+import org.springframework.context.support.ResourceBundleMessageSource;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -21,7 +22,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ScoreServiceCertificateTest {
 
-    private final ScoreService scoreService = new ScoreService();
+    private final ScoreService scoreService = new ScoreService(catalogoReal());
+
+    /**
+     * Catálogo apontando para o messages.properties de verdade, não para um dublê.
+     * Assim o teste também falha se uma chave sumir do arquivo — o texto passou a
+     * viver fora do código, e nada mais garantiria que ele existe.
+     */
+    private static IssueCatalog catalogoReal() {
+        var fonte = new ResourceBundleMessageSource();
+        fonte.setBasename("messages");
+        fonte.setDefaultEncoding("UTF-8");
+        fonte.setFallbackToSystemLocale(false);
+        return new IssueCatalog(fonte);
+    }
 
     /** Headers "todos presentes", para isolar o efeito do certificado no score. */
     private static Map<String, String> headersOk() {

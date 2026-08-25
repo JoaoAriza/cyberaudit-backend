@@ -1,0 +1,57 @@
+package com.joao.cyberaudit.service;
+
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.stereotype.Component;
+
+/**
+ * Texto dos achados de segurança, indexado por ID.
+ *
+ * O texto nascia embutido no {@link ScoreService}, em português. Vender fora do
+ * Brasil exige traduzir o LAUDO, não só a interface: cliente lendo tela em inglês
+ * e achado em português não compra. Todo achado já tinha ID estável, então o ID
+ * virou a chave e o texto saiu do código.
+ *
+ * Nesta etapa o contrato da API não muda — a resposta continua trazendo texto
+ * pronto, só que vindo de {@code messages.properties}. Ela existe para que a
+ * etapa seguinte precise apenas somar {@code messages_en.properties}, sem tocar
+ * na lógica de scan.
+ *
+ * O locale sai do {@link LocaleContextHolder}, que hoje devolve sempre o padrão
+ * porque não há resolvedor configurado. É de propósito: o ponto de virada já fica
+ * no lugar certo.
+ */
+@Component
+public class IssueCatalog {
+
+    private final MessageSource messages;
+
+    public IssueCatalog(MessageSource messages) {
+        this.messages = messages;
+    }
+
+    public String title(String chave, Object... args) {
+        return texto(chave, "title", args);
+    }
+
+    public String impact(String chave, Object... args) {
+        return texto(chave, "impact", args);
+    }
+
+    public String recommendation(String chave, Object... args) {
+        return texto(chave, "recommendation", args);
+    }
+
+    /** Fragmento avulso do catálogo — ver issue.CVE.reference e issue.GRAPHQL.typeCount. */
+    public String fragment(String chave, String sufixo, Object... args) {
+        return texto(chave, sufixo, args);
+    }
+
+    private String texto(String chave, String campo, Object[] args) {
+        String id = "issue." + chave + "." + campo;
+        // Chave ausente devolve a própria chave, que aparece feia no laudo. É o
+        // mesmo princípio do id cru no cardápio: achado novo sem tradução salta
+        // aos olhos em vez de sair com texto vazio.
+        return messages.getMessage(id, args, id, LocaleContextHolder.getLocale());
+    }
+}
