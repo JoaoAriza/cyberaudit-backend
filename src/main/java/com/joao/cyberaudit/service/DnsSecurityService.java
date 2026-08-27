@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -71,6 +72,118 @@ public class DnsSecurityService {
             // OVH
             "ovhex"
     );
+
+    /**
+     * Provedor de e-mail reconhecível pelo SPF ou pelo MX, e os seletores que ele
+     * publica.
+     *
+     * @param marcadores trechos que aparecem num `include:` do SPF ou no destino de
+     *                   um MX. Casam por substring em minúsculas.
+     */
+    record ProvedorDeEmail(String nome, List<String> marcadores, List<String> seletores) {}
+
+    /**
+     * De onde sai o palpite dirigido de DKIM.
+     *
+     * O SPF e o MX já dizem QUEM entrega o e-mail do domínio — `include:_spf.google.com`
+     * e `aspmx.l.google.com` são a mesma informação escrita de dois jeitos. Como as duas
+     * consultas já foram feitas na fase 1, o provedor sai de graça, e com ele os únicos
+     * seletores que têm chance real de existir.
+     *
+     * Um domínio pode casar com MAIS DE UM provedor, e isso é o caso comum, não a
+     * exceção: recebe no Google e envia pelo SendGrid. Por isso o casamento devolve
+     * lista, não o primeiro que bater.
+     */
+    private static final List<ProvedorDeEmail> PROVEDORES = List.of(
+            new ProvedorDeEmail("Google Workspace",
+                    List.of("_spf.google.com", "aspmx.l.google.com", "googlemail.com"),
+                    List.of("google")),
+            new ProvedorDeEmail("Microsoft 365",
+                    List.of("spf.protection.outlook.com", "mail.protection.outlook.com"),
+                    List.of("selector1", "selector2")),
+            new ProvedorDeEmail("SendGrid",
+                    List.of("sendgrid.net"),
+                    List.of("s1", "s2", "em", "smtpapi")),
+            new ProvedorDeEmail("Mailchimp / Mandrill",
+                    List.of("spf.mandrillapp.com", "servers.mcsv.net", "mailchimp.com"),
+                    List.of("k1", "k2", "k3", "mandrill")),
+            // `amazonses.com` é marcador do Resend TAMBÉM, e não por precaução: o Resend
+            // entrega pela infra da AWS e é isso — só isso — que o SPF dele publica.
+            // Conferido no cyberauditapp.com, cujo SPF é `v=spf1 include:amazonses.com -all`
+            // e cujo DKIM está em `resend._domainkey`. Sem este marcador a rodada dirigida
+            // tentaria só `amazonses`, não acharia, e o domínio cairia na força bruta —
+            // exatamente o que esta etapa existe para evitar. Como o casamento devolve
+            // lista, os dois provedores entram e são 2 seletores em vez de 40.
+            new ProvedorDeEmail("Resend",
+                    List.of("resend.com", "_spf.resend.com", "amazonses.com"),
+                    List.of("resend")),
+            new ProvedorDeEmail("Amazon SES",
+                    List.of("amazonses.com"),
+                    List.of("amazonses")),
+            new ProvedorDeEmail("Mailgun",
+                    List.of("mailgun.org", "mailgun.net"),
+                    List.of("mx1", "mx2", "pic", "krs")),
+            new ProvedorDeEmail("Postmark",
+                    List.of("spf.mtasv.net", "mtasv.net"),
+                    List.of("pm")),
+            new ProvedorDeEmail("FastMail",
+                    List.of("messagingengine.com"),
+                    List.of("fm1", "fm2", "fm3")),
+            new ProvedorDeEmail("Proton Mail",
+                    List.of("protonmail.ch", "protonmail.com", "proton.me"),
+                    List.of("protonmail", "protonmail2", "protonmail3")),
+            new ProvedorDeEmail("Zoho Mail",
+                    List.of("zoho.com", "zoho.eu", "zohomail"),
+                    List.of("zoho")),
+            new ProvedorDeEmail("HubSpot",
+                    List.of("hubspotemail.net", "hubspot.com"),
+                    List.of("hubspot1", "hubspot2")),
+            new ProvedorDeEmail("Mailjet",
+                    List.of("mailjet.com"),
+                    List.of("mailjet")),
+            new ProvedorDeEmail("SparkPost",
+                    List.of("sparkpostmail.com"),
+                    List.of("scph")),
+            new ProvedorDeEmail("Brevo (Sendinblue)",
+                    List.of("brevo.com", "sendinblue.com"),
+                    List.of("brevo")),
+            new ProvedorDeEmail("ConvertKit",
+                    List.of("convertkit.com"),
+                    List.of("ck1")),
+            new ProvedorDeEmail("Campaign Monitor",
+                    List.of("cmail1.com", "createsend.com"),
+                    List.of("cm")),
+            new ProvedorDeEmail("ActiveCampaign",
+                    List.of("activecampaign.com"),
+                    List.of("ac")),
+            new ProvedorDeEmail("OVH",
+                    List.of("mx.ovh.com", "ovh.net"),
+                    List.of("ovhex"))
+    );
+
+    /**
+     * O que a fase 1 descobre e a fase 2 aproveita.
+     *
+     * Escrito pelas análises de SPF e MX, lido pela sonda de DKIM. É um holder à parte
+     * e não o próprio builder porque o builder do Lombok não tem como ser LIDO — e a
+     * evidência precisa atravessar as duas fases. As referências são atômicas porque
+     * SPF e MX rodam em threads diferentes.
+     */
+    /** Teto de tempo das DUAS rodadas de DKIM somadas — o mesmo que a sonda antiga tinha. */
+    private static final long DKIM_ORCAMENTO_MS = 8_000;
+
+    private static final class PistasDeProvedor {
+        private final AtomicReference<String>       spf = new AtomicReference<>("");
+        private final AtomicReference<List<String>> mx  = new AtomicReference<>(List.of());
+
+        void spf(String registro)          { if (registro != null)   spf.set(registro); }
+        void mx(List<String> registros)    { if (registros != null && !registros.isEmpty()) mx.set(registros); }
+
+        /** SPF e MX num texto só, minúsculo — é contra ele que os marcadores casam. */
+        String evidencia() {
+            return (spf.get() + " " + String.join(" ", mx.get())).toLowerCase(Locale.ROOT);
+        }
+    }
 
     private static final Pattern DMARC_P = Pattern.compile(
             "(?:^|;)\\s*p=([^;\\s]+)", Pattern.CASE_INSENSITIVE
@@ -157,14 +270,15 @@ public class DnsSecurityService {
     public DnsSecurityResult scan(String host) {
         DnsSecurityResult.DnsSecurityResultBuilder b = DnsSecurityResult.builder();
         AtomicBoolean falhou = new AtomicBoolean(false);
+        PistasDeProvedor pistas = new PistasDeProvedor();
 
         // ── Fase 1: o que decide o risco ──────────────────────────────────
         ExecutorService pool = Executors.newFixedThreadPool(4);
         try {
-            var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, falhou, b),   pool);
+            var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, falhou, b, pistas), pool);
             var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, falhou, b), pool);
             var caaFuture   = CompletableFuture.runAsync(() -> analyzeCaa(host, falhou, b),   pool);
-            var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, falhou, b),    pool);
+            var mxFuture    = CompletableFuture.runAsync(() -> analyzeMx(host, falhou, b, pistas), pool);
 
             CompletableFuture.allOf(spfFuture, dmarcFuture, caaFuture, mxFuture)
                     .get(10, TimeUnit.SECONDS);
@@ -178,7 +292,9 @@ public class DnsSecurityService {
 
         // ── Fase 2: DKIM, melhor-esforço ──────────────────────────────────
         // Fora do try acima de propósito: falha aqui não é falha do módulo.
-        analyzeDkim(host, b);
+        // Recebe as pistas da fase 1: o provedor revelado pelo SPF e pelo MX é o que
+        // transforma a adivinhação de seletor num palpite dirigido.
+        analyzeDkim(host, b, pistas);
 
         b.lookupFailed(falhou.get());
         DnsSecurityResult result = b.build();
@@ -190,13 +306,14 @@ public class DnsSecurityService {
     // ── SPF ───────────────────────────────────────────────────────────────────
 
     private void analyzeSpf(String host, AtomicBoolean falhou,
-                            DnsSecurityResult.DnsSecurityResultBuilder b) {
+                            DnsSecurityResult.DnsSecurityResultBuilder b,
+                            PistasDeProvedor pistas) {
         // SPF normalmente fica no apex. Tenta o host, depois o domínio registrável (apex).
-        if (querySpf(host, falhou, b)) return;
+        if (querySpf(host, falhou, b, pistas)) return;
 
         String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
-            querySpf(parent, falhou, b);
+            querySpf(parent, falhou, b, pistas);
         }
         // querySpf marca MISSING se nada for encontrado
     }
@@ -206,12 +323,17 @@ public class DnsSecurityService {
      * @return true se um registro v=spf1 válido foi encontrado
      */
     private boolean querySpf(String domain, AtomicBoolean falhou,
-                             DnsSecurityResult.DnsSecurityResultBuilder b) {
+                             DnsSecurityResult.DnsSecurityResultBuilder b,
+                             PistasDeProvedor pistas) {
         try {
             List<String> spfs = textosQueComecamCom(
                     consultar(domain, Type.TXT, falhou), "v=spf1");
 
             if (spfs.isEmpty()) { b.spfPresent(false).spfPolicy("MISSING"); return false; }
+
+            // Vale como pista mesmo quando o registro é inválido: SPF duplicado não
+            // protege ninguém, mas ainda diz quem entrega o e-mail do domínio.
+            pistas.spf(String.join(" ", spfs));
 
             if (spfs.size() > 1) {
                 // RFC 7208 §4.5: mais de um registro v=spf1 é PERMERROR — o
@@ -337,74 +459,152 @@ public class DnsSecurityService {
     // ── DKIM — seletores testados em paralelo ─────────────────────────────────
 
     /**
-     * O DKIM sonda ~40 seletores em 2 domínios: mais de 80 consultas especulativas
-     * de uma vez, contra nomes que na maioria não existem.
+     * O DKIM não tem como ser descoberto: o seletor é um nome arbitrário escolhido por
+     * quem configurou. A única saída é adivinhar — e a diferença está em adivinhar às
+     * cegas ou com evidência.
      *
-     * Por isso ele NÃO alimenta o sinal de falha global. Se algumas dessas sondas
-     * estouram o tempo — o que é esperado num lote grande, ainda mais em instância
-     * com CPU limitada —, isso não diz nada sobre a saúde do DNS: o SPF e o DMARC
-     * podem ter resolvido perfeitamente em uma consulta cada.
+     * <h2>Duas rodadas</h2>
      *
-     * Deixar o lote de DKIM marcar falha global fazia o resultado inteiro virar
-     * UNKNOWN por causa da parte mais especulativa da análise. O DKIM já tem seu
-     * próprio estado honesto para isso: NOT_DETECTED.
+     * <b>Dirigida.</b> O SPF e o MX, já consultados na fase 1, dizem quem entrega o
+     * e-mail do domínio. Reconhecido o provedor, só os seletores DELE têm chance real:
+     * são 2 a 12 consultas em vez de ~84. É o caso comum — a esmagadora maioria dos
+     * domínios usa um punhado de provedores conhecidos.
+     *
+     * <b>Reserva.</b> Se nenhum provedor foi reconhecido, ou se o reconhecido não
+     * respondeu, cai na lista inteira. Desistir depois da rodada dirigida perderia
+     * DKIM que a força bruta achava: quem RECEBE por um provedor pode ENVIAR por outro,
+     * e nem toda infra aparece no SPF.
+     *
+     * <h2>Por que o DKIM não alimenta o sinal de falha global</h2>
+     *
+     * São consultas especulativas contra nomes que na maioria não existem. Se algumas
+     * estouram o tempo — esperado num lote grande, ainda mais em instância com CPU
+     * limitada —, isso não diz nada sobre a saúde do DNS: o SPF e o DMARC podem ter
+     * resolvido perfeitamente em uma consulta cada.
+     *
+     * Deixar o lote de DKIM marcar falha global fazia o resultado inteiro virar UNKNOWN
+     * por causa da parte mais especulativa da análise. O DKIM já tem seu próprio estado
+     * honesto para isso: NOT_DETECTED — que significa inconclusivo, não ausente. Seletor
+     * customizado ou baseado em data (ex: Google "20230601") não é adivinhável, e nunca
+     * será, com tabela nenhuma.
      */
     private void analyzeDkim(String host,
-                             DnsSecurityResult.DnsSecurityResultBuilder b) {
+                             DnsSecurityResult.DnsSecurityResultBuilder b,
+                             PistasDeProvedor pistas) {
         // Isolado do sinal global: ver javadoc acima.
         AtomicBoolean falhou = new AtomicBoolean(false);
-        // Proba os seletores no host e no apex (DKIM costuma estar em
-        // selector._domainkey.<apex>), num único batch paralelo.
+
+        // Sonda no host e no apex: DKIM costuma estar em selector._domainkey.<apex>.
         List<String> domains = new ArrayList<>();
         domains.add(host);
         String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) domains.add(parent);
 
+        List<ProvedorDeEmail> provedores = provedoresParaEvidencia(pistas.evidencia());
+        List<String> dirigidos = provedores.stream()
+                .flatMap(p -> p.seletores().stream())
+                .distinct()
+                .toList();
+
+        // Orçamento ÚNICO para as duas rodadas. Sem ele, um domínio cujo provedor é
+        // reconhecido mas não responde pagaria os 4s da dirigida MAIS os 8s da reserva
+        // — a etapa que existe para economizar consulta acabaria custando tempo.
+        long limite = System.currentTimeMillis() + DKIM_ORCAMENTO_MS;
+
+        if (!dirigidos.isEmpty()) {
+            String seletor = sondarSeletores(domains, dirigidos, falhou, segundosRestantes(limite, 4));
+            if (seletor != null) {
+                log.debug("DKIM de {} resolvido no seletor {} — provedor revelado por SPF/MX: {}",
+                        host, seletor,
+                        provedores.stream().map(ProvedorDeEmail::nome).collect(Collectors.joining(", ")));
+                b.dkimHintFound(true).dkimSelector(seletor);
+                return;
+            }
+        }
+
+        // O que a rodada dirigida já testou sai da reserva — repetir consulta que
+        // acabou de falhar não muda a resposta e só gasta o orçamento de tempo.
+        List<String> resto = DKIM_SELECTORS.stream()
+                .filter(s -> !dirigidos.contains(s))
+                .toList();
+
+        String seletor = sondarSeletores(domains, resto, falhou, segundosRestantes(limite, 8));
+        if (seletor != null) b.dkimHintFound(true).dkimSelector(seletor);
+        else                 b.dkimHintFound(false).dkimSelector("NOT_DETECTED");
+    }
+
+    /** Segundos que ainda cabem no orçamento, limitados a {@code teto} e nunca zero. */
+    private static int segundosRestantes(long limiteMs, int teto) {
+        long restam = (limiteMs - System.currentTimeMillis() + 999) / 1000;
+        return (int) Math.max(1, Math.min(teto, restam));
+    }
+
+    /**
+     * Provedores de e-mail que o SPF e o MX do domínio revelam.
+     *
+     * Devolve LISTA porque casar com mais de um é o caso comum, não a exceção: recebe
+     * no Google e envia pelo SendGrid, com os dois no mesmo SPF. Ficar no primeiro que
+     * bate perderia metade dos seletores certos.
+     *
+     * Estático e visível ao pacote para o teste poder exercitar a tabela sem rede —
+     * é a parte da etapa que tem regra de negócio; o resto é consulta DNS.
+     *
+     * @param evidencia SPF e MX concatenados, como {@code PistasDeProvedor.evidencia()} monta
+     */
+    static List<ProvedorDeEmail> provedoresParaEvidencia(String evidencia) {
+        if (evidencia == null || evidencia.isBlank()) return List.of();
+
+        String texto = evidencia.toLowerCase(Locale.ROOT);
+        return PROVEDORES.stream()
+                .filter(p -> p.marcadores().stream().anyMatch(texto::contains))
+                .toList();
+    }
+
+    /**
+     * Dispara um lote de sondas e devolve o primeiro seletor que existir, ou null.
+     *
+     * Concorrência baixa de propósito: 20 threads disparando 84 consultas de uma vez
+     * saturavam o cliente HTTP (no modo DoH, cada consulta é uma requisição) e
+     * derrubavam por timeout até o SPF e o DMARC. Adivinhar seletor não justifica
+     * atrapalhar o que decide o veredito.
+     */
+    private String sondarSeletores(List<String> domains, List<String> seletores,
+                                   AtomicBoolean falhou, int timeoutSegundos) {
+        if (seletores.isEmpty()) return null;
+
         List<String[]> probes = new ArrayList<>();   // {selector, domain}
         for (String domain : domains)
-            for (String selector : DKIM_SELECTORS)
+            for (String selector : seletores)
                 probes.add(new String[]{ selector, domain });
 
-        // Concorrência baixa de propósito: 20 threads disparando 84 consultas de
-        // uma vez saturavam o cliente HTTP (no modo DoH, cada uma é uma requisição)
-        // e derrubavam por timeout até as consultas de SPF e DMARC. Adivinhar
-        // seletor não justifica atrapalhar o que decide o veredito.
         int poolSize = Math.min(Math.max(probes.size(), 1), 4);
         ExecutorService pool = Executors.newFixedThreadPool(poolSize);
+        List<CompletableFuture<String>> futures = probes.stream()
+                .map(p -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        org.xbill.DNS.Record[] records =
+                                consultar(p[0] + "._domainkey." + p[1], Type.TXT, falhou);
+                        return (records != null && records.length > 0) ? p[0] : null;
+                    } catch (Exception e) { return null; }
+                }, pool))
+                .toList();
         try {
-            List<CompletableFuture<String>> futures = probes.stream()
-                    .map(p -> CompletableFuture.supplyAsync(() -> {
-                        try {
-                            org.xbill.DNS.Record[] records =
-                                    consultar(p[0] + "._domainkey." + p[1], Type.TXT, falhou);
-                            return (records != null && records.length > 0) ? p[0] : null;
-                        } catch (Exception e) { return null; }
-                    }, pool))
-                    .toList();
-
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(8, TimeUnit.SECONDS);
-
-            List<String> found = futures.stream()
-                    .map(f -> f.getNow(null))
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-
-            if (!found.isEmpty()) {
-                // Seletor confirmado
-                b.dkimHintFound(true).dkimSelector(found.get(0));
-            } else {
-                // Nenhum seletor da lista respondeu.
-                // Isso NÃO significa ausência de DKIM — o domínio pode usar seletores
-                // customizados ou baseados em data (ex: Google "20230601") que não são
-                // adivinháveis sem enumeração. Marcamos como NOT_DETECTED (inconclusivo).
-                b.dkimHintFound(false).dkimSelector("NOT_DETECTED");
-            }
+                    .get(timeoutSegundos, TimeUnit.SECONDS);
         } catch (Exception e) {
-            b.dkimHintFound(false).dkimSelector("NOT_DETECTED");
+            // Estouro de tempo no lote não descarta o que já voltou: a colheita abaixo
+            // roda de qualquer jeito. Um seletor confirmado é um seletor confirmado,
+            // mesmo que as sondas vizinhas não tenham cabido no tempo.
+            log.debug("Lote de DKIM não concluiu em {}s — colhendo o que respondeu", timeoutSegundos);
         } finally {
             pool.shutdownNow();
         }
+
+        return futures.stream()
+                .map(f -> f.getNow(null))
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
     }
 
     // ── CAA ───────────────────────────────────────────────────────────────────
@@ -456,13 +656,14 @@ public class DnsSecurityService {
     // ── MX ────────────────────────────────────────────────────────────────────
 
     private void analyzeMx(String host, AtomicBoolean falhou,
-                           DnsSecurityResult.DnsSecurityResultBuilder b) {
+                           DnsSecurityResult.DnsSecurityResultBuilder b,
+                           PistasDeProvedor pistas) {
         // MX normalmente fica no apex. Tenta o host, depois o domínio registrável (apex).
-        if (queryMx(host, falhou, b)) return;
+        if (queryMx(host, falhou, b, pistas)) return;
 
         String parent = publicSuffixService.registrableDomain(host);
         if (parent != null && !parent.equals(host)) {
-            queryMx(parent, falhou, b);
+            queryMx(parent, falhou, b, pistas);
         }
     }
 
@@ -471,7 +672,8 @@ public class DnsSecurityService {
      * @return true se ao menos um registro MX foi encontrado
      */
     private boolean queryMx(String domain, AtomicBoolean falhou,
-                            DnsSecurityResult.DnsSecurityResultBuilder b) {
+                            DnsSecurityResult.DnsSecurityResultBuilder b,
+                            PistasDeProvedor pistas) {
         try {
             org.xbill.DNS.Record[] records = consultar(domain, Type.MX, falhou);
             if (records == null || records.length == 0) {
@@ -484,6 +686,7 @@ public class DnsSecurityService {
                     mx.add(mxr.getPriority() + " " + mxr.getTarget());
             }
             b.mxPresent(true).mxRecords(mx);
+            pistas.mx(mx);
             return true;
         } catch (Exception e) {
             b.mxPresent(false).mxRecords(List.of());
