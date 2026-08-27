@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -173,6 +174,25 @@ class PasswordResetServiceTest {
         assertNotEquals(hashAntigo, user.getPasswordHash());
         assertTrue(encoder.matches("SenhaNova#2026", user.getPasswordHash()));
         assertTrue(prt.isUsed(), "token de uso único precisa ficar marcado");
+    }
+
+    @Test
+    @DisplayName("a troca carimba passwordChangedAt — é o que derruba as sessões antigas")
+    void trocaCarimbaMomentoDaMudanca() {
+        AppUser user = usuario();
+        var prt = tokenValido(user.getId(), "qualquer");
+
+        when(tokenRepo.findByTokenHashAndUsedFalse(anyString())).thenReturn(Optional.of(prt));
+        when(userRepo.findById(user.getId())).thenReturn(Optional.of(user));
+
+        LocalDateTime antes = LocalDateTime.now();
+        service().resetPassword("token-cru", "SenhaNova#2026");
+
+        // Sem o carimbo o JwtAuthFilter não tem como distinguir token velho de novo,
+        // e a redefinição deixa a sessão do invasor de pé por até 24h.
+        assertNotNull(user.getPasswordChangedAt(), "sem carimbo não há revogação");
+        assertFalse(user.getPasswordChangedAt().isBefore(antes),
+                "o carimbo tem de ser do momento da troca, não anterior a ele");
     }
 
     @Test

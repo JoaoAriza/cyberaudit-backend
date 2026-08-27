@@ -41,13 +41,11 @@ import java.util.UUID;
  * <b>Token de uso único e curto.</b> 30 minutos, invalidado ao ser usado, e cada
  * pedido novo apaga os anteriores.
  *
- * <h2>Limitação conhecida</h2>
- *
- * Sessões abertas ANTES da redefinição continuam válidas até o JWT expirar (24h).
- * Invalidá-las exigiria um carimbo de "senha alterada em" no usuário, conferido
- * pelo filtro a cada requisição — os JWT são stateless e não têm como ser
- * revogados sozinhos. Fica como melhoria separada; implementar pela metade daria
- * uma falsa sensação de revogação, que é pior do que a limitação declarada.
+ * <b>As sessões antigas caem junto.</b> A redefinição grava
+ * {@code AppUser.passwordChangedAt}, e o {@code JwtAuthFilter} recusa todo token
+ * emitido antes desse carimbo. Sem isso a redefinição não expulsava ninguém: quem
+ * tivesse tomado a conta continuava dentro dela por até 24h, que é o tempo de vida
+ * do JWT — e o dono trocava a senha achando que tinha resolvido.
  */
 @Service
 public class PasswordResetService {
@@ -152,6 +150,9 @@ public class PasswordResetService {
                         "Link inválido ou expirado. Peça uma nova redefinição."));
 
         user.setPasswordHash(passwordEncoder.encode(novaSenha));
+        // O carimbo é o que derruba as sessões abertas: o filtro JWT recusa todo
+        // token emitido antes dele. Sem isto, trocar a senha não expulsava ninguém.
+        user.setPasswordChangedAt(LocalDateTime.now());
         userRepository.save(user);
 
         prt.setUsed(true);

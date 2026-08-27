@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Date;
 
 @Component
@@ -86,6 +87,18 @@ public class JwtUtil {
 
     public String extractEmail(String token) {
         return parseClaims(token).getSubject();
+    }
+
+    /**
+     * Momento de emissão do token (claim {@code iat}), ou null se o token não tiver.
+     *
+     * A precisão é de SEGUNDO — é o que o formato guarda. Quem compara este valor
+     * com um carimbo de banco precisa contar com isso; ver
+     * {@code JwtAuthFilter.emitidoAntesDaTrocaDeSenha}.
+     */
+    public Instant extractIssuedAt(String token) {
+        Date emitido = parseClaims(token).getIssuedAt();
+        return emitido == null ? null : emitido.toInstant();
     }
 
     /** Retorna true se o token é um pre-auth (2FA ainda não completado). */

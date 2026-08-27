@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.joao.cyberaudit.model.AppUser;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +19,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -78,6 +82,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String email = jwtUtil.extractEmail(token);
         if (SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+
+            // Sessão anterior à troca de senha não vale mais. Segue sem autenticar,
+            // como um token inválido: a cadeia responde 401 nas rotas fechadas, que é
+            // o status que o Frontend usa para derrubar a sessão e mandar para o login.
+            if (emitidoAntesDaTrocaDeSenha(token, userDetails)) {
+                chain.doFilter(request, response);
+                return;
+            }
+
             // Token pre-auth nunca carrega as authorities reais do usuário: mesmo que
             // uma rota escape do allowlist acima, ele não satisfaz nenhuma checagem
             // de role (/admin/**, ações OWNER-only).
@@ -91,6 +104,35 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         chain.doFilter(request, response);
+    }
+
+    /**
+     * Token emitido antes da última troca de senha do usuário.
+     *
+     * É o que dá revogação a um JWT, que por definição não tem: em vez de manter
+     * lista de tokens vivos, guarda-se UM carimbo por usuário e recusa-se tudo que
+     * é anterior a ele. Vale para o token completo e para o pre-auth, que também
+     * carrega {@code iat}.
+     *
+     * <b>Sobre a precisão.</b> O {@code iat} do JWT tem precisão de segundo e o
+     * carimbo do banco tem precisão maior, então um token emitido no MESMO segundo
+     * da troca é recusado mesmo tendo nascido depois dela. Erra para o lado seguro,
+     * e o custo é um login a mais numa janela de um segundo.
+     *
+     * Sem carimbo (conta que nunca trocou a senha, ou que já existia antes desta
+     * mudança) nada é revogado — ver {@code AppUser.passwordChangedAt}.
+     */
+    private boolean emitidoAntesDaTrocaDeSenha(String token, UserDetails userDetails) {
+        if (!(userDetails instanceof AppUser user)) return false;
+
+        LocalDateTime trocadaEm = user.getPasswordChangedAt();
+        if (trocadaEm == null) return false;
+
+        Instant emitidoEm = jwtUtil.extractIssuedAt(token);
+        // Token sem `iat` não tem como provar que é posterior à troca. Recusa.
+        if (emitidoEm == null) return true;
+
+        return emitidoEm.isBefore(trocadaEm.atZone(ZoneId.systemDefault()).toInstant());
     }
 
     /**

@@ -60,6 +60,20 @@ public class AppUser implements UserDetails {
 
     private LocalDateTime termsAcceptedAt;
 
+    /**
+     * Quando a senha foi trocada pela última vez. Null = nunca foi trocada.
+     *
+     * O filtro JWT compara este carimbo com o {@code iat} do token e recusa o que
+     * foi emitido antes. É o que faz a redefinição de senha derrubar as sessões
+     * abertas — JWT é stateless e não tem como ser revogado por conta própria, então
+     * sem o carimbo o token anterior continuaria valendo até expirar (24h), e quem
+     * tomou a conta seguiria dentro dela depois de o dono trocar a senha.
+     *
+     * Nulo é permitido de propósito: as contas que já existem sobem sem carimbo, e
+     * inventar um valor no deploy deslogaria todo mundo de uma vez.
+     */
+    private LocalDateTime passwordChangedAt;
+
     private String totpSecret;
 
     @Builder.Default
