@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class ScoreService {
@@ -702,5 +703,28 @@ public class ScoreService {
         if (totalValidityDays <= 0) return RENEWAL_WARNING_FALLBACK_DAYS;
         long proportional = Math.round(totalValidityDays * RENEWAL_WARNING_FRACTION);
         return Math.min(Math.max(proportional, 1), RENEWAL_WARNING_MAX_DAYS);
+    }
+
+    /**
+     * Anexa ao breakdown a nota de resultado parcial, NOMEANDO o que não concluiu.
+     *
+     * Não desconta pontos — não é justo penalizar o cliente por falha de coleta nossa
+     * — mas deixa explícito o que ficou sem apurar. Dizia só "1 verificação(ões) não
+     * concluída(s)", o que obrigava o leitor a adivinhar qual módulo olhar com
+     * desconfiança; e estava chumbado em português, então saía em português no meio
+     * de um laudo em inglês.
+     *
+     * Mora aqui, e não no orquestrador, porque nota do score é assunto deste serviço —
+     * é ele que tem o catálogo e é onde estão as outras trinta.
+     */
+    public void appendPartialNote(ScoreResult score, List<ScanCheck> naoConcluidas) {
+        if (score == null || score.getNotes() == null || naoConcluidas.isEmpty()) return;
+
+        String nomes = naoConcluidas.stream()
+                .map(c -> catalog.check(c.name()))
+                .distinct()
+                .collect(Collectors.joining(", "));
+
+        score.getNotes().add(catalog.note("PARTIAL_RESULT", nomes));
     }
 }

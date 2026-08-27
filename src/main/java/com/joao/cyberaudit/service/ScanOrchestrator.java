@@ -11,6 +11,7 @@ import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.*;
 
 @Service
@@ -238,7 +239,7 @@ public class ScanOrchestrator {
         // Status por módulo — distingue "verificado" de "não concluído" (ver moduleState).
         Map<String, String> moduleStatus = new LinkedHashMap<>();
         // Fetch principal já rodou na fase 1: erro aqui = headers não verificados (vide ScoreService).
-        moduleStatus.put("HTTP fetch / headers", fetch.getError() != null ? "ERROR" : "OK");
+        moduleStatus.put(ScanCheck.HTTP_FETCH.name(), fetch.getError() != null ? "ERROR" : "OK");
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
                             () -> robotsTxtService.findSensitivePaths(target), passivePool)
@@ -292,20 +293,20 @@ public class ScanOrchestrator {
             fingerprintPool.shutdownNow();
 
             // ── Status dos módulos passivos ───────────────────────────────────
-            moduleStatus.put("robots.txt",          moduleState(robotsFuture));
-            moduleStatus.put("security.txt",        moduleState(secTxtFuture));
-            moduleStatus.put("DNS / email auth",    moduleState(dnsFuture));
-            moduleStatus.put("HTTP methods",        moduleState(methodsFuture));
-            moduleStatus.put("Directory listing",   moduleState(dirListFuture));
-            moduleStatus.put("Subdomain takeover",  moduleState(takeoverFuture));
-            moduleStatus.put("Source maps / debug", moduleState(sourceMapFuture));
-            moduleStatus.put("Host header",         moduleState(hostHeaderFuture));
-            moduleStatus.put("API docs",            moduleState(apiDocsFuture));
-            moduleStatus.put("GraphQL",             moduleState(graphQlFuture));
-            moduleStatus.put("Cert Transparency",   moduleState(certTransFuture));
-            moduleStatus.put("Tech fingerprint",    moduleState(fingerprintFuture));
-            moduleStatus.put("CVE correlation",     moduleState(cveFuture));
-            moduleStatus.put("Related hosts headers", moduleState(relatedHostsFuture));
+            moduleStatus.put(ScanCheck.ROBOTS.name(),            moduleState(robotsFuture));
+            moduleStatus.put(ScanCheck.SECURITY_TXT.name(),      moduleState(secTxtFuture));
+            moduleStatus.put(ScanCheck.DNS_EMAIL.name(),         moduleState(dnsFuture));
+            moduleStatus.put(ScanCheck.HTTP_METHODS.name(),      moduleState(methodsFuture));
+            moduleStatus.put(ScanCheck.DIRECTORY_LISTING.name(), moduleState(dirListFuture));
+            moduleStatus.put(ScanCheck.SUBDOMAIN_TAKEOVER.name(),moduleState(takeoverFuture));
+            moduleStatus.put(ScanCheck.SOURCE_MAPS.name(),       moduleState(sourceMapFuture));
+            moduleStatus.put(ScanCheck.HOST_HEADER.name(),       moduleState(hostHeaderFuture));
+            moduleStatus.put(ScanCheck.API_DOCS.name(),          moduleState(apiDocsFuture));
+            moduleStatus.put(ScanCheck.GRAPHQL.name(),           moduleState(graphQlFuture));
+            moduleStatus.put(ScanCheck.CERT_TRANSPARENCY.name(),moduleState(certTransFuture));
+            moduleStatus.put(ScanCheck.TECH_FINGERPRINT.name(), moduleState(fingerprintFuture));
+            moduleStatus.put(ScanCheck.CVE.name(),               moduleState(cveFuture));
+            moduleStatus.put(ScanCheck.RELATED_HOSTS.name(),     moduleState(relatedHostsFuture));
 
             List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
@@ -335,11 +336,12 @@ public class ScanOrchestrator {
                     List.of(), List.of(), hostHeaderFindings, sourceMapFindings, List.of()
             );
 
-            appendDegradedNote(passiveScore, moduleStatus);
+            scoreService.appendPartialNote(passiveScore, naoConcluidas(moduleStatus));
 
             // ── Monta resultado passivo ────────────────────────────────────────
             ScanResult passiveResult = ScanResult.builder()
                     .lang(idiomaDaRequisicao())
+                    .degradedModules(modulosDegradados(moduleStatus))
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
@@ -456,20 +458,20 @@ public class ScanOrchestrator {
 
             // ── Status dos módulos ativos ─────────────────────────────────────
             // Probes dependentes de superfície de input (query params): SKIPPED quando ausentes.
-            moduleStatus.put("CORS",                moduleState(corsFuture));
-            moduleStatus.put("Sensitive files",     moduleState(filesFuture));
-            moduleStatus.put("WAF",                 moduleState(wafFuture));
-            moduleStatus.put("Open redirect",       moduleState(redirectFuture));
-            moduleStatus.put("CRLF injection",      moduleState(crlfFuture));
-            moduleStatus.put("Port scan",
+            moduleStatus.put(ScanCheck.CORS.name(),            moduleState(corsFuture));
+            moduleStatus.put(ScanCheck.SENSITIVE_FILES.name(), moduleState(filesFuture));
+            moduleStatus.put(ScanCheck.WAF.name(),             moduleState(wafFuture));
+            moduleStatus.put(ScanCheck.OPEN_REDIRECT.name(),   moduleState(redirectFuture));
+            moduleStatus.put(ScanCheck.CRLF.name(),            moduleState(crlfFuture));
+            moduleStatus.put(ScanCheck.PORT_SCAN.name(),
                     (host != null && !host.isBlank()) ? moduleState(portFuture) : "SKIPPED");
-            moduleStatus.put("Reflected XSS",
+            moduleStatus.put(ScanCheck.REFLECTED_XSS.name(),
                     inputSurfaceDetected ? moduleState(xssFuture) : "SKIPPED");
-            moduleStatus.put("DB error disclosure",
+            moduleStatus.put(ScanCheck.DB_ERROR.name(),
                     inputSurfaceDetected ? moduleState(dbFuture) : "SKIPPED");
-            moduleStatus.put("Path traversal",
+            moduleStatus.put(ScanCheck.PATH_TRAVERSAL.name(),
                     inputSurfaceDetected ? moduleState(pathTraversalFuture) : "SKIPPED");
-            moduleStatus.put("SSRF",
+            moduleStatus.put(ScanCheck.SSRF.name(),
                     inputSurfaceDetected ? moduleState(ssrfFuture) : "SKIPPED");
 
             CorsResult                 corsResult            = corsFuture.getNow(null);
@@ -496,10 +498,11 @@ public class ScanOrchestrator {
                     pathTraversal, ssrfFindings, hostHeaderFindings, sourceMapFindings, crlfFindings
             );
 
-            appendDegradedNote(score, moduleStatus);
+            scoreService.appendPartialNote(score, naoConcluidas(moduleStatus));
 
             ScanResult result = ScanResult.builder()
                     .lang(idiomaDaRequisicao())
+                    .degradedModules(modulosDegradados(moduleStatus))
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
@@ -594,20 +597,36 @@ public class ScanOrchestrator {
     }
 
     /**
-     * Anexa uma nota de transparência ao score quando algum módulo não concluiu.
-     * Não penaliza pontos — não é justo descontar pela nossa própria falha de coleta —
-     * mas deixa explícito que o resultado é parcial.
+     * Verificações que não concluíram — timeout ou erro.
+     *
+     * SKIPPED fica de fora: é decisão do scan (probe de injeção sem parâmetro para
+     * injetar, port scan sem host), não falha de coleta. Avisar sobre o que foi
+     * deliberadamente pulado transformaria a nota em ruído e ensinaria o cliente a
+     * ignorá-la.
      */
-    private static void appendDegradedNote(ScoreResult score, Map<String, String> moduleStatus) {
-        if (score == null || score.getNotes() == null) return;
-        long degraded = moduleStatus.values().stream()
-                .filter(s -> "TIMEOUT".equals(s) || "ERROR".equals(s))
-                .count();
-        if (degraded > 0) {
-            score.getNotes().add("⚠ Resultado parcial: " + degraded + " verificação(ões) "
-                    + "não concluída(s) (timeout). A ausência de achados nesses módulos NÃO "
-                    + "significa ausência de risco.");
-        }
+    private static List<ScanCheck> naoConcluidas(Map<String, String> moduleStatus) {
+        return moduleStatus.entrySet().stream()
+                .filter(e -> "TIMEOUT".equals(e.getValue()) || "ERROR".equals(e.getValue()))
+                .map(e -> {
+                    try { return ScanCheck.valueOf(e.getKey()); }
+                    catch (IllegalArgumentException ex) { return null; }
+                })
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * Módulos da barra lateral com alguma verificação não concluída.
+     *
+     * Sem isto a barra lateral marcava ✓ verde num módulo cuja verificação nunca
+     * rodou — afirmando "seguro" sobre o que o scan não chegou a apurar, que é o
+     * pior tipo de erro num produto de auditoria.
+     */
+    private static List<String> modulosDegradados(Map<String, String> moduleStatus) {
+        return naoConcluidas(moduleStatus).stream()
+                .map(ScanCheck::moduloUi)
+                .distinct()
+                .toList();
     }
 
     private String normalizeUrl(String url) {

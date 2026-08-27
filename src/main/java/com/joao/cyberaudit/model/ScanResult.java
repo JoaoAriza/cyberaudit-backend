@@ -85,10 +85,27 @@ public class ScanResult {
     private ScoreResult score;
 
     /**
-     * Status de execução por módulo: nome → "OK" | "TIMEOUT" | "SKIPPED".
-     * Distingue "verificado e sem achado" de "não conseguiu verificar".
+     * Status de execução por verificação: {@link ScanCheck#name()} → "OK" | "TIMEOUT"
+     * | "ERROR" | "SKIPPED". Distingue "verificado e sem achado" de "não conseguiu
+     * verificar".
+     *
+     * A chave era prosa em inglês ("HTTP fetch / headers"). Virou id de enum porque
+     * texto solto não dá para traduzir nem para casar com o módulo da interface —
+     * e era por não casar que a barra lateral marcava ✓ em módulo não verificado.
      */
     private Map<String, String> moduleStatus;
+
+    /**
+     * Ids de módulo da barra lateral com alguma verificação não concluída.
+     *
+     * Derivado do {@code moduleStatus} pelo {@code ScanCheck.moduloUi()}. Vem pronto
+     * do Backend, e não montado no Frontend, porque quem sabe qual verificação
+     * alimenta qual módulo é quem as executa — uma tabela paralela na interface
+     * envelheceria em silêncio na primeira verificação nova.
+     *
+     * Só timeout e erro entram. SKIPPED não: é decisão do scan, não falha de coleta.
+     */
+    private List<String> degradedModules;
 
     /**
      * Headers de segurança de hosts relacionados (api., server., www. ...) — informativo,

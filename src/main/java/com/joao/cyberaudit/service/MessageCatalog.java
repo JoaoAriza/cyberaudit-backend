@@ -59,6 +59,16 @@ public class MessageCatalog {
     }
 
     /**
+     * Nome de exibição de uma verificação do scan — {@code ScanCheck}.
+     *
+     * Prefixo próprio porque não é achado nem nota: é o rótulo do que rodou, e
+     * aparece quando o scan precisa dizer o que NÃO conseguiu verificar.
+     */
+    public String check(String chave, Object... args) {
+        return prefixado("check.", chave, args);
+    }
+
+    /**
      * Texto dos e-mails — assunto e corpo.
      *
      * A estrutura HTML fica no {@link EmailService}: só a prosa vem daqui. Marcação
