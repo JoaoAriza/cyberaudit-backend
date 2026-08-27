@@ -65,6 +65,23 @@ public class ScanResult {
     private List<SourceMapFinding>            sourceMapFindings;
     private List<CrlfFinding>                crlfFindings;
 
+    /**
+     * Idioma em que os textos deste resultado foram montados (subtag: "pt", "en").
+     *
+     * O título, o impacto e a correção de cada achado são texto pronto, montado no
+     * idioma da requisição e guardado assim — no cache, no histórico e no laudo do
+     * agendamento. Quem lê depois em outro idioma vê a interface traduzida e os
+     * achados no idioma de origem.
+     *
+     * Carimbar aqui é o que permite a tela AVISAR em vez de fingir que acompanhou a
+     * troca. Some no JSON dos registros antigos, que não têm o carimbo — nesse caso
+     * a tela não afirma nada, que é a resposta honesta para "não sei".
+     *
+     * O conserto de raiz é o resultado guardar ID + parâmetros e o texto ser
+     * resolvido na saída; é mudança de contrato e continua em aberto.
+     */
+    private String lang;
+
     private ScoreResult score;
 
     /**

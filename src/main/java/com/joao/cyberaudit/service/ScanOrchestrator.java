@@ -339,6 +339,7 @@ public class ScanOrchestrator {
 
             // ── Monta resultado passivo ────────────────────────────────────────
             ScanResult passiveResult = ScanResult.builder()
+                    .lang(idiomaDaRequisicao())
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
@@ -498,6 +499,7 @@ public class ScanOrchestrator {
             appendDegradedNote(score, moduleStatus);
 
             ScanResult result = ScanResult.builder()
+                    .lang(idiomaDaRequisicao())
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
@@ -641,6 +643,19 @@ public class ScanOrchestrator {
      * Usa só o idioma, não o locale inteiro: en-US e en-GB leem o mesmo catálogo e
      * não têm motivo para ocupar entradas separadas.
      */
+    /**
+     * Idioma em que os textos deste scan estão sendo montados.
+     *
+     * Mesma fonte da chave de cache, de propósito: se as duas divergissem, o
+     * resultado servido de cache viria carimbado com um idioma que não é o dele.
+     * Vale nos três caminhos — o síncrono roda na thread da requisição, o assíncrono
+     * propaga o locale, e o agendado o define a partir do que ficou guardado no
+     * agendamento ({@code ScheduledScanService.idiomaDe}).
+     */
+    private String idiomaDaRequisicao() {
+        return LocaleContextHolder.getLocale().getLanguage();
+    }
+
     private String buildCacheKey(String url, boolean active) {
         String h = extractHostSafe(url);
         return CACHE_VERSION + ":scan:" + (h != null ? h : url) + ":active=" + active

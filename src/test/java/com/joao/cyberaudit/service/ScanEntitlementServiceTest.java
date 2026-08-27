@@ -59,6 +59,7 @@ class ScanEntitlementServiceTest {
 
         return ScanResult.builder()
                 .url("https://example.com")
+                .lang("pt")
                 .score(new ScoreResult(70, RiskLevel.MEDIUM, List.of("nota do breakdown"), issues))
                 .build();
     }
@@ -80,6 +81,17 @@ class ScanEntitlementServiceTest {
         assertNull(issue(r, "A").getTitle(), "CRITICAL não pode entregar o título");
         assertNull(issue(r, "B").getTitle(), "HIGH não pode entregar o título");
         assertNull(issue(r, "C").getTitle(), "MEDIUM não pode entregar o título");
+    }
+
+    @Test
+    @DisplayName("o carimbo de idioma sobrevive ao gating — a cópia é por toBuilder, não campo a campo")
+    void carimboDeIdiomaSobreviveAoGating() {
+        // A cópia do gating é `toBuilder()`, que copia tudo. Se algum dia virar
+        // construção campo a campo, o `lang` cai fora em silêncio — e a tela para de
+        // avisar que o laudo está em outro idioma, sem nada quebrar.
+        ScanResult r = service().applyEntitlement(resultado(), usuario(Plan.FREE));
+
+        assertEquals("pt", r.getLang());
     }
 
     @Test
