@@ -20,26 +20,60 @@ import java.util.regex.Pattern;
 public class SourceMapService {
 
     /**
-     * Endpoints Actuator de alta severidade — expõem config, secrets, heap.
+     * Endpoint Actuator sondado, com o que confirma que ele é mesmo um Actuator.
+     *
+     * @param chave    id no catálogo de mensagens ({@code evidence.<chave>})
+     * @param markers  chaves JSON que a resposta DAQUELE endpoint tem de conter,
+     *                 em minúsculas. Específicas por endpoint de propósito — ver
+     *                 o javadoc de {@link #probeActuator}.
      */
-    private static final List<String[]> ACTUATOR_HIGH = List.of(
-            new String[]{ "/actuator/env",      "Spring Boot env — expõe variáveis de ambiente e segredos" },
-            new String[]{ "/actuator/beans",     "Spring Boot beans — lista todos os beans da aplicação" },
-            new String[]{ "/actuator/heapdump",  "Spring Boot heapdump — dump da heap da JVM" },
-            new String[]{ "/actuator/threaddump","Spring Boot threaddump — threads da JVM" },
-            new String[]{ "/actuator/loggers",   "Spring Boot loggers — configuração de logs" },
-            new String[]{ "/actuator/mappings",  "Spring Boot mappings — lista todos os endpoints" }
-    );
+    record ActuatorTarget(String path, String severity, String chave, List<String> markers) {}
 
     /**
-     * Endpoints Actuator de média severidade.
+     * Endpoints do Spring Boot Actuator, com o formato real de cada resposta.
+     *
+     * <h2>Por que os marcadores são por endpoint</h2>
+     *
+     * Havia UMA lista global de marcadores genéricos, casada por substring contra o
+     * corpo inteiro. Um deles era {@code "status"} — e o perfil
+     * {@code github.com/actuator} foi reportado como "Actuator exposto" porque o HTML
+     * do GitHub tem <b>{@code role="status"}</b>, um atributo de acessibilidade.
+     *
+     * Confirmar {@code /actuator/env} com um marcador que só existe em
+     * {@code /actuator/health} nunca fez sentido; o que salvava era a coincidência de
+     * os dois serem JSON. Agora cada endpoint é confirmado pelo que ELE devolve.
      */
-    private static final List<String[]> ACTUATOR_MEDIUM = List.of(
-            new String[]{ "/actuator",           "Spring Boot Actuator — endpoint raiz exposto" },
-            new String[]{ "/actuator/info",      "Spring Boot info — metadados da aplicação" },
-            new String[]{ "/actuator/metrics",   "Spring Boot metrics — métricas da aplicação" },
-            new String[]{ "/actuator/conditions","Spring Boot conditions — diagnóstico de autoconfigure" }
+    static final List<ActuatorTarget> ACTUATOR_ENDPOINTS = List.of(
+            // Alta severidade — expõem config, segredos, heap.
+            new ActuatorTarget("/actuator/env",        "HIGH", "ACTUATOR_ENV",
+                    List.of("\"propertysources\"", "\"activeprofiles\"")),
+            new ActuatorTarget("/actuator/beans",      "HIGH", "ACTUATOR_BEANS",
+                    List.of("\"beans\"")),
+            // Binário (HPROF), não JSON — tratado à parte em probeActuator.
+            new ActuatorTarget("/actuator/heapdump",   "HIGH", "ACTUATOR_HEAPDUMP",
+                    List.of()),
+            new ActuatorTarget("/actuator/threaddump", "HIGH", "ACTUATOR_THREADDUMP",
+                    List.of("\"threads\"", "\"threadname\"")),
+            new ActuatorTarget("/actuator/loggers",    "HIGH", "ACTUATOR_LOGGERS",
+                    List.of("\"loggers\"", "\"levels\"")),
+            new ActuatorTarget("/actuator/mappings",   "HIGH", "ACTUATOR_MAPPINGS",
+                    List.of("\"mappings\"", "\"dispatcherservlets\"")),
+
+            // Média severidade.
+            new ActuatorTarget("/actuator",            "MEDIUM", "ACTUATOR_ROOT",
+                    List.of("\"_links\"")),
+            // `/actuator/info` responde `{}` quando nada foi configurado. Sem build/git
+            // não há informação exposta — e achado sem nada exposto é ruído.
+            new ActuatorTarget("/actuator/info",       "MEDIUM", "ACTUATOR_INFO",
+                    List.of("\"build\"", "\"git\"", "\"app\"")),
+            new ActuatorTarget("/actuator/metrics",    "MEDIUM", "ACTUATOR_METRICS",
+                    List.of("\"names\"")),
+            new ActuatorTarget("/actuator/conditions", "MEDIUM", "ACTUATOR_CONDITIONS",
+                    List.of("\"positivematches\"", "\"negativematches\""))
     );
+
+    /** Assinatura de um heap dump HPROF — os primeiros bytes do arquivo. */
+    private static final String HPROF_MAGIC = "JAVA PROFILE";
 
     /**
      * Endpoints de debug/profiler de frameworks web.
@@ -51,35 +85,35 @@ public class SourceMapService {
      * em confirmsDebugContent().
      */
     private static final List<DebugTarget> DEBUG_ENDPOINTS = List.of(
-            new DebugTarget("/_profiler",            "Symfony Profiler exposto",
+            new DebugTarget("/_profiler",            "DEBUG_SYMFONY_PROFILER",
                     List.of("sf-toolbar", "symfony profiler", "sf-profiler", "/_profiler/")),
-            new DebugTarget("/_profiler/phpinfo",    "Symfony phpinfo exposto",
+            new DebugTarget("/_profiler/phpinfo",    "DEBUG_SYMFONY_PHPINFO",
                     List.of("php version", "phpinfo()", "zend engine")),
-            new DebugTarget("/debug/default/view",   "Yii2 Debug Toolbar exposto",
+            new DebugTarget("/debug/default/view",   "DEBUG_YII2",
                     List.of("yii debugger", "/debug/default/")),
-            new DebugTarget("/__debugbar/open",      "Laravel Debugbar exposto",
+            new DebugTarget("/__debugbar/open",      "DEBUG_LARAVEL_DEBUGBAR",
                     List.of("debugbar", "\"__meta\"", "\"php\":")),
-            new DebugTarget("/console",              "Console interativo exposto",
+            new DebugTarget("/console",              "DEBUG_CONSOLE",
                     List.of("werkzeug", "h2 console", "interactive console", "wsgi")),
-            new DebugTarget("/telescope",            "Laravel Telescope exposto",
+            new DebugTarget("/telescope",            "DEBUG_TELESCOPE",
                     List.of("/vendor/telescope", "window.telescope", "laravel telescope")),
-            new DebugTarget("/horizon",              "Laravel Horizon exposto",
+            new DebugTarget("/horizon",              "DEBUG_HORIZON",
                     List.of("/vendor/horizon", "window.horizon", "laravel horizon")),
-            new DebugTarget("/phpinfo.php",          "phpinfo() exposto",
+            new DebugTarget("/phpinfo.php",          "DEBUG_PHPINFO",
                     List.of("php version", "phpinfo()", "zend engine")),
-            new DebugTarget("/info.php",             "phpinfo() exposto",
+            new DebugTarget("/info.php",             "DEBUG_PHPINFO",
                     List.of("php version", "phpinfo()", "zend engine")),
-            new DebugTarget("/server-info",          "Informação de servidor exposta",
+            new DebugTarget("/server-info",          "DEBUG_SERVER_INFO",
                     List.of("apache server information", "server settings")),
-            new DebugTarget("/.env",                 "Arquivo .env exposto",
+            new DebugTarget("/.env",                 "DEBUG_ENV_FILE",
                     List.of()),
-            new DebugTarget("/config.json",          "Arquivo de config JSON exposto",
+            new DebugTarget("/config.json",          "DEBUG_CONFIG_JSON",
                     List.of()),
-            new DebugTarget("/app/config.json",      "Arquivo de config da aplicação exposto",
+            new DebugTarget("/app/config.json",      "DEBUG_APP_CONFIG",
                     List.of()),
-            new DebugTarget("/rails/info/properties","Rails info exposto",
+            new DebugTarget("/rails/info/properties","DEBUG_RAILS_INFO",
                     List.of("ruby version", "rails version", "rack version")),
-            new DebugTarget("/rails/info/routes",    "Rails routes exposto",
+            new DebugTarget("/rails/info/routes",    "DEBUG_RAILS_ROUTES",
                     List.of("controller#action", "uri pattern"))
     );
 
@@ -91,15 +125,11 @@ public class SourceMapService {
             Pattern.CASE_INSENSITIVE
     );
 
-    /**
-     * Marcadores que confirmam que um endpoint Actuator/debug está acessível
-     * (e não retornou 404 ou redirect para login).
-     */
-    private static final Set<String> ACTUATOR_MARKERS = Set.of(
-            "\"status\"", "\"components\"", "\"beans\"", "\"contexts\"",
-            "\"mappings\"", "\"dispatcherServlets\"", "\"_links\"",
-            "\"loggers\"", "\"metrics\"", "\"info\""
-    );
+    private final MessageCatalog catalog;
+
+    public SourceMapService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
 
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -119,15 +149,9 @@ public class SourceMapService {
         // 1. Source maps via headers e arquivos .map
         findings.addAll(scanSourceMaps(targetUrl, base));
 
-        // 2. Spring Boot Actuator — alta severidade
-        for (String[] entry : ACTUATOR_HIGH) {
-            SourceMapFinding f = probeEndpoint(base + entry[0], "ACTUATOR", "HIGH", entry[1]);
-            if (f != null) findings.add(f);
-        }
-
-        // 3. Spring Boot Actuator — média severidade
-        for (String[] entry : ACTUATOR_MEDIUM) {
-            SourceMapFinding f = probeEndpoint(base + entry[0], "ACTUATOR", "MEDIUM", entry[1]);
+        // 2. Spring Boot Actuator
+        for (ActuatorTarget entry : ACTUATOR_ENDPOINTS) {
+            SourceMapFinding f = probeActuator(base + entry.path(), entry);
             if (f != null) findings.add(f);
         }
 
@@ -227,7 +251,29 @@ public class SourceMapService {
 
     // ── Actuator / Debug Endpoint Detection ──────────────────────────────────
 
-    private SourceMapFinding probeEndpoint(String url, String type, String severity, String description) {
+    /**
+     * Sonda um endpoint do Actuator, em três barreiras.
+     *
+     * <ol>
+     *   <li><b>Não pode ser HTML.</b> Actuator serve JSON
+     *       ({@code application/vnd.spring-boot.actuator.v3+json}); nenhuma resposta
+     *       {@code text/html} é um Actuator. Só esta barreira já derruba o caso que
+     *       originou a correção — {@code github.com/actuator} é o perfil de um usuário
+     *       chamado "actuator", HTTP 200 e HTML;</li>
+     *   <li><b>Tem de parecer JSON</b> — content-type de JSON, ou corpo começando em
+     *       <code>{</code>/<code>[</code>;</li>
+     *   <li><b>Marcador do PRÓPRIO endpoint.</b> Antes bastava um marcador genérico
+     *       qualquer, casado por substring: {@code "status"} casava com o
+     *       {@code role="status"} de qualquer página acessível.</li>
+     * </ol>
+     *
+     * O heapdump é a exceção: é binário (HPROF), não JSON, e se identifica pela
+     * assinatura no início do arquivo.
+     *
+     * Na dúvida, descarta. Falso negativo custa um achado; falso positivo custa a
+     * credibilidade do laudo inteiro — e é o cliente que descobre, como aqui.
+     */
+    private SourceMapFinding probeActuator(String url, ActuatorTarget target) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
@@ -242,30 +288,41 @@ public class SourceMapService {
 
             String body  = resp.body() == null ? "" : resp.body();
             String lower = body.toLowerCase(Locale.ROOT);
+            String contentType = resp.headers()
+                    .firstValue("content-type").orElse("").toLowerCase(Locale.ROOT);
 
-            // Anti-FP: deve ter conteúdo relevante — não apenas uma página 200 genérica.
-            // Debug endpoints usam probeDebugEndpoint() com markers próprios; aqui só Actuator.
-            boolean confirmed = false;
-            if ("ACTUATOR".equals(type)) {
-                for (String marker : ACTUATOR_MARKERS) {
-                    if (lower.contains(marker.toLowerCase(Locale.ROOT))) {
-                        confirmed = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!confirmed) return null;
+            if (!confirmaActuator(target, body, lower, contentType)) return null;
 
             return SourceMapFinding.builder()
-                    .type(type)
+                    .type("ACTUATOR")
                     .url(url)
-                    .evidence(description + " (HTTP " + status + ")")
-                    .severity(severity)
+                    .evidence(catalog.evidence(target.chave()) + " (HTTP " + status + ")")
+                    .severity(target.severity())
                     .build();
 
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /** As três barreiras descritas em {@link #probeActuator}. */
+    boolean confirmaActuator(ActuatorTarget t, String body, String lower, String contentType) {
+        // Heapdump: binário, identificado pela assinatura HPROF. Antes ele nunca era
+        // reportado — nenhum marcador JSON casa com um dump binário —, então o achado
+        // mais grave da família era o único que não funcionava.
+        if (t.markers().isEmpty()) {
+            return body.startsWith(HPROF_MAGIC)
+                    || contentType.contains("application/octet-stream") && body.length() > 512;
+        }
+
+        if (contentType.contains("text/html")
+                || lower.contains("<!doctype html") || lower.contains("<html")) return false;
+
+        String trimmed = body.trim();
+        boolean pareceJson = contentType.contains("json")
+                || trimmed.startsWith("{") || trimmed.startsWith("[");
+        if (!pareceJson) return false;
+
+        return t.markers().stream().anyMatch(lower::contains);
     }
 
     /**
@@ -295,7 +352,7 @@ public class SourceMapService {
             return SourceMapFinding.builder()
                     .type("DEBUG_ENDPOINT")
                     .url(url)
-                    .evidence(target.description() + " (HTTP " + status + ")")
+                    .evidence(catalog.evidence(target.chave()) + " (HTTP " + status + ")")
                     .severity("MEDIUM")
                     .build();
 
@@ -384,5 +441,6 @@ public class SourceMapService {
     }
 
     /** Endpoint de debug com marcadores de confirmação específicos da ferramenta. */
-    private record DebugTarget(String path, String description, List<String> markers) {}
+    /** @param chave id no catálogo — {@code evidence.<chave>} */
+    private record DebugTarget(String path, String chave, List<String> markers) {}
 }

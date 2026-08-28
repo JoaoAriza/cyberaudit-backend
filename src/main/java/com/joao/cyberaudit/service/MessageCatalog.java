@@ -69,6 +69,18 @@ public class MessageCatalog {
     }
 
     /**
+     * Evidência de um achado — o que foi encontrado, em uma linha.
+     *
+     * Prefixo próprio porque não é o achado nem a nota: é o detalhe concreto que
+     * aparece dentro do card ("Spring Boot Actuator — endpoint raiz exposto").
+     * Nasceu chumbado em português nos serviços de sonda e saía assim no laudo em
+     * inglês.
+     */
+    public String evidence(String chave, Object... args) {
+        return prefixado("evidence.", chave, args);
+    }
+
+    /**
      * Texto dos e-mails — assunto e corpo.
      *
      * A estrutura HTML fica no {@link EmailService}: só a prosa vem daqui. Marcação
