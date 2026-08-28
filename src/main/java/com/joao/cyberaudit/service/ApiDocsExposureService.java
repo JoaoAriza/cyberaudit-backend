@@ -117,14 +117,25 @@ public class ApiDocsExposureService {
      * SPAs como Next.js e Nuxt retornam HTTP 200 para qualquer path com HTML generico.
      * Exigimos marcadores especificos que so aparecem em docs reais.
      */
-    private String matchEvidence(String type, String lower, String contentType) {
+    String matchEvidence(String type, String lower, String contentType) {
         return switch (type) {
             case "SWAGGER_UI" -> {
-                // Swagger UI real contem o bundle JS ou titulos especificos
+                // O Swagger UI tem de estar RODANDO ali — não basta a página citar o
+                // nome. A regra antiga era `contains("swagger-ui") && contains("<title")`,
+                // ou seja: "é HTML e menciona swagger-ui em algum lugar". Foi assim que
+                // github.com/swagger-ui.html — o perfil de um usuário chamado
+                // "swagger-ui" — virou achado: o nome aparece 47 vezes na página, e
+                // nenhuma delas é o Swagger UI.
+                //
+                // O que prova execução é o ASSET que a ferramenta carrega, ou o nó do
+                // DOM em que ela monta.
                 if (lower.contains("swaggeruibundle") || lower.contains("swagger-ui-bundle"))
                     yield "SwaggerUIBundle detectado";
-                if (lower.contains("swagger-ui") && lower.contains("<title"))
-                    yield "Swagger UI HTML detectado";
+                if (lower.contains("swagger-ui.css") || lower.contains("swagger-ui-standalone-preset"))
+                    yield "Assets do Swagger UI carregados";
+                if (lower.contains("id=\"swagger-ui\"") || lower.contains("id='swagger-ui'"))
+                    yield "Container do Swagger UI presente";
+                // Spec embutida na própria página: é a definição da API, não uma menção.
                 if (lower.contains("\"swagger\"") && lower.contains("\"paths\""))
                     yield "Swagger spec inline detectado";
                 yield null;

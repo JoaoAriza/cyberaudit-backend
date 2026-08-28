@@ -40,16 +40,43 @@ public class GraphQlIntrospectionService {
     );
 
     /**
-     * Strings presentes em UIs interativas de GraphQL.
-     * GraphiQL e GraphQL Playground sao as mais comuns.
+     * Marcadores de que uma UI interativa de GraphQL está RODANDO nesta página.
+     *
+     * Eram os nomes das ferramentas em texto puro — "graphiql", "graphql playground".
+     * Mas citar o nome não é servir a ferramenta: github.com/graphql é o perfil da
+     * organização GraphQL, e a palavra "graphiql" aparece 14 vezes ali (é o nome de um
+     * dos repositórios). O endpoint foi reportado como playground exposto, HIGH, -8.
+     *
+     * Agora cada marcador é um ASSET que a UI carrega ou o NÓ DO DOM em que ela monta —
+     * coisas que só existem na página onde a ferramenta de fato roda.
      */
     private static final List<String> PLAYGROUND_MARKERS = List.of(
-            "graphiql",
-            "graphql-playground",
-            "graphql playground",
-            "graphql voyager",
-            "altair graphql"
+            // GraphiQL: monta em <div id="graphiql"> e carrega seus próprios assets.
+            "id=\"graphiql\"", "id='graphiql'",
+            "graphiql.min.js", "graphiql.min.css", "graphiql/graphiql.css",
+            "rendergraphiql", "graphiql.createfetcher",
+            // GraphQL Playground: bundle e ponto de montagem próprios.
+            "graphql-playground-react", "graphqlplayground",
+            // Voyager e Altair.
+            "graphql-voyager", "altair-graphql", "altair.js"
     );
+
+    /**
+     * Marcador de UI interativa no corpo, ou null.
+     *
+     * Só considera HTML: uma resposta JSON é a API respondendo, não a interface.
+     * Método à parte, e visível ao pacote, para o teste poder exercitar a decisão sem
+     * rede — o {@code ScannerHttp} valida no SsrfGuard e recusa localhost, então um
+     * servidor de teste local nunca chega a ser consultado por este serviço.
+     */
+    String playgroundMarker(String bodyLower, String contentType) {
+        if (!contentType.contains("text/html") && !bodyLower.contains("<!doctype html")) return null;
+
+        return PLAYGROUND_MARKERS.stream()
+                .filter(bodyLower::contains)
+                .findFirst()
+                .orElse(null);
+    }
 
     private static final Pattern TYPE_COUNT_PATTERN =
             Pattern.compile("\"name\"\\s*:", Pattern.CASE_INSENSITIVE);
@@ -139,15 +166,10 @@ public class GraphQlIntrospectionService {
                 String ct       = getResp.headers()
                         .firstValue("content-type").orElse("").toLowerCase(Locale.ROOT);
 
-                // So considera playground se o response for HTML (nao JSON)
-                if (ct.contains("text/html") || getLower.contains("<!doctype html")) {
-                    for (String marker : PLAYGROUND_MARKERS) {
-                        if (getLower.contains(marker)) {
-                            playgroundExposed  = true;
-                            playgroundEvidence = "UI marker: \"" + marker + "\"";
-                            break;
-                        }
-                    }
+                String marker = playgroundMarker(getLower, ct);
+                if (marker != null) {
+                    playgroundExposed  = true;
+                    playgroundEvidence = "UI marker: \"" + marker + "\"";
                 }
             }
         } catch (Exception ignored) {}

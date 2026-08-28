@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 @Service
 public class CrlfService {
@@ -22,6 +23,13 @@ public class CrlfService {
      */
     private static final String PROBE_HEADER_NAME  = "X-CyberAudit-Test";
     private static final String PROBE_HEADER_VALUE = "crlf-probe-7x3k";
+
+    /**
+     * Linha de status HTTP crua — "HTTP/1.1 200". Dentro do CORPO, é assinatura de
+     * resposta partida: nenhuma página legítima serve isso como conteúdo.
+     */
+    private static final Pattern STATUS_LINE_CRUA =
+            Pattern.compile("http/[0-9.]+\\s+[0-9]{3}");
 
     /**
      * Payloads em ordem de prioridade.
@@ -189,15 +197,34 @@ public class CrlfService {
                     .build();
         }
 
-        // Fallback: verifica reflexão do probe no body
-        String body = resp.body() == null ? "" : resp.body();
-        if (body.toLowerCase(Locale.ROOT).contains(PROBE_HEADER_VALUE.toLowerCase(Locale.ROOT))
-                && body.toLowerCase(Locale.ROOT).contains(PROBE_HEADER_NAME.toLowerCase(Locale.ROOT))) {
+        // ── Probe no CORPO ────────────────────────────────────────────────────
+        //
+        // Reflexão no corpo, sozinha, NÃO é CRLF injection.
+        //
+        // Bastava o probe aparecer no corpo para o achado sair como HIGH e descontar
+        // 12 pontos. Mas o corpo é onde o servidor ECOA a entrada — é o que qualquer
+        // página de erro faz ao dizer "não encontramos /<caminho>". Nesse caso o CRLF
+        // não foi interpretado: virou texto dentro do HTML, que é exatamente o
+        // contrário do que o achado afirma. Response splitting é sobre a resposta ser
+        // PARTIDA, e isso só se prova nos headers.
+        //
+        // Existe um caso em que o corpo é evidência: quando o split ocorreu de fato e
+        // o cliente HTTP passou a ler a resposta injetada como corpo. Aí o corpo traz
+        // uma LINHA DE STATUS HTTP crua junto do probe — página nenhuma tem isso. É
+        // esse caso, e só ele, que continua valendo.
+        String body  = resp.body() == null ? "" : resp.body();
+        String lower = body.toLowerCase(Locale.ROOT);
+
+        boolean probeNoCorpo = lower.contains(PROBE_HEADER_VALUE.toLowerCase(Locale.ROOT))
+                && lower.contains(headerLower);
+
+        if (probeNoCorpo && STATUS_LINE_CRUA.matcher(lower).find()) {
             return CrlfFinding.builder()
                     .parameter(parameter)
                     .payload(payload)
-                    .injectionType(injectionType + "_BODY")
-                    .evidence("Header probe refletido no body da resposta")
+                    .injectionType(injectionType + "_SPLIT")
+                    .evidence("Resposta partida: linha de status HTTP e o header probe "
+                            + "aparecem no corpo")
                     .severity("HIGH")
                     .build();
         }
