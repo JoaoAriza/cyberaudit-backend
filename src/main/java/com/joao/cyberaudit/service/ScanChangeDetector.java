@@ -14,6 +14,12 @@ import java.util.stream.Collectors;
 @Service
 public class ScanChangeDetector {
 
+    private final MessageCatalog catalog;
+
+    public ScanChangeDetector(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     public List<ScanChange> detect(ScanResult current, ScanResult previous) {
         if (previous == null) return List.of();
 
@@ -55,8 +61,11 @@ public class ScanChangeDetector {
                 .oldValue(prevScore + "/100")
                 .newValue(curScore + "/100")
                 .severity(severity)
-                .description(String.format("Score %s de %d → %d (%+d pontos)",
-                        delta > 0 ? "subiu" : "caiu", prevScore, curScore, delta))
+                // Duas chaves em vez de uma com o verbo interpolado: "subiu"/"caiu"
+                // são texto, e texto interpolado não passa por tradutor nenhum.
+                .description(delta > 0
+                        ? catalog.change("SCORE_UP",   prevScore, curScore, delta)
+                        : catalog.change("SCORE_DOWN", prevScore, curScore, delta))
                 .build());
     }
 
@@ -74,12 +83,12 @@ public class ScanChangeDetector {
                     .category("SSL")
                     .field("certificate validity")
                     .changeType(degraded ? "DEGRADED" : "IMPROVED")
-                    .oldValue(prevSsl.isValid() ? "válido" : "inválido")
-                    .newValue(curSsl.isValid()  ? "válido" : "inválido")
+                    .oldValue(catalog.valor(prevSsl.isValid() ? "valido" : "invalido"))
+                    .newValue(catalog.valor(curSsl.isValid()  ? "valido" : "invalido"))
                     .severity(degraded ? "HIGH" : "MEDIUM")
                     .description(degraded
-                            ? "Certificado SSL tornou-se inválido"
-                            : "Certificado SSL voltou a ser válido")
+                            ? catalog.change("SSL_INVALID")
+                            : catalog.change("SSL_VALID_AGAIN"))
                     .build());
         }
 
@@ -94,7 +103,7 @@ public class ScanChangeDetector {
                     .oldValue(prevExp)
                     .newValue(curExp)
                     .severity("INFO")
-                    .description("Novo certificado SSL emitido — data de expiração alterada")
+                    .description(catalog.change("SSL_NEW_CERT"))
                     .build());
         }
 
@@ -106,20 +115,20 @@ public class ScanChangeDetector {
                     .category("SSL")
                     .field("days remaining")
                     .changeType("DEGRADED")
-                    .oldValue(prevDays + " dias")
-                    .newValue(curDays + " dias")
+                    .oldValue(catalog.valor("dias", prevDays))
+                    .newValue(catalog.valor("dias", curDays))
                     .severity("HIGH")
-                    .description("Certificado SSL entra na janela crítica de 30 dias")
+                    .description(catalog.change("SSL_WINDOW_30"))
                     .build());
         } else if (prevDays > 90 && curDays <= 90 && curDays > 30) {
             out.add(ScanChange.builder()
                     .category("SSL")
                     .field("days remaining")
                     .changeType("DEGRADED")
-                    .oldValue(prevDays + " dias")
-                    .newValue(curDays + " dias")
+                    .oldValue(catalog.valor("dias", prevDays))
+                    .newValue(catalog.valor("dias", curDays))
                     .severity("MEDIUM")
-                    .description("Certificado SSL entra na janela de atenção de 90 dias")
+                    .description(catalog.change("SSL_WINDOW_90"))
                     .build());
         }
     }
@@ -154,15 +163,15 @@ public class ScanChangeDetector {
             if (wasMiss && nowOk) {
                 changeType  = "IMPROVED";
                 severity    = "MEDIUM";
-                description = header + " adicionado";
+                description = catalog.change("HEADER_ADDED", header);
             } else if (wasOk && nowMiss) {
                 changeType  = "DEGRADED";
                 severity    = criticalHeader(header) ? "HIGH" : "MEDIUM";
-                description = header + " removido";
+                description = catalog.change("HEADER_REMOVED", header);
             } else if (!Objects.equals(curVal, prevVal)) {
                 changeType  = "CHANGED";
                 severity    = "LOW";
-                description = header + " alterado";
+                description = catalog.change("HEADER_CHANGED", header);
             } else {
                 continue;
             }
@@ -191,12 +200,12 @@ public class ScanChangeDetector {
                 .category("WAF")
                 .field("WAF detection")
                 .changeType(curWaf ? "IMPROVED" : "DEGRADED")
-                .oldValue(prevWaf ? "detectado" : "não detectado")
-                .newValue(curWaf  ? "detectado" : "não detectado")
+                .oldValue(catalog.valor(prevWaf ? "detectado" : "naoDetectado"))
+                .newValue(catalog.valor(curWaf  ? "detectado" : "naoDetectado"))
                 .severity(curWaf ? "LOW" : "MEDIUM")
                 .description(curWaf
-                        ? "WAF/CDN passou a ser detectado: " + cur.getWafDetectionResult().getProvider()
-                        : "WAF/CDN não mais detectado")
+                        ? catalog.change("WAF_DETECTED", cur.getWafDetectionResult().getProvider())
+                        : catalog.change("WAF_GONE"))
                 .build());
     }
 
@@ -216,7 +225,7 @@ public class ScanChangeDetector {
                     .oldValue(prevDns.getSpfPolicy())
                     .newValue(curDns.getSpfPolicy())
                     .severity("MEDIUM")
-                    .description("Política SPF alterada")
+                    .description(catalog.change("SPF_CHANGED"))
                     .build());
         }
 
@@ -230,8 +239,8 @@ public class ScanChangeDetector {
                     .oldValue("p=" + prevDns.getDmarcPolicy())
                     .newValue("p=" + curDns.getDmarcPolicy())
                     .severity("MEDIUM")
-                    .description("Política DMARC alterada: p=" + prevDns.getDmarcPolicy()
-                            + " → p=" + curDns.getDmarcPolicy())
+                    .description(catalog.change("DMARC_CHANGED", prevDns.getDmarcPolicy(),
+                            curDns.getDmarcPolicy()))
                     .build());
         }
 
@@ -246,8 +255,8 @@ public class ScanChangeDetector {
                     .oldValue(prevDns.getEmailSpoofingRisk())
                     .newValue(curDns.getEmailSpoofingRisk())
                     .severity("MEDIUM")
-                    .description("Risco de email spoofing: "
-                            + prevDns.getEmailSpoofingRisk() + " → " + curDns.getEmailSpoofingRisk())
+                    .description(catalog.change("SPOOFING_RISK",
+                            prevDns.getEmailSpoofingRisk(), curDns.getEmailSpoofingRisk()))
                     .build());
         }
     }
@@ -264,10 +273,10 @@ public class ScanChangeDetector {
                     .category("HTTP METHODS")
                     .field(m)
                     .changeType("DEGRADED")
-                    .oldValue("não detectado")
-                    .newValue("habilitado")
+                    .oldValue(catalog.valor("naoDetectado"))
+                    .newValue(catalog.valor("habilitado"))
                     .severity("HIGH")
-                    .description("Novo método HTTP perigoso detectado: " + m)
+                    .description(catalog.change("HTTP_METHOD_NEW", m))
                     .build());
         }
 
@@ -277,10 +286,10 @@ public class ScanChangeDetector {
                     .category("HTTP METHODS")
                     .field(m)
                     .changeType("IMPROVED")
-                    .oldValue("habilitado")
-                    .newValue("não detectado")
+                    .oldValue(catalog.valor("habilitado"))
+                    .newValue(catalog.valor("naoDetectado"))
                     .severity("LOW")
-                    .description("Método HTTP perigoso removido: " + m)
+                    .description(catalog.change("HTTP_METHOD_GONE", m))
                     .build());
         }
     }
@@ -296,10 +305,10 @@ public class ScanChangeDetector {
                     .category("PORTS")
                     .field("port " + port)
                     .changeType("DEGRADED")
-                    .oldValue("fechada")
-                    .newValue("aberta")
+                    .oldValue(catalog.valor("fechada"))
+                    .newValue(catalog.valor("aberta"))
                     .severity("HIGH")
-                    .description("Nova porta aberta detectada: " + port)
+                    .description(catalog.change("PORT_OPENED", port))
                     .build());
         }
 
@@ -308,10 +317,10 @@ public class ScanChangeDetector {
                     .category("PORTS")
                     .field("port " + port)
                     .changeType("IMPROVED")
-                    .oldValue("aberta")
-                    .newValue("fechada")
+                    .oldValue(catalog.valor("aberta"))
+                    .newValue(catalog.valor("fechada"))
                     .severity("LOW")
-                    .description("Porta fechada: " + port)
+                    .description(catalog.change("PORT_CLOSED", port))
                     .build());
         }
     }
@@ -327,10 +336,10 @@ public class ScanChangeDetector {
                     .category("FILES")
                     .field(f)
                     .changeType("DEGRADED")
-                    .oldValue("não exposto")
-                    .newValue("exposto")
+                    .oldValue(catalog.valor("naoExposto"))
+                    .newValue(catalog.valor("exposto"))
                     .severity("HIGH")
-                    .description("Novo arquivo sensível exposto: " + f)
+                    .description(catalog.change("FILE_EXPOSED", f))
                     .build());
         }
 
@@ -339,10 +348,10 @@ public class ScanChangeDetector {
                     .category("FILES")
                     .field(f)
                     .changeType("IMPROVED")
-                    .oldValue("exposto")
-                    .newValue("não detectado")
+                    .oldValue(catalog.valor("exposto"))
+                    .newValue(catalog.valor("naoDetectado"))
                     .severity("LOW")
-                    .description("Arquivo sensível não mais acessível: " + f)
+                    .description(catalog.change("FILE_GONE", f))
                     .build());
         }
     }
@@ -355,12 +364,12 @@ public class ScanChangeDetector {
                 .category("HEADERS")
                 .field("server version disclosure")
                 .changeType(cur.isServerVersionExposed() ? "DEGRADED" : "IMPROVED")
-                .oldValue(prev.isServerVersionExposed() ? "exposto" : "oculto")
-                .newValue(cur.isServerVersionExposed()  ? "exposto" : "oculto")
+                .oldValue(catalog.valor(prev.isServerVersionExposed() ? "exposto" : "oculto"))
+                .newValue(catalog.valor(cur.isServerVersionExposed()  ? "exposto" : "oculto"))
                 .severity(cur.isServerVersionExposed() ? "MEDIUM" : "LOW")
                 .description(cur.isServerVersionExposed()
-                        ? "Versão do servidor passou a ser exposta"
-                        : "Versão do servidor foi ocultada")
+                        ? catalog.change("SERVER_EXPOSED")
+                        : catalog.change("SERVER_HIDDEN"))
                 .build());
     }
 
@@ -386,11 +395,11 @@ public class ScanChangeDetector {
                 .category("TECH")
                 .field(label)
                 .changeType("CHANGED")
-                .oldValue(prevVal != null ? prevVal : "não detectado")
+                .oldValue(prevVal != null ? prevVal : catalog.valor("naoDetectado"))
                 .newValue(curVal)
                 .severity("INFO")
-                .description(label + " alterado: "
-                        + (prevVal != null ? prevVal : "não detectado") + " → " + curVal)
+                .description(catalog.change("TECH_CHANGED", label,
+                        prevVal != null ? prevVal : catalog.valor("naoDetectado"), curVal))
                 .build());
     }
 

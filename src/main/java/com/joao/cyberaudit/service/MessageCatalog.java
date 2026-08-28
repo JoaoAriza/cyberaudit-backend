@@ -91,6 +91,31 @@ public class MessageCatalog {
     }
 
     /**
+     * Mensagem de erro que chega ao cliente pela resposta HTTP.
+     *
+     * Estava chumbada no serviço que a lança, e o {@code GlobalExceptionHandler} a
+     * devolve tal e qual — um cliente em inglês recebia "Capacidade de scan esgotada".
+     */
+    public String erro(String chave, Object... args) {
+        return prefixado("erro.", chave, args);
+    }
+
+    /** Descrição de uma mudança entre dois scans — módulo Changes. */
+    public String change(String chave, Object... args) {
+        return prefixado("change.", chave, args);
+    }
+
+    /**
+     * Valor de antes/depois no card de mudança — "válido", "aberta", "exposto".
+     *
+     * Família própria porque são rótulos de estado, reaproveitados entre categorias:
+     * o mesmo "não detectado" serve para WAF, método HTTP e tecnologia.
+     */
+    public String valor(String chave, Object... args) {
+        return prefixado("valor.", chave, args);
+    }
+
+    /**
      * Texto dos e-mails — assunto e corpo.
      *
      * A estrutura HTML fica no {@link EmailService}: só a prosa vem daqui. Marcação

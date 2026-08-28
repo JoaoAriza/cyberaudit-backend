@@ -16,10 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScanConcurrencyLimiterTest {
 
+    /** Catálogo real: a mensagem de capacidade esgotada chega ao cliente por ele. */
+    private MessageCatalog catalogo() {
+        var source = new org.springframework.context.support.ResourceBundleMessageSource();
+        source.setBasename("messages");
+        source.setDefaultEncoding("UTF-8");
+        source.setFallbackToSystemLocale(false);
+        return new MessageCatalog(source);
+    }
+
     @Test
     @DisplayName("libera o slot mesmo quando o trabalho lança")
     void liberaSlotEmExcecao() {
-        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(1, 1);
+        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(catalogo(), 1, 1);
 
         assertThrows(IllegalStateException.class, () -> limiter.withSlot(() -> {
             throw new IllegalStateException("falha do scan");
@@ -32,7 +41,7 @@ class ScanConcurrencyLimiterTest {
     @Test
     @DisplayName("recusa com 503 quando a capacidade está esgotada")
     void recusaQuandoLotado() throws Exception {
-        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(1, 1);
+        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(catalogo(), 1, 1);
         CountDownLatch ocupado  = new CountDownLatch(1);
         CountDownLatch liberar  = new CountDownLatch(1);
         ExecutorService pool    = Executors.newSingleThreadExecutor();
@@ -62,7 +71,7 @@ class ScanConcurrencyLimiterTest {
     @DisplayName("nunca deixa passar mais que a capacidade configurada")
     void respeitaCapacidade() throws Exception {
         int capacidade = 3;
-        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(capacidade, 10);
+        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(catalogo(), capacidade, 10);
         AtomicInteger simultaneos = new AtomicInteger();
         AtomicInteger pico        = new AtomicInteger();
         ExecutorService pool      = Executors.newFixedThreadPool(16);
@@ -94,7 +103,7 @@ class ScanConcurrencyLimiterTest {
     @Test
     @DisplayName("capacidade mínima de 1 mesmo com configuração inválida")
     void normalizaConfiguracaoInvalida() {
-        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(0, 0);
+        ScanConcurrencyLimiter limiter = new ScanConcurrencyLimiter(catalogo(), 0, 0);
         assertEquals(1, limiter.capacity());
         assertEquals("ok", limiter.withSlot(() -> "ok"));
     }

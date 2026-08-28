@@ -19,13 +19,16 @@ import java.util.function.Supplier;
 @Service
 public class ScanConcurrencyLimiter {
 
+    private final MessageCatalog catalog;
     private final Semaphore slots;
     private final int       maxConcurrent;
     private final int       acquireTimeoutSeconds;
 
     public ScanConcurrencyLimiter(
+            MessageCatalog catalog,
             @Value("${scan.max-concurrent:4}") int maxConcurrent,
             @Value("${scan.acquire-timeout-seconds:20}") int acquireTimeoutSeconds) {
+        this.catalog               = catalog;
         this.maxConcurrent         = Math.max(1, maxConcurrent);
         this.acquireTimeoutSeconds = Math.max(1, acquireTimeoutSeconds);
         // fair=true: FIFO, evita que uma requisição fique presa enquanto outras passam
@@ -43,13 +46,12 @@ public class ScanConcurrencyLimiter {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ScanCapacityException(
-                    "Scan interrompido enquanto aguardava capacidade. Tente novamente.");
+                    catalog.erro("SCAN_INTERROMPIDO"));
         }
 
         if (!acquired) {
             throw new ScanCapacityException(
-                    "Capacidade de scan esgotada (" + maxConcurrent + " simultâneos). "
-                            + "Tente novamente em alguns instantes.");
+                    catalog.erro("CAPACIDADE_ESGOTADA", maxConcurrent));
         }
 
         try {
