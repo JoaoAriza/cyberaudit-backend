@@ -5,10 +5,13 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.context.support.ResourceBundleMessageSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -90,13 +93,22 @@ class ProbeFalsePositiveTest {
     // Estes dois serviços passam pelo ScannerHttp, que valida no SsrfGuard e recusa
     // 127.0.0.1 — um servidor de teste local nunca seria consultado, e o teste
     // "passaria" com a requisição bloqueada, provando nada. Exercitam a DECISÃO direto.
+    /** Catálogo real: a evidência sai dele, então o teste também confere o texto. */
+    private MessageCatalog catalogo() {
+        var source = new ResourceBundleMessageSource();
+        source.setBasename("messages");
+        source.setDefaultEncoding("UTF-8");
+        source.setFallbackToSystemLocale(false);
+        return new MessageCatalog(source);
+    }
+
     private String swagger(String html) {
-        return new ApiDocsExposureService()
+        return new ApiDocsExposureService(catalogo())
                 .matchEvidence("SWAGGER_UI", html.toLowerCase(), "text/html");
     }
 
     private String playground(String html) {
-        return new GraphQlIntrospectionService()
+        return new GraphQlIntrospectionService(catalogo())
                 .playgroundMarker(html.toLowerCase(), "text/html");
     }
 
@@ -154,8 +166,24 @@ class ProbeFalsePositiveTest {
     @Test
     @DisplayName("resposta JSON não é playground — é a API respondendo")
     void jsonNaoEPlayground() {
-        assertNull(new GraphQlIntrospectionService()
+        assertNull(new GraphQlIntrospectionService(catalogo())
                 .playgroundMarker("{\"data\":{\"__schema\":{}}}", "application/json"));
+    }
+
+    // ── Idioma da evidência ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a evidência segue o idioma do laudo — saía chumbada em português")
+    void evidenciaSegueOIdioma() {
+        try {
+            LocaleContextHolder.setLocale(Locale.ENGLISH);
+            assertEquals("Swagger UI assets loaded", swagger("<html><link href='swagger-ui.css'></html>"));
+
+            LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+            assertEquals("Assets do Swagger UI carregados", swagger("<html><link href='swagger-ui.css'></html>"));
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+        }
     }
 
     // ── CRLF ─────────────────────────────────────────────────────────────────
@@ -169,7 +197,7 @@ class ProbeFalsePositiveTest {
                 "<html><body><h1>404</h1><p>Não encontramos "
                         + t.getRequestURI().getPath() + "</p></body></html>");
 
-        assertTrue(new CrlfService().scan(base).isEmpty(),
+        assertTrue(new CrlfService(catalogo()).scan(base).isEmpty(),
                 "input ecoado no corpo não parte resposta nenhuma");
     }
 
@@ -181,7 +209,7 @@ class ProbeFalsePositiveTest {
         String base = sobeServidor(t ->
                 "HTTP/1.1 200 OK\r\nX-CyberAudit-Test: crlf-probe-7x3k\r\n\r\n<html>injetado</html>");
 
-        var achados = new CrlfService().scan(base);
+        var achados = new CrlfService(catalogo()).scan(base);
 
         assertEquals(1, achados.size());
         assertEquals("HIGH", achados.get(0).getSeverity());

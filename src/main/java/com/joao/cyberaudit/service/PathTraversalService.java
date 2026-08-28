@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class PathTraversalService {
@@ -54,11 +56,16 @@ public class PathTraversalService {
      * Assinaturas de conteudo que confirmam vazamento do arquivo alvo.
      * Anti-FP: exige multiplas strings presentes simultaneamente.
      */
+    /** Linha real de /etc/hosts: IP e nome na MESMA linha. */
+    private static final Pattern HOSTS_LINE = Pattern.compile("127\\.0\\.0\\.1[ \\t]+localhost");
+
     private static final List<String[]> SIGNATURES = List.of(
             // { target, marker1, marker2 }
             new String[]{ "/etc/passwd",    "root:",        "/bin/" },
             new String[]{ "/etc/passwd",    "root:x:0:0",   null    },
-            new String[]{ "/etc/hosts",     "127.0.0.1",    "localhost" },
+            // /etc/hosts sai da lista de marcadores soltos e vai para HOSTS_LINE:
+            // "127.0.0.1" e "localhost" convivem em qualquer tutorial de rede, e o par
+            // solto acusava LFI numa página que só mostra um exemplo de hosts.
             new String[]{ "windows/win.ini","[fonts]",      null    },
             new String[]{ "windows/win.ini","[extensions]", null    },
             new String[]{ "windows/win.ini","[mci",         null    }
@@ -145,8 +152,18 @@ public class PathTraversalService {
      * Verifica se o body contem assinaturas do arquivo alvo.
      * Retorna um snippet de evidencia (max 120 chars) ou null se nao confirmado.
      */
-    private String matchesFileContent(String body, String target) {
+    String matchesFileContent(String body, String target) {
         String lower = body.toLowerCase(Locale.ROOT);
+
+        // /etc/hosts só conta com a LINHA de verdade: o IP e o nome juntos, separados
+        // por espaço ou tab. É o que distingue o arquivo servido de um trecho citado.
+        if ("/etc/hosts".equals(target)) {
+            Matcher m = HOSTS_LINE.matcher(lower);
+            if (!m.find()) return null;
+            int start = Math.max(0, m.start() - 10);
+            int end   = Math.min(body.length(), m.end() + 60);
+            return body.substring(start, end).replaceAll("[\\r\\n\\t]+", " ").trim();
+        }
 
         for (String[] sig : SIGNATURES) {
             String sigTarget  = sig[0];

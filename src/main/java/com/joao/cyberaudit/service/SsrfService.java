@@ -47,27 +47,51 @@ public class SsrfService {
             new String[]{ "http://[::1]/",                                "ERROR_DISCLOSURE" }
     );
 
-    /** Marcadores de metadata AWS na resposta */
-    private static final List<String> AWS_MARKERS = List.of(
-            "ami-", "instance-id", "local-ipv4", "security-credentials",
-            "placement/", "public-hostname", "meta-data", "instance-type"
+    // ── Marcadores em dois níveis ────────────────────────────────────────────
+    //
+    // Eram listas únicas em que UM marcador bastava para um achado CRITICAL. Vários
+    // deles casam por substring em texto comum: "ami-" casa com "Miami-Dade",
+    // "placement/" com "/ad-placement/", "meta-data" com qualquer atributo assim,
+    // "project-id" com o JSON de metade das APIs do mundo. Cada um sozinho valia
+    // CRITICAL — é a mesma armadilha do `role="status"` que marcou um perfil do
+    // GitHub como Actuator exposto.
+    //
+    // FORTE confirma sozinho: é nome de campo que só existe no serviço de metadados.
+    // FRACO precisa de DOIS: um pode ser coincidência, dois juntos não são.
+
+    /** Campos exclusivos do IMDS da AWS. */
+    private static final List<String> AWS_STRONG = List.of(
+            "security-credentials", "local-ipv4", "public-hostname",
+            "ami-launch-index", "instance-identity", "iam/info"
+    );
+    private static final List<String> AWS_WEAK = List.of(
+            "ami-", "instance-id", "placement/", "meta-data", "instance-type"
     );
 
-    /** Marcadores de metadata GCP na resposta */
-    private static final List<String> GCP_MARKERS = List.of(
-            "project-id", "instance/", "service-accounts", "computeMetadata",
-            "google-compute", "instance-id"
+    /** Campos exclusivos do metadata server do GCP. */
+    private static final List<String> GCP_STRONG = List.of(
+            "computemetadata", "google-compute", "service-accounts/default"
+    );
+    private static final List<String> GCP_WEAK = List.of(
+            "project-id", "instance/", "service-accounts", "instance-id"
     );
 
     /**
      * Mensagens de erro que revelam tentativa de conexao interna.
      * Anti-FP: so conta se o erro menciona IPs/hosts internos especificos.
      */
-    private static final List<String> ERROR_MARKERS = List.of(
-            "econnrefused", "connection refused", "dial tcp 127",
-            "dial tcp ::1", "failed to connect to 127", "failed to connect to localhost",
+    private static final List<String> ERROR_STRONG = List.of(
+            "econnrefused", "dial tcp 127", "dial tcp ::1",
+            "failed to connect to 127", "failed to connect to localhost",
             "java.net.connectexception", "connection timed out to 127",
-            "ssh-", "ssh_", "220 smtp", "220-smtp"   // banners de servicos locais
+            "220 smtp", "220-smtp"                   // banner de SMTP local
+    );
+    /**
+     * Sozinhos não provam nada: "ssh-" casa com "ssh-keygen" em qualquer tutorial, e
+     * "connection refused" aparece em toda documentação que fala de rede.
+     */
+    private static final List<String> ERROR_WEAK = List.of(
+            "connection refused", "ssh-", "ssh_"
     );
 
     /** Regex para detectar redirecionamento para endereco interno no header Location */
@@ -143,7 +167,7 @@ public class SsrfService {
 
                 // 2. Check for AWS metadata content
                 if ("AWS_METADATA".equals(indicator)) {
-                    String evidence = matchesMarkers(body, lower, AWS_MARKERS);
+                    String evidence = confirma(body, lower, AWS_STRONG, AWS_WEAK);
                     if (evidence != null) {
                         return SsrfFinding.builder()
                                 .parameter(paramName)
@@ -157,7 +181,7 @@ public class SsrfService {
 
                 // 3. Check for GCP metadata content
                 if ("GCP_METADATA".equals(indicator)) {
-                    String evidence = matchesMarkers(body, lower, GCP_MARKERS);
+                    String evidence = confirma(body, lower, GCP_STRONG, GCP_WEAK);
                     if (evidence != null) {
                         return SsrfFinding.builder()
                                 .parameter(paramName)
@@ -171,7 +195,7 @@ public class SsrfService {
 
                 // 4. Check for error-based disclosure
                 if ("ERROR_DISCLOSURE".equals(indicator)) {
-                    String evidence = matchesMarkers(body, lower, ERROR_MARKERS);
+                    String evidence = confirma(body, lower, ERROR_STRONG, ERROR_WEAK);
                     if (evidence != null) {
                         return SsrfFinding.builder()
                                 .parameter(paramName)
@@ -192,7 +216,28 @@ public class SsrfService {
      * Verifica se o body contem algum dos marcadores.
      * Retorna snippet de evidencia ou null.
      */
-    private String matchesMarkers(String body, String lower, List<String> markers) {
+    /**
+     * Um marcador FORTE, ou dois FRACOS.
+     *
+     * A evidência é um trecho ao redor do marcador que decidiu, para o laudo mostrar o
+     * que foi encontrado e não só afirmar que encontrou.
+     *
+     * @return trecho de evidência, ou null quando não há confirmação suficiente
+     */
+    String confirma(String body, String lower, List<String> fortes, List<String> fracos) {
+        String forte = primeiroTrecho(body, lower, fortes);
+        if (forte != null) return forte;
+
+        List<String> achados = fracos.stream()
+                .filter(m -> lower.contains(m.toLowerCase(Locale.ROOT)))
+                .toList();
+        if (achados.size() < 2) return null;
+
+        return primeiroTrecho(body, lower, achados);
+    }
+
+    /** Trecho do corpo ao redor do primeiro marcador que casar. */
+    private String primeiroTrecho(String body, String lower, List<String> markers) {
         for (String marker : markers) {
             int idx = lower.indexOf(marker.toLowerCase(Locale.ROOT));
             if (idx >= 0) {

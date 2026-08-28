@@ -81,6 +81,16 @@ public class MessageCatalog {
     }
 
     /**
+     * Descrição de um achado de módulo — o parágrafo que explica o que foi exposto.
+     *
+     * Separado da evidência porque são coisas diferentes no card: a evidência é o que
+     * se encontrou, a descrição é o que aquilo significa.
+     */
+    public String desc(String chave, Object... args) {
+        return prefixado("desc.", chave, args);
+    }
+
+    /**
      * Texto dos e-mails — assunto e corpo.
      *
      * A estrutura HTML fica no {@link EmailService}: só a prosa vem daqui. Marcação

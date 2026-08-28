@@ -46,14 +46,33 @@ public class DirectoryListingService {
      * Padrões que confirmam que o servidor está listando o diretório.
      * Específicos o suficiente para evitar falsos positivos.
      */
-    private static final List<String> LISTING_SIGNATURES = List.of(
-            "index of /",           // Apache / Nginx padrão
-            "directory listing",    // IIS e outros
-            "parent directory",     // Apache
-            "<title>index of",      // título da página de listing
-            "[to parent directory]",// IIS
-            "last modified</a>",    // coluna de data no listing Apache
-            "directory: /"          // Nginx alternative
+    /**
+     * Assinaturas ESTRUTURAIS de uma página de autoindex — confirmam sozinhas.
+     *
+     * São marcação, não prosa: só existem na página que o servidor gera para listar um
+     * diretório.
+     */
+    private static final List<String> LISTING_STRONG = List.of(
+            "<title>index of /",     // Apache / nginx
+            "<h1>index of /",        // Apache / nginx
+            "[to parent directory]"  // IIS
+    );
+
+    /**
+     * Frases que uma página pode ter só por FALAR do assunto — exigem duas.
+     *
+     * "directory listing" e "parent directory" aparecem em qualquer tutorial de
+     * servidor web, e "last modified</a>" em qualquer índice de blog. Uma sozinha era
+     * suficiente para acusar listagem exposta — a mesma armadilha que marcou o perfil
+     * github.com/actuator como Spring Boot Actuator: a página fala do assunto, não é o
+     * assunto.
+     */
+    private static final List<String> LISTING_WEAK = List.of(
+            "index of /",
+            "directory listing",
+            "parent directory",
+            "last modified</a>",
+            "directory: /"
     );
 
     private final HttpClient client = HttpClient.newBuilder()
@@ -112,11 +131,14 @@ public class DirectoryListingService {
         }
     }
 
-    private String findSignature(String lowerBody) {
-        for (String sig : LISTING_SIGNATURES) {
+    /** Uma assinatura estrutural, ou duas frases. Ver os javadocs das duas listas. */
+    String findSignature(String lowerBody) {
+        for (String sig : LISTING_STRONG) {
             if (lowerBody.contains(sig)) return sig;
         }
-        return null;
+
+        List<String> fracas = LISTING_WEAK.stream().filter(lowerBody::contains).toList();
+        return fracas.size() >= 2 ? String.join(" + ", fracas) : null;
     }
 
     private String extractBase(String url) {

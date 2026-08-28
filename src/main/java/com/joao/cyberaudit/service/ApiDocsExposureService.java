@@ -55,6 +55,12 @@ public class ApiDocsExposureService {
             new DocTarget("/api-explorer",                 "API_DOCS")
     );
 
+    private final MessageCatalog catalog;
+
+    public ApiDocsExposureService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
@@ -130,14 +136,14 @@ public class ApiDocsExposureService {
                 // O que prova execução é o ASSET que a ferramenta carrega, ou o nó do
                 // DOM em que ela monta.
                 if (lower.contains("swaggeruibundle") || lower.contains("swagger-ui-bundle"))
-                    yield "SwaggerUIBundle detectado";
+                    yield catalog.evidence("SWAGGER_BUNDLE");
                 if (lower.contains("swagger-ui.css") || lower.contains("swagger-ui-standalone-preset"))
-                    yield "Assets do Swagger UI carregados";
+                    yield catalog.evidence("SWAGGER_ASSETS");
                 if (lower.contains("id=\"swagger-ui\"") || lower.contains("id='swagger-ui'"))
-                    yield "Container do Swagger UI presente";
+                    yield catalog.evidence("SWAGGER_CONTAINER");
                 // Spec embutida na própria página: é a definição da API, não uma menção.
                 if (lower.contains("\"swagger\"") && lower.contains("\"paths\""))
-                    yield "Swagger spec inline detectado";
+                    yield catalog.evidence("SWAGGER_SPEC_INLINE");
                 yield null;
             }
             case "OPENAPI_JSON" -> {
@@ -149,23 +155,23 @@ public class ApiDocsExposureService {
                 if (!hasSpec) yield null;
                 boolean isJson = contentType.contains("application/json") || lower.trim().startsWith("{");
                 if (!isJson) yield null;
-                if (lower.contains("\"openapi\"")) yield "OpenAPI 3.x spec JSON exposta";
-                yield "Swagger 2.x spec JSON exposta";
+                if (lower.contains("\"openapi\"")) yield catalog.evidence("OPENAPI_3_JSON");
+                yield catalog.evidence("SWAGGER_2_JSON");
             }
             case "OPENAPI_YAML" -> {
                 // YAML: comeca com "openapi:" ou "swagger:" e contem "paths:"
                 if ((lower.startsWith("openapi:") || lower.startsWith("swagger:"))
                         && lower.contains("paths:"))
-                    yield "OpenAPI spec YAML exposta";
+                    yield catalog.evidence("OPENAPI_YAML_SPEC");
                 // Pode ter espacos/newlines antes
                 if (lower.contains("\nopenapi:") || lower.contains("\nswagger:"))
-                    yield "OpenAPI spec YAML exposta";
+                    yield catalog.evidence("OPENAPI_YAML_SPEC");
                 yield null;
             }
             case "REDOC" -> {
                 if (lower.contains("redoc") && (lower.contains("redocly") ||
                         lower.contains("<redoc ") || lower.contains("redoc.standalone")))
-                    yield "ReDoc interface detectada";
+                    yield catalog.evidence("REDOC_UI");
                 yield null;
             }
             case "API_DOCS" -> {
@@ -175,7 +181,7 @@ public class ApiDocsExposureService {
                 if (lower.contains("\"paths\""))   score++;
                 if (lower.contains("\"info\""))    score++;
                 if (lower.contains("swagger-ui") || lower.contains("redoc")) score++;
-                if (score >= 2) yield "Documentacao de API detectada (score=" + score + ")";
+                if (score >= 2) yield catalog.evidence("API_DOCS_SCORE", score);
                 yield null;
             }
             default -> null;
@@ -194,15 +200,11 @@ public class ApiDocsExposureService {
 
     private String buildDescription(String type, String path) {
         return switch (type) {
-            case "SWAGGER_UI"   -> "Swagger UI acessivel publicamente em " + path +
-                    ". Permite explorar e testar endpoints da API sem autenticacao.";
-            case "OPENAPI_JSON" -> "Especificacao OpenAPI/Swagger em JSON exposta em " + path +
-                    ". Contem schema completo: endpoints, parametros, modelos e metodos HTTP.";
-            case "OPENAPI_YAML" -> "Especificacao OpenAPI em YAML exposta em " + path +
-                    ". Equivalente ao JSON — schema completo da API acessivel publicamente.";
-            case "REDOC"        -> "Interface ReDoc de documentacao acessivel em " + path +
-                    ". Expoe estrutura completa da API de forma navegavel.";
-            default             -> "Endpoint de documentacao de API detectado em " + path + ".";
+            case "SWAGGER_UI"   -> catalog.desc("SWAGGER_UI", path);
+            case "OPENAPI_JSON" -> catalog.desc("OPENAPI_JSON", path);
+            case "OPENAPI_YAML" -> catalog.desc("OPENAPI_YAML", path);
+            case "REDOC"        -> catalog.desc("REDOC", path);
+            default             -> catalog.desc("API_DOCS", path);
         };
     }
 

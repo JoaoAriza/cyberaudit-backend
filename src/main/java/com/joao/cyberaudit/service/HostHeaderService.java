@@ -35,6 +35,12 @@ public class HostHeaderService {
             "X-Original-Host"
     );
 
+    private final MessageCatalog catalog;
+
+    public HostHeaderService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(6))
@@ -124,7 +130,7 @@ public class HostHeaderService {
                         .injectedHeader(headerName)
                         .injectedValue(PROBE_VALUE)
                         .reflectionPoint("BODY")
-                        .evidence("Reflexão no body (informativo, requer validação manual): " + snippet)
+                        .evidence(catalog.evidence("HOST_HEADER_BODY", snippet))
                         .severity("LOW")
                         .build();
             }

@@ -16,6 +16,12 @@ import java.util.regex.Pattern;
 @Service
 public class JwtSecurityService {
 
+    private final MessageCatalog catalog;
+
+    public JwtSecurityService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     /**
      * Regex para detectar JWTs: 3 segmentos Base64URL separados por ponto.
      * Base64URL usa [A-Za-z0-9_-] (sem +, /, =).
@@ -120,19 +126,19 @@ public class JwtSecurityService {
         String algUpper = alg.toUpperCase(Locale.ROOT);
 
         if ("NONE".equals(algUpper) || "\"NONE\"".equals(algUpper)) {
-            issues.add("alg:none — token sem assinatura, pode ser forjado arbitrariamente");
+            issues.add(catalog.evidence("JWT_ALG_NONE"));
         } else if (SYMMETRIC_ALGS.contains(algUpper)) {
-            issues.add("Algoritmo simetrico (" + alg + ") — seguranca depende da forca do segredo compartilhado");
+            issues.add(catalog.evidence("JWT_SYMMETRIC", alg));
         }
 
         if (!hasExpiry) {
-            issues.add("Sem claim 'exp' — token nao expira, valido indefinidamente");
+            issues.add(catalog.evidence("JWT_NO_EXP"));
         } else if (expired) {
-            issues.add("Token expirado (exp=" + expValue + ") sendo servido pelo servidor");
+            issues.add(catalog.evidence("JWT_EXPIRED", expValue));
         }
 
-        if (!hasIssuer)   issues.add("Sem claim 'iss' — issuer nao validado");
-        if (!hasAudience) issues.add("Sem claim 'aud' — audience nao validada");
+        if (!hasIssuer)   issues.add(catalog.evidence("JWT_NO_ISS"));
+        if (!hasAudience) issues.add(catalog.evidence("JWT_NO_AUD"));
 
         // Nao reportar se nao ha problemas reais
         if (issues.isEmpty()) return null;
@@ -143,8 +149,8 @@ public class JwtSecurityService {
         String evidence = "Header: " + truncate(headerJson, 120);
         if (!hasExpiry || expired) {
             // Adiciona info de expiracao ao evidence — sem dados sensiveis
-            String expInfo = !hasExpiry ? "exp: ausente"
-                    : "exp: " + expValue + " (expirado)";
+            String expInfo = !hasExpiry ? catalog.evidence("JWT_EXP_AUSENTE")
+                    : catalog.evidence("JWT_EXP_EXPIRADO", expValue);
             evidence += " | " + expInfo;
         }
 

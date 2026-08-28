@@ -59,6 +59,12 @@ public class CrlfService {
             }
     );
 
+    private final MessageCatalog catalog;
+
+    public CrlfService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -223,8 +229,7 @@ public class CrlfService {
                     .parameter(parameter)
                     .payload(payload)
                     .injectionType(injectionType + "_SPLIT")
-                    .evidence("Resposta partida: linha de status HTTP e o header probe "
-                            + "aparecem no corpo")
+                    .evidence(catalog.evidence("CRLF_SPLIT"))
                     .severity("HIGH")
                     .build();
         }

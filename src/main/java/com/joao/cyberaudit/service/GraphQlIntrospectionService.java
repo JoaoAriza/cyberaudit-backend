@@ -81,6 +81,12 @@ public class GraphQlIntrospectionService {
     private static final Pattern TYPE_COUNT_PATTERN =
             Pattern.compile("\"name\"\\s*:", Pattern.CASE_INSENSITIVE);
 
+    private final MessageCatalog catalog;
+
+    public GraphQlIntrospectionService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
@@ -169,7 +175,7 @@ public class GraphQlIntrospectionService {
                 String marker = playgroundMarker(getLower, ct);
                 if (marker != null) {
                     playgroundExposed  = true;
-                    playgroundEvidence = "UI marker: \"" + marker + "\"";
+                    playgroundEvidence = catalog.evidence("GRAPHQL_UI_MARKER", marker);
                 }
             }
         } catch (Exception ignored) {}
@@ -219,8 +225,8 @@ public class GraphQlIntrospectionService {
                                   String introspEv, String playgroundEv, int typeCount) {
         List<String> parts = new ArrayList<>();
         if (introspection) {
-            String tc = typeCount > 0 ? " (" + typeCount + " tipos)" : "";
-            parts.add("Introspection habilitada" + tc);
+            parts.add(typeCount > 0 ? catalog.evidence("GRAPHQL_INTROSPECTION_TYPES", typeCount)
+                                    : catalog.evidence("GRAPHQL_INTROSPECTION"));
             if (introspEv != null) parts.add(introspEv);
         }
         if (playground && playgroundEv != null) parts.add(playgroundEv);
