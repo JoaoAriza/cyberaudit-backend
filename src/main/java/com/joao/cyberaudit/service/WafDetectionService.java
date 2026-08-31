@@ -27,6 +27,12 @@ public class WafDetectionService {
             "?file=" + URLEncoder.encode("../../../../etc/passwd", StandardCharsets.UTF_8)
     );
 
+    private final MessageCatalog catalog;
+
+    public WafDetectionService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     public WafDetectionResult scan(String targetUrl) {
         WafDetectionResult.WafDetectionResultBuilder b = WafDetectionResult.builder();
 
@@ -42,7 +48,7 @@ public class WafDetectionService {
                         .provider(headerMatch.provider())
                         .category(headerMatch.category())
                         .confidence("HIGH")
-                        .evidence("Header detectado: " + headerMatch.evidence());
+                        .evidence(catalog.evidence("WAF_HEADER", headerMatch.evidence()));
             }
 
             // Passo 2 — verifica via: varnish (Fastly usa Varnish internamente)
@@ -58,8 +64,9 @@ public class WafDetectionService {
                             .provider(hasFastlyHint ? "Fastly" : "Varnish Cache")
                             .category("CDN")   // Varnish/Fastly = CDN, não WAF
                             .confidence("HIGH")
-                            .evidence("Via: " + viaHeader +
-                                    (hasFastlyHint ? " + Fastly headers presentes" : ""));
+                            .evidence(hasFastlyHint
+                                    ? catalog.evidence("WAF_VIA_FASTLY", viaHeader)
+                                    : catalog.evidence("WAF_VIA", viaHeader));
                     headerMatch = new WafMatch("detected", "CDN", "via varnish");
                 }
             }
@@ -85,9 +92,8 @@ public class WafDetectionService {
                     b.detected(true)
                             .category("WAF")
                             .confidence("MEDIUM")
-                            .evidence("Payload malicioso bloqueado (HTTP " + probeCode
-                                    + ") enquanto requisições benignas passaram (HTTP "
-                                    + baselineCode + "/" + benignCode + ")");
+                            .evidence(catalog.evidence("WAF_PAYLOAD_BLOCKED",
+                                    probeCode, baselineCode, benignCode));
                 }
             } else if (probeCode == 403 || probeCode == 406
                     || probeCode == 429 || probeCode == 503) {
@@ -118,13 +124,13 @@ public class WafDetectionService {
                     b.detected(false)
                             .provider(null)
                             .confidence(null)
-                            .evidence("Nenhum indicador de WAF encontrado");
+                            .evidence(catalog.evidence("WAF_NONE"));
                 }
             }
 
         } catch (Exception e) {
             b.detected(false)
-                    .evidence("Erro: " + e.getMessage());
+                    .evidence(catalog.evidence("WAF_ERROR", e.getMessage()));
         }
 
         WafDetectionResult result = b.build();
@@ -259,25 +265,27 @@ public class WafDetectionService {
         return (vals != null && !vals.isEmpty()) ? vals.get(0) : null;
     }
 
-    private String buildSummary(WafDetectionResult r) {
+    /** Visível ao teste: as seis frases de resumo só provam que resolvem se forem chamadas. */
+    String buildSummary(WafDetectionResult r) {
         if (!r.isDetected()) {
-            return "WAF não confirmado via headers. O site pode usar proteção sem expor " +
-                    "headers identificadores (prática comum em infraestruturas enterprise), " +
-                    "ou pode não ter WAF. Probe com payload: " +
-                    (r.getProbeResponse() != null ? r.getProbeResponse() : "N/A") + ".";
+            return catalog.desc("WAF_NOT_CONFIRMED",
+                    r.getProbeResponse() != null ? r.getProbeResponse() : "N/A");
         }
-        boolean isCdn = "CDN".equals(r.getCategory());
-        boolean isBoth = "BOTH".equals(r.getCategory());
-        String typeLabel = isCdn  ? "CDN (sem WAF nativo)"
-                         : isBoth ? "CDN com WAF opcional"
-                         : "WAF";
+
+        // O rótulo do tipo entra na CHAVE, não como argumento: fragmento traduzido
+        // interpolado em frase traduzida é a armadilha que já escapou no verbo do
+        // score no módulo Changes. Aqui cada combinação é uma frase inteira.
+        String tipo = switch (r.getCategory() != null ? r.getCategory() : "") {
+            case "CDN"  -> "CDN";
+            case "BOTH" -> "BOTH";
+            default     -> "WAF";
+        };
 
         return switch (r.getConfidence() != null ? r.getConfidence() : "") {
-            case "HIGH"   -> r.getProvider() + " detectado (" + typeLabel + ") via header exclusivo."
-                    + (isCdn ? " CDN de entrega — não confere proteção WAF por padrão." : " Camada de proteção ativa.");
-            case "MEDIUM" -> "Possível WAF detectado — payloads maliciosos foram bloqueados.";
-            case "LOW"    -> "Indício de " + r.getProvider() + " via Server header. Confirmação inconclusiva.";
-            default       -> r.getProvider() + " detectado (" + typeLabel + ").";
+            case "HIGH"   -> catalog.desc("WAF_HIGH_" + tipo, r.getProvider());
+            case "MEDIUM" -> catalog.desc("WAF_MEDIUM");
+            case "LOW"    -> catalog.desc("WAF_LOW", r.getProvider());
+            default       -> catalog.desc("WAF_DETECTED_" + tipo, r.getProvider());
         };
     }
 
