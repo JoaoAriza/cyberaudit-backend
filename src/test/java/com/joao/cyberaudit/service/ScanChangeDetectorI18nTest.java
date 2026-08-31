@@ -16,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.ResourceBundle;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -121,6 +122,41 @@ class ScanChangeDetectorI18nTest {
                 comHeaders(Map.of("Strict-Transport-Security", "OK: max-age=31536000")));
 
         assertEquals("Strict-Transport-Security removed", descricaoDe(mudancas, "HEADERS"));
+    }
+
+    // ── O que NÃO é traduzido ────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("field é rótulo técnico — a coluna não muda de idioma")
+    void fieldNaoSegueOIdioma() {
+        // Decisão registrada no javadoc do ScanChangeDetector: metade dos valores é
+        // dado cru — nome do header, método HTTP, porta, caminho de arquivo — e as
+        // duas telas renderizam a coluna em fonte monoespaçada, colada ao category,
+        // que também é código. Traduzir só a metade que é prosa deixaria a coluna
+        // metade em cada regime, que é pior que inteira em um só.
+        List<String> pt = camposEm(Locale.forLanguageTag("pt-BR"));
+        List<String> en = camposEm(Locale.ENGLISH);
+
+        assertEquals(pt, en, "field virou prosa traduzida em uma das metades da coluna");
+        assertTrue(pt.containsAll(
+                        List.of("score", "certificate validity", "Strict-Transport-Security")),
+                "o cenário deixou de exercitar os três regimes de field: " + pt);
+    }
+
+    /** Os campos das mudanças de score, SSL e header, resolvidos em um idioma só. */
+    private List<String> camposEm(Locale idioma) {
+        LocaleContextHolder.setLocale(idioma);
+        ScanChangeDetector d = detector();
+
+        return Stream.of(
+                        d.detect(comScore(50), comScore(80)),
+                        d.detect(comSsl(false), comSsl(true)),
+                        d.detect(comHeaders(Map.of("Strict-Transport-Security", "MISSING")),
+                                comHeaders(Map.of("Strict-Transport-Security", "OK: max-age=31536000"))))
+                .flatMap(List::stream)
+                .map(ScanChange::getField)
+                .sorted()
+                .toList();
     }
 
     // ── Cobertura do catálogo ────────────────────────────────────────────────

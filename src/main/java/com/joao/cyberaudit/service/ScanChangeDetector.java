@@ -10,6 +10,26 @@ import java.util.stream.Collectors;
  * Compara dois ScanResult (atual vs anterior) e retorna a lista de mudanças.
  * Detecta melhorias, regressões e alterações neutras que um analista
  * precisaria saber entre dois scans do mesmo alvo.
+ *
+ * <h2>{@code field} não é traduzido — é rótulo técnico</h2>
+ *
+ * {@code description}, {@code oldValue} e {@code newValue} saem do catálogo e seguem
+ * o idioma do laudo. {@code field} não, e isso é decisão, não esquecimento:
+ *
+ * <ul>
+ *   <li>metade dos valores é dado cru que não tem tradução — o nome do header
+ *       ({@code Strict-Transport-Security}), o método ({@code TRACE}), o caminho do
+ *       arquivo exposto, o número da porta, o nome da tecnologia;</li>
+ *   <li>as duas telas renderizam a coluna em fonte monoespaçada, colada ao
+ *       {@code category}, que também é código não traduzido ({@code SSL},
+ *       {@code HEADERS});</li>
+ *   <li>no PDF sai como {@code SSL / certificate validity}, e o PDF é inglês por
+ *       decisão de produto — ali o texto atual já está correto.</li>
+ * </ul>
+ *
+ * Traduzir só a metade que é prosa deixaria a coluna metade em cada regime. Quem
+ * mudar de ideia precisa mover as duas metades, não uma —
+ * {@code ScanChangeDetectorI18nTest.fieldNaoSegueOIdioma()} trava isso.
  */
 @Service
 public class ScanChangeDetector {

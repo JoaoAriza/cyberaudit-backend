@@ -73,31 +73,62 @@ deploy para confirmar que sumiu.
 
 ---
 
-## 2. Português chumbado que ainda chega ao laudo
+## 2. Português chumbado que ainda chega ao laudo — ✅ FECHADA
 
-A varredura desta sessão cobriu as sondas, as notas do score e o módulo Changes. Estes
-serviços ficaram de fora e **têm texto em português no campo `evidence`**, que a tela
-mostra dentro do card:
+Os cinco serviços passaram pela receita. O inventário abaixo é o original, com o que
+foi encontrado de verdade ao lado — **a contagem estava curta em dois deles**, porque
+tinha pegado só a linha mais visível de cada um:
 
-| serviço | ocorrências | exemplo |
-|---|---|---|
-| `TechFingerprintService` | ~21 | `"HTML: React fiber detectado"`, `"cf-ray header presente"` |
-| `WafDetectionService` | ~10 | `"Payload malicioso bloqueado (HTTP …)"`, `"Nenhum indicador de WAF encontrado"` |
-| `SubdomainTakeoverService` | ~5 | `"CNAME aponta para … não reivindicado"`, `"Conexão recusada: "` |
-| `TlsVersionService` | 1 | `"… é deprecated (RFC 8996). Vulnerável a POODLE/BEAST."` |
-| `HttpMethodService` | 1 | `risk.description() + " (requer autenticação)"` |
+| serviço | previsto | achado | além do `evidence` |
+|---|---|---|---|
+| `TechFingerprintService` | ~21 | 26 | — |
+| `WafDetectionService` | ~10 | 15 | o `summary` inteiro, um parágrafo no card |
+| `SubdomainTakeoverService` | ~5 | 3 | — |
+| `TlsVersionService` | 1 | **6** | a mensagem inteira, não só a linha do deprecated |
+| `HttpMethodService` | 1 | **5** | as 4 descrições de risco, dentro de um `static Map` |
 
-**Receita já estabelecida** (foi assim nos outros cinco serviços):
+**Receita, como ficou** (o passo 4 já vinha de graça — `MessageCatalogEnglishTest`
+compara os dois arquivos nas duas direções para *todas* as chaves):
 
-1. chave em `messages.properties` + `messages_en.properties` com prefixo `evidence.`
+1. chave em `messages.properties` + `messages_en.properties`
 2. injetar `MessageCatalog` no construtor do serviço
-3. trocar o literal por `catalog.evidence("CHAVE", args)`
-4. teste que percorre as chaves e falha se faltar em qualquer um dos dois arquivos
+3. trocar o literal por `catalog.evidence(...)` ou `catalog.desc(...)`
+4. teste do serviço: chaves presentes, **tradução que não é cópia do português**, e o
+   formato resolvido nos dois idiomas
 
-**Atenção ao contrário disso:** `ScanChangeDetector.field` usa valores em **inglês**
-(`"certificate validity"`, `"days remaining"`, `"SPF policy"`) no meio de um laudo em
-português. Ou entram no catálogo, ou viram rótulo técnico assumido — mas hoje é
-inconsistência sem decisão.
+### Três armadilhas que apareceram, para não repetir
+
+**Texto em `static final`.** As descrições de risco do `HttpMethodService` moravam
+dentro de um `static final Map`. Resolver texto ali **congela o idioma no carregamento
+da classe** — o primeiro scan do processo decide pelo resto da vida do processo, e
+nenhum teste de paridade pega isso. O mapa guarda a chave; a frase resolve por
+requisição.
+
+**Fragmento traduzido no meio de frase traduzida.** O resumo do WAF concatenava um
+rótulo de tipo (`"CDN (sem WAF nativo)"`) dentro da frase. É o mesmo erro do verbo do
+score que o `subiuECaiuSaoChavesSeparadas` já tinha pego. Cada combinação virou frase
+inteira no catálogo. **Compor é diferente de concatenar**: `desc.METHOD_REQUIRES_AUTH`
+envolve uma frase já fechada num parêntese, e isso é seguro.
+
+**Chave montada por concatenação** (`"WAF_HIGH_" + tipo`) não é vista pelo compilador —
+um typo sai como `desc.WAF_HIGH_CDN` cru dentro do card. Tem teste percorrendo as 12
+combinações.
+
+### Decisão tomada: `ScanChangeDetector.field` é rótulo técnico
+
+Fica em inglês, nos dois idiomas, e isso é decisão registrada — não esquecimento:
+
+- **metade dos valores é dado cru que não tem tradução** — nome do header
+  (`Strict-Transport-Security`), método (`TRACE`), caminho do arquivo, número da porta
+- as duas telas renderizam a coluna em **fonte monoespaçada**, colada ao `category`,
+  que também é código não traduzido
+- no PDF sai como `SSL / certificate validity`, e o PDF é **inglês por decisão** — ali
+  o texto de hoje já está correto
+
+Traduzir só a metade que é prosa deixaria a coluna metade em cada regime, que é pior
+que inteira em um só. O javadoc do `ScanChangeDetector` guarda o porquê, e
+`ScanChangeDetectorI18nTest.fieldNaoSegueOIdioma()` trava: quem mudar de ideia move as
+duas metades, não uma.
 
 ---
 
@@ -192,6 +223,6 @@ Nenhuma é técnica. Todas mudam o que se implementa.
 1. **Operacional 5.1 e 5.2** — têm prazo e um deles bloqueia deploy
 2. **Verificações da seção 1** — com Postgres local, é uma tarde e fecha o que já foi
    escrito. Verificar antes de escrever mais é mais barato que o contrário
-3. **Seção 2** — o português restante nas evidências, com a receita já estabelecida
+3. ~~**Seção 2**~~ — ✅ fechada, incluindo a decisão do `field`
 4. **3.1** — a guarda de paridade do Frontend, antes que o catálogo cresça mais
 5. **Seção 4** — quando houver apetite para mudança de contrato
