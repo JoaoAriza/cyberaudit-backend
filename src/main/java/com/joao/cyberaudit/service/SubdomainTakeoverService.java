@@ -69,13 +69,15 @@ public class SubdomainTakeoverService {
     private static final int CONCURRENT_PROBES = 10;
 
     private final CrtShService crtShService; // ← compartilhado
+    private final MessageCatalog catalog;
     private final HttpClient   httpClient = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    public SubdomainTakeoverService(CrtShService crtShService) {
+    public SubdomainTakeoverService(CrtShService crtShService, MessageCatalog catalog) {
         this.crtShService = crtShService;
+        this.catalog = catalog;
     }
 
     public List<SubdomainTakeoverFinding> scan(String targetUrl) {
@@ -147,8 +149,7 @@ public class SubdomainTakeoverService {
                 return SubdomainTakeoverFinding.builder()
                         .subdomain(subdomain).cnameTarget(cnameTarget)
                         .service(matched.serviceName())
-                        .vulnerability("CNAME aponta para " + matched.serviceName()
-                                + " não reivindicado — subdomínio pode ser registrado por atacante")
+                        .vulnerability(catalog.desc("TAKEOVER_UNCLAIMED", matched.serviceName()))
                         .evidence(extractSnippet(body, matched.bodyFingerprint()))
                         .severity(matched.severity()).status("VULNERABLE").build();
             }
@@ -158,9 +159,8 @@ public class SubdomainTakeoverService {
                 return SubdomainTakeoverFinding.builder()
                         .subdomain(subdomain).cnameTarget(cnameTarget)
                         .service(matched.serviceName())
-                        .vulnerability("CNAME aponta para " + matched.serviceName()
-                                + " — serviço não responde")
-                        .evidence("Conexão recusada: " + cnameTarget)
+                        .vulnerability(catalog.desc("TAKEOVER_NO_RESPONSE", matched.serviceName()))
+                        .evidence(catalog.evidence("TAKEOVER_REFUSED", cnameTarget))
                         .severity("MEDIUM").status("POTENTIAL").build();
             }
         }
