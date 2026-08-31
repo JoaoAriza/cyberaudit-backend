@@ -23,6 +23,12 @@ public class TechFingerprintService {
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
+    private final MessageCatalog catalog;
+
+    public TechFingerprintService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     public TechFingerprintResult fingerprint(String targetUrl,
                                              Map<String, String> analyzedHeaders,
                                              List<String> rawSetCookies) {
@@ -107,7 +113,7 @@ public class TechFingerprintService {
 
         // CDN-specific headers
         String cfRay = getFromHeaders(allHeaders, "cf-ray");
-        if (cfRay != null) { cdn = "Cloudflare"; evidence.add("cf-ray header presente"); }
+        if (cfRay != null) { cdn = "Cloudflare"; evidence.add(catalog.evidence("TECH_HEADER_PRESENT", "cf-ray")); }
 
         String xServedBy = getFromHeaders(allHeaders, "x-served-by");
         if (xServedBy != null && xServedBy.toLowerCase().contains("cache")) {
@@ -123,13 +129,13 @@ public class TechFingerprintService {
         }
 
         String xAmzId = getFromHeaders(allHeaders, "x-amz-id-2");
-        if (xAmzId != null) { cdn = "AWS S3/CloudFront"; evidence.add("x-amz-id-2 header presente"); }
+        if (xAmzId != null) { cdn = "AWS S3/CloudFront"; evidence.add(catalog.evidence("TECH_HEADER_PRESENT", "x-amz-id-2")); }
 
         String xVercel = getFromHeaders(allHeaders, "x-vercel-id");
-        if (xVercel != null) { cdn = "Vercel"; evidence.add("x-vercel-id header presente"); }
+        if (xVercel != null) { cdn = "Vercel"; evidence.add(catalog.evidence("TECH_HEADER_PRESENT", "x-vercel-id")); }
 
         String xNetlify = getFromHeaders(allHeaders, "x-nf-request-id");
-        if (xNetlify != null) { cdn = "Netlify"; evidence.add("x-nf-request-id header presente"); }
+        if (xNetlify != null) { cdn = "Netlify"; evidence.add(catalog.evidence("TECH_HEADER_PRESENT", "x-nf-request-id")); }
 
         // ── 2. Cookies ─────────────────────────────────────────────────────────
         if (rawSetCookies != null) {
@@ -138,11 +144,11 @@ public class TechFingerprintService {
                 if      (cl.startsWith("phpsessid"))            { language = "PHP";    evidence.add("Cookie: PHPSESSID"); }
                 else if (cl.startsWith("jsessionid"))           { language = "Java";   backend = coalesce(backend, "Java Servlet/Tomcat"); evidence.add("Cookie: JSESSIONID"); }
                 else if (cl.startsWith("laravel_session"))      { language = "PHP";    framework = "Laravel"; evidence.add("Cookie: laravel_session"); }
-                else if (cl.startsWith("wp-settings") || cl.startsWith("wordpress_")) { cms = "WordPress"; evidence.add("Cookie: WordPress session"); }
-                else if (cl.startsWith("django"))               { language = "Python"; framework = "Django"; evidence.add("Cookie: Django session"); }
-                else if (cl.startsWith("_rails") || cl.startsWith("rack.session")) { language = "Ruby"; framework = "Ruby on Rails"; evidence.add("Cookie: Rails/Rack session"); }
+                else if (cl.startsWith("wp-settings") || cl.startsWith("wordpress_")) { cms = "WordPress"; evidence.add(catalog.evidence("TECH_COOKIE_SESSION", "WordPress")); }
+                else if (cl.startsWith("django"))               { language = "Python"; framework = "Django"; evidence.add(catalog.evidence("TECH_COOKIE_SESSION", "Django")); }
+                else if (cl.startsWith("_rails") || cl.startsWith("rack.session")) { language = "Ruby"; framework = "Ruby on Rails"; evidence.add(catalog.evidence("TECH_COOKIE_SESSION", "Rails/Rack")); }
                 else if (cl.startsWith("craft"))                { cms = "Craft CMS";  evidence.add("Cookie: Craft CMS"); }
-                else if (cl.startsWith("express:sess"))         { language = "Node.js"; framework = coalesce(framework, "Express"); evidence.add("Cookie: Express session"); }
+                else if (cl.startsWith("express:sess"))         { language = "Node.js"; framework = coalesce(framework, "Express"); evidence.add(catalog.evidence("TECH_COOKIE_SESSION", "Express")); }
             }
         }
 
@@ -161,18 +167,18 @@ public class TechFingerprintService {
 
             // CMS via paths
             if (lower.contains("/wp-content/") || lower.contains("/wp-includes/")) {
-                cms = "WordPress"; evidence.add("HTML: /wp-content/ path detectado");
+                cms = "WordPress"; evidence.add(catalog.evidence("TECH_HTML_WP_CONTENT"));
                 extractWpVersion(body).ifPresent(v -> detectedVersions.put("WordPress", v));
             } else if (lower.contains("drupal.settings") || lower.contains("/sites/default/files/")) {
-                cms = "Drupal"; evidence.add("HTML: Drupal signature detectada");
+                cms = "Drupal"; evidence.add(catalog.evidence("TECH_HTML_DRUPAL"));
             } else if (lower.contains("joomla") || lower.contains("/components/com_")) {
-                cms = "Joomla"; evidence.add("HTML: Joomla signature detectada");
+                cms = "Joomla"; evidence.add(catalog.evidence("TECH_HTML_JOOMLA"));
             } else if (lower.contains("shopify.com/s/files") || lower.contains("cdn.shopify.com")) {
-                cms = "Shopify"; evidence.add("HTML: Shopify CDN detectado");
+                cms = "Shopify"; evidence.add(catalog.evidence("TECH_HTML_SHOPIFY"));
             } else if (lower.contains("ghost-url") || lower.contains("/ghost/api/")) {
-                cms = "Ghost"; evidence.add("HTML: Ghost CMS detectado");
+                cms = "Ghost"; evidence.add(catalog.evidence("TECH_HTML_GHOST"));
             } else if (lower.contains("webflow.com") || lower.contains("webflow-badge")) {
-                cms = "Webflow"; evidence.add("HTML: Webflow detectado");
+                cms = "Webflow"; evidence.add(catalog.evidence("TECH_HTML_WEBFLOW"));
             }
 
             // Meta generator (contem versao do CMS frequentemente)
@@ -199,17 +205,17 @@ public class TechFingerprintService {
                 evidence.add("HTML: __NEXT_DATA__ / _next/static");
             } else if (lower.contains("__nuxt") || lower.contains("data-n-head")) {
                 framework = "Nuxt.js"; language = coalesce(language, "Node.js");
-                evidence.add("HTML: Nuxt.js signature");
+                evidence.add(catalog.evidence("TECH_HTML_NUXT"));
             } else if (lower.contains("ng-version") || lower.contains("ng-app")) {
                 framework = "Angular"; language = coalesce(language, "TypeScript");
-                evidence.add("HTML: Angular directive detectada");
+                evidence.add(catalog.evidence("TECH_HTML_ANGULAR"));
                 extractNgVersion(body).ifPresent(v -> detectedVersions.put("Angular", v));
             } else if (lower.contains("data-reactroot") || lower.contains("__reactfiber")) {
-                libraries.add("React"); evidence.add("HTML: React fiber detectado");
+                libraries.add("React"); evidence.add(catalog.evidence("TECH_HTML_REACT"));
             } else if (lower.contains("vue.js") || lower.contains("__vue_app__") || lower.contains("data-v-app")) {
-                libraries.add("Vue.js"); evidence.add("HTML: Vue.js detectado");
+                libraries.add("Vue.js"); evidence.add(catalog.evidence("TECH_HTML_VUE"));
             } else if (lower.contains("svelte-") || lower.contains("__svelte")) {
-                libraries.add("Svelte"); evidence.add("HTML: Svelte detectado");
+                libraries.add("Svelte"); evidence.add(catalog.evidence("TECH_HTML_SVELTE"));
             }
 
             // Libraries — exige a string dentro de um atributo src=/href= (contexto de
@@ -218,7 +224,7 @@ public class TechFingerprintService {
                     "(?:src|href)\\s*=\\s*[\"'][^\"']*bootstrap[^\"']*[\"']",
                     Pattern.CASE_INSENSITIVE);
             if (assetBootstrap.matcher(body).find()) {
-                libraries.add("Bootstrap"); evidence.add("HTML: Bootstrap asset detectado");
+                libraries.add("Bootstrap"); evidence.add(catalog.evidence("TECH_HTML_BOOTSTRAP"));
             }
 
             // Tailwind: "tw-" era muito generico (qualquer classe prefixada). Mantemos
@@ -227,7 +233,7 @@ public class TechFingerprintService {
                     "(?:src|href)\\s*=\\s*[\"'][^\"']*tailwindcss[^\"']*[\"']",
                     Pattern.CASE_INSENSITIVE);
             if (assetTailwind.matcher(body).find() || lower.contains("tailwindcss")) {
-                libraries.add("Tailwind CSS"); evidence.add("HTML: Tailwind CSS detectado");
+                libraries.add("Tailwind CSS"); evidence.add(catalog.evidence("TECH_HTML_TAILWIND"));
             }
 
             // jQuery: exige script src com "jquery" no caminho do arquivo JS.
@@ -238,18 +244,18 @@ public class TechFingerprintService {
             if (jqScript.matcher(body).find()) {
                 String jqVersion = extractJQueryVersion(body).orElse(null);
                 libraries.add(jqVersion != null ? "jQuery " + jqVersion : "jQuery");
-                evidence.add("HTML: jQuery detectado");
+                evidence.add(catalog.evidence("TECH_HTML_JQUERY"));
                 if (jqVersion != null) detectedVersions.put("jQuery", jqVersion);
             }
 
             // Backend patterns
             if (lower.contains("__viewstate") || lower.contains("asp.net_sessionid")) {
                 backend = "ASP.NET"; language = coalesce(language, "C#");
-                evidence.add("HTML: ASP.NET ViewState detectado");
+                evidence.add(catalog.evidence("TECH_HTML_VIEWSTATE"));
             }
             if (lower.contains("thymeleaf") || lower.contains("th:text")) {
                 framework = "Spring + Thymeleaf"; language = coalesce(language, "Java");
-                evidence.add("HTML: Thymeleaf template detectado");
+                evidence.add(catalog.evidence("TECH_HTML_THYMELEAF"));
             }
 
             // Laravel: requer path de asset especifico (/vendor/laravel/, livewire) OU
@@ -260,11 +266,11 @@ public class TechFingerprintService {
             boolean laravelCsrf  = lower.contains("csrf-token") && "PHP".equals(language);
             if ((laravelAsset || laravelCsrf) && framework == null) {
                 framework = "Laravel"; language = coalesce(language, "PHP");
-                evidence.add("HTML: Laravel path/CSRF detectado");
+                evidence.add(catalog.evidence("TECH_HTML_LARAVEL"));
             }
 
             if (lower.contains("inertia") && lower.contains("data-page")) {
-                libraries.add("Inertia.js"); evidence.add("HTML: Inertia.js detectado");
+                libraries.add("Inertia.js"); evidence.add(catalog.evidence("TECH_HTML_INERTIA"));
             }
 
         } catch (Exception ignored) {}
