@@ -25,42 +25,64 @@ package com.joao.cyberaudit.model;
 public enum ScanCheck {
 
     // ── Passivas ─────────────────────────────────────────────────────────────
-    HTTP_FETCH        ("headers"),
-    RELATED_HOSTS     ("headers"),
-    ROBOTS            ("recon"),
-    SECURITY_TXT      ("recon"),
-    DNS_EMAIL         ("recon"),
-    HTTP_METHODS      ("http"),
-    DIRECTORY_LISTING ("dirlist"),
-    SUBDOMAIN_TAKEOVER("takeover"),
-    SOURCE_MAPS       ("sourcemap"),
-    HOST_HEADER       ("hostheader"),
-    API_DOCS          ("apidocs"),
-    GRAPHQL           ("graphql"),
-    CERT_TRANSPARENCY ("cert"),
-    TECH_FINGERPRINT  ("tech"),
-    CVE               ("cve"),
+    HTTP_FETCH        ("headers",    Fase.PASSIVA),
+    RELATED_HOSTS     ("headers",    Fase.PASSIVA),
+    ROBOTS            ("recon",      Fase.PASSIVA),
+    SECURITY_TXT      ("recon",      Fase.PASSIVA),
+    DNS_EMAIL         ("recon",      Fase.PASSIVA),
+    HTTP_METHODS      ("http",       Fase.PASSIVA),
+    DIRECTORY_LISTING ("dirlist",    Fase.PASSIVA),
+    SUBDOMAIN_TAKEOVER("takeover",   Fase.PASSIVA),
+    SOURCE_MAPS       ("sourcemap",  Fase.PASSIVA),
+    HOST_HEADER       ("hostheader", Fase.PASSIVA),
+    API_DOCS          ("apidocs",    Fase.PASSIVA),
+    GRAPHQL           ("graphql",    Fase.PASSIVA),
+    CERT_TRANSPARENCY ("cert",       Fase.PASSIVA),
+    TECH_FINGERPRINT  ("tech",       Fase.PASSIVA),
+    CVE               ("cve",        Fase.PASSIVA),
 
     // ── Ativas ───────────────────────────────────────────────────────────────
-    CORS              ("active"),
-    SENSITIVE_FILES   ("active"),
-    WAF               ("active"),
-    PORT_SCAN         ("active"),
-    REFLECTED_XSS     ("active"),
-    DB_ERROR          ("active"),
-    OPEN_REDIRECT     ("redirect"),
-    CRLF              ("crlf"),
-    PATH_TRAVERSAL    ("traversal"),
-    SSRF              ("ssrf");
+    CORS              ("active",     Fase.ATIVA),
+    SENSITIVE_FILES   ("active",     Fase.ATIVA),
+    WAF               ("active",     Fase.ATIVA),
+    PORT_SCAN         ("active",     Fase.ATIVA),
+    REFLECTED_XSS     ("active",     Fase.ATIVA),
+    DB_ERROR          ("active",     Fase.ATIVA),
+    OPEN_REDIRECT     ("redirect",   Fase.ATIVA),
+    CRLF              ("crlf",       Fase.ATIVA),
+    PATH_TRAVERSAL    ("traversal",  Fase.ATIVA),
+    SSRF              ("ssrf",       Fase.ATIVA);
+
+    /**
+     * Em que fase do scan a verificação roda.
+     *
+     * A distinção já existia como comentário separando os dois blocos deste enum, e
+     * como o parâmetro {@code active} lá no orquestrador. Virou dado porque o feed
+     * de progresso precisa dela em dois momentos: para não listar as ativas num scan
+     * passivo (elas nunca vão rodar, e uma linha eternamente pendente parece travada)
+     * e para agrupar o que aparece na tela.
+     */
+    public enum Fase { PASSIVA, ATIVA }
 
     private final String moduloUi;
+    private final Fase   fase;
 
-    ScanCheck(String moduloUi) {
+    ScanCheck(String moduloUi, Fase fase) {
         this.moduloUi = moduloUi;
+        this.fase     = fase;
     }
 
     /** Id do módulo na barra lateral do Frontend. */
     public String moduloUi() {
         return moduloUi;
+    }
+
+    public Fase fase() {
+        return fase;
+    }
+
+    /** Só roda quando o scan é ativo — envia requisição com payload ao alvo. */
+    public boolean ativa() {
+        return fase == Fase.ATIVA;
     }
 }

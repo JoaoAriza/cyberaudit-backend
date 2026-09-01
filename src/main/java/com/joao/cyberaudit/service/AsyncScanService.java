@@ -6,7 +6,6 @@ import com.joao.cyberaudit.model.AsyncScanStatus.State;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.repository.AppUserRepository;
 import org.springframework.context.i18n.LocaleContextHolder;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -32,7 +31,8 @@ public class AsyncScanService {
      * propósito: aquele objeto é serializado para o cliente e não deve carregar
      * identidade de ninguém.
      */
-    private record Entry(AsyncScanStatus status, String ownerKey, Instant createdAt) {}
+    private record Entry(AsyncScanStatus status, String ownerKey, Instant createdAt,
+                         ScanProgress progresso) {}
 
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
 
@@ -40,15 +40,21 @@ public class AsyncScanService {
     private final EmailService           emailService;
     private final AppUserRepository      appUserRepository;
     private final ScanEntitlementService scanEntitlement;
+    private final MessageCatalog         catalog;
+    private final BackgroundRunner       background;
 
     public AsyncScanService(ScanOrchestrator scanOrchestrator,
                             EmailService emailService,
                             AppUserRepository appUserRepository,
-                            ScanEntitlementService scanEntitlement) {
+                            ScanEntitlementService scanEntitlement,
+                            MessageCatalog catalog,
+                            BackgroundRunner background) {
         this.scanOrchestrator  = scanOrchestrator;
         this.emailService      = emailService;
         this.appUserRepository = appUserRepository;
         this.scanEntitlement   = scanEntitlement;
+        this.catalog           = catalog;
+        this.background        = background;
     }
 
     /**
@@ -65,13 +71,23 @@ public class AsyncScanService {
                          boolean refresh, boolean notify, String ownerKey) {
         evictStale();
         String scanId = UUID.randomUUID().toString();
-        put(scanId, new AsyncScanStatus(scanId, State.PENDING, null, null), ownerKey);
+        // Nasce junto com o scanId: o cliente pode perguntar o progresso antes mesmo
+        // de a thread do scan começar, e recebe a lista inteira ainda pendente.
+        put(scanId, new AsyncScanStatus(scanId, State.PENDING, null, null), ownerKey,
+                new ScanProgress(catalog, active));
         // O idioma tem de ser capturado AQUI, na thread da requisição. O
         // LocaleContextHolder é ThreadLocal e o scan roda em outra thread: sem
         // carregá-lo junto, todo scan assíncrono sairia no idioma padrão — e este
         // é o caminho que a interface usa.
-        executeAsync(scanId, url, active, currentUser, refresh, notify, ownerKey,
-                LocaleContextHolder.getLocale());
+        //
+        // Via BackgroundRunner, e não com um @Async aqui: método anotado chamado de
+        // dentro da própria classe não passa pelo proxy do Spring e roda síncrono.
+        // Ver o javadoc do BackgroundRunner — foi assim que este endpoint passou a
+        // devolver o scanId só depois do scan inteiro terminar.
+        final AppUser usuario = currentUser;
+        final Locale  idioma  = LocaleContextHolder.getLocale();
+        background.run(() -> executeScan(scanId, url, active, usuario, refresh, notify,
+                ownerKey, idioma));
         return scanId;
     }
 
@@ -83,13 +99,22 @@ public class AsyncScanService {
     public AsyncScanStatus getStatusFor(String scanId, String ownerKey) {
         Entry entry = entries.get(scanId);
         if (entry == null || !entry.ownerKey().equals(ownerKey)) return null;
-        return entry.status();
+
+        // O progresso é montado aqui, e não guardado com o status, por duas razões:
+        // muda a cada instante enquanto o scan roda, e os rótulos são traduzidos no
+        // idioma de QUEM PERGUNTOU — o feed acompanha quem troca de idioma no meio.
+        AsyncScanStatus s = entry.status();
+        return new AsyncScanStatus(s.getScanId(), s.getState(), s.getResult(),
+                s.getErrorMessage(), entry.progresso().instantaneo());
     }
 
-    @Async
-    public void executeAsync(String scanId, String url, boolean active,
-                             AppUser currentUser, boolean refresh, boolean notify,
-                             String ownerKey, Locale idioma) {
+    /**
+     * O scan em si. Já roda na thread do {@link BackgroundRunner} — sem anotação
+     * aqui, que daria a impressão de garantir a troca de thread e não garante.
+     */
+    void executeScan(String scanId, String url, boolean active,
+                     AppUser currentUser, boolean refresh, boolean notify,
+                     String ownerKey, Locale idioma) {
         put(scanId, new AsyncScanStatus(scanId, State.RUNNING, null, null), ownerKey);
         // Reinstala o idioma da requisição nesta thread; o finally limpa porque a
         // thread volta para o pool e serviria outro scan com o idioma errado.
@@ -105,7 +130,8 @@ public class AsyncScanService {
                         .orElse(null);
             }
 
-            ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh);
+            ScanResult result = scanOrchestrator.execute(url, active, currentUser, refresh,
+                    com.joao.cyberaudit.model.ScanOrigin.MANUAL, progressoDe(scanId));
 
             // O gating vale para QUALQUER canal de entrega, não só para a tela.
             // O e-mail mandava o resultado cru: um FREE via na caixa de entrada os
@@ -160,10 +186,22 @@ public class AsyncScanService {
 
     // ── Interno ──────────────────────────────────────────────────────────────
 
+    /** Atualiza o status preservando o progresso que já está sendo escrito. */
     private void put(String scanId, AsyncScanStatus status, String ownerKey) {
         Entry previous = entries.get(scanId);
+        put(scanId, status, ownerKey,
+                previous != null ? previous.progresso() : ScanProgress.desligado());
+    }
+
+    private void put(String scanId, AsyncScanStatus status, String ownerKey, ScanProgress progresso) {
+        Entry previous = entries.get(scanId);
         Instant createdAt = previous != null ? previous.createdAt() : Instant.now();
-        entries.put(scanId, new Entry(status, ownerKey, createdAt));
+        entries.put(scanId, new Entry(status, ownerKey, createdAt, progresso));
+    }
+
+    private ScanProgress progressoDe(String scanId) {
+        Entry entry = entries.get(scanId);
+        return entry != null ? entry.progresso() : ScanProgress.desligado();
     }
 
     /**

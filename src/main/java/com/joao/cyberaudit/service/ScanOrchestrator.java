@@ -142,6 +142,19 @@ public class ScanOrchestrator {
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh, ScanOrigin origin) {
+        return execute(url, active, currentUser, refresh, origin, ScanProgress.desligado());
+    }
+
+    /**
+     * Variante que reporta o andamento enquanto trabalha.
+     *
+     * O {@code progresso} é parâmetro, e não campo, porque este serviço é singleton
+     * e atende vários scans ao mesmo tempo — um campo misturaria o progresso de
+     * clientes diferentes. Quem não observa passa {@link ScanProgress#desligado()},
+     * que é o que as três outras assinaturas fazem.
+     */
+    public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh,
+                              ScanOrigin origin, ScanProgress progresso) {
         String inputUrl = normalizeUrl(url);
         // Anti-SSRF: bloqueia alvos internos/privados antes de qualquer request
         // (cobre fetch, port scan e demais módulos, pois todos rodam dentro deste execute()).
@@ -167,11 +180,11 @@ public class ScanOrchestrator {
         // Só o trabalho real ocupa slot — cache hit não entra na fila.
         final AppUser user = currentUser;
         return concurrencyLimiter.withSlot(
-                () -> runScan(inputUrl, cacheKey, active, user, origin));
+                () -> runScan(inputUrl, cacheKey, active, user, origin, progresso));
     }
 
     private ScanResult runScan(String inputUrl, String cacheKey, boolean active,
-                               AppUser currentUser, ScanOrigin origin) {
+                               AppUser currentUser, ScanOrigin origin, ScanProgress progresso) {
         // Registra início do scan somente para usuários autenticados
         if (currentUser != null) {
             auditService.log(currentUser, AuditAction.SCAN_STARTED,
@@ -195,7 +208,12 @@ public class ScanOrchestrator {
         else if (sslInfo.isHttps()) analysisUrl = toHttp(inputUrl);
         else                        analysisUrl = toHttp(inputUrl);
 
+        // Primeira requisição ao alvo e a mais lenta a aparecer: marcada à mão porque
+        // roda fora dos pools, e sem ela o feed ficaria vazio justamente no começo.
+        progresso.registra(ScanCheck.HTTP_FETCH, ScanProgress.Estado.RODANDO);
         HttpFetchResult fetch = httpFetchService.fetchHeaders(analysisUrl);
+        progresso.registra(ScanCheck.HTTP_FETCH,
+                fetch.getError() != null ? ScanProgress.Estado.FALHOU : ScanProgress.Estado.OK);
 
         Map<String, String> analyzedHeaders;
         boolean serverVersionExposed = false;
@@ -221,11 +239,15 @@ public class ScanOrchestrator {
         ExecutorService fingerprintPool = Executors.newFixedThreadPool(2);
 
         var fingerprintFuture = CompletableFuture.supplyAsync(
-                () -> techFingerprintService.fingerprint(target, analyzedHeaders, fetch.getRawSetCookies()),
+                progresso.acompanha(ScanCheck.TECH_FINGERPRINT,
+                        () -> techFingerprintService.fingerprint(target, analyzedHeaders, fetch.getRawSetCookies())),
                 fingerprintPool).exceptionally(e -> null);
 
+        // Encadeada, não paralela: `acompanha` embrulha o corpo porque quem chega
+        // aqui é uma Function, e o que interessa marcar é a correlação em si.
         var cveFuture = fingerprintFuture.thenApplyAsync(
-                fp -> fp != null ? cveCorrelationService.correlate(fp) : List.<CVEFinding>of(),
+                fp -> progresso.acompanha(ScanCheck.CVE,
+                        () -> fp != null ? cveCorrelationService.correlate(fp) : List.<CVEFinding>of()).get(),
                 fingerprintPool);
 
         // ── Busca scan anterior ANTES de salvar (para change detection) ───────
@@ -242,42 +264,54 @@ public class ScanOrchestrator {
         moduleStatus.put(ScanCheck.HTTP_FETCH.name(), fetch.getError() != null ? "ERROR" : "OK");
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
-                            () -> robotsTxtService.findSensitivePaths(target), passivePool)
+                            progresso.acompanha(ScanCheck.ROBOTS,
+                                    () -> robotsTxtService.findSensitivePaths(target)), passivePool)
                     .exceptionally(e -> List.of());
             var secTxtFuture = CompletableFuture.supplyAsync(
-                            () -> securityTxtService.check(target), passivePool)
+                            progresso.acompanha(ScanCheck.SECURITY_TXT,
+                                    () -> securityTxtService.check(target)), passivePool)
                     .exceptionally(e -> null);
             var dnsFuture = CompletableFuture.supplyAsync(
-                            () -> dnsSecurityService.scan(host), passivePool)
+                            progresso.acompanha(ScanCheck.DNS_EMAIL,
+                                    () -> dnsSecurityService.scan(host)), passivePool)
                     .exceptionally(e -> null);
             var methodsFuture = CompletableFuture.supplyAsync(
-                            () -> httpMethodService.scan(target), passivePool)
+                            progresso.acompanha(ScanCheck.HTTP_METHODS,
+                                    () -> httpMethodService.scan(target)), passivePool)
                     .exceptionally(e -> List.of());
             var dirListFuture = CompletableFuture.supplyAsync(
-                            () -> directoryListingService.scan(target), passivePool)
+                            progresso.acompanha(ScanCheck.DIRECTORY_LISTING,
+                                    () -> directoryListingService.scan(target)), passivePool)
                     .exceptionally(e -> List.of());
 
             var takeoverFuture = CompletableFuture.supplyAsync(
-                            () -> subdomainTakeoverService.scan(target), passivePool)
+                            progresso.acompanha(ScanCheck.SUBDOMAIN_TAKEOVER,
+                                    () -> subdomainTakeoverService.scan(target)), passivePool)
                     .exceptionally(e -> List.of());
             var sourceMapFuture = CompletableFuture.supplyAsync(
-                    () -> sourceMapService.scan(target), passivePool).exceptionally(e -> List.of());
+                    progresso.acompanha(ScanCheck.SOURCE_MAPS,
+                            () -> sourceMapService.scan(target)), passivePool).exceptionally(e -> List.of());
             var hostHeaderFuture = CompletableFuture.supplyAsync(
-                    () -> hostHeaderService.scan(target), passivePool).exceptionally(e -> List.of());
+                    progresso.acompanha(ScanCheck.HOST_HEADER,
+                            () -> hostHeaderService.scan(target)), passivePool).exceptionally(e -> List.of());
             var apiDocsFuture  = CompletableFuture.supplyAsync(
-                            () -> apiDocsExposureService.scan(target), passivePool)
+                            progresso.acompanha(ScanCheck.API_DOCS,
+                                    () -> apiDocsExposureService.scan(target)), passivePool)
                     .exceptionally(e -> List.of());
             var graphQlFuture  = CompletableFuture.supplyAsync(
-                            () -> graphQlIntrospectionService.scan(target), passivePool)
+                            progresso.acompanha(ScanCheck.GRAPHQL,
+                                    () -> graphQlIntrospectionService.scan(target)), passivePool)
                     .exceptionally(e -> List.of());
             var relatedHostsFuture = CompletableFuture.supplyAsync(
-                            () -> relatedHostsHeaderService.analyze(host), passivePool)
+                            progresso.acompanha(ScanCheck.RELATED_HOSTS,
+                                    () -> relatedHostsHeaderService.analyze(host)), passivePool)
                     .exceptionally(e -> List.<RelatedHostHeaders>of());
 
             // CT encadeado após DNS para garantir que recebe o resultado correto
             var certTransFuture = dnsFuture
                     .thenApplyAsync(
-                            dnsResult -> certTransparencyService.scan(host, dnsResult),
+                            dnsResult -> progresso.acompanha(ScanCheck.CERT_TRANSPARENCY,
+                                    () -> certTransparencyService.scan(host, dnsResult)).get(),
                             passivePool)
                     .exceptionally(e -> null);
 
@@ -307,6 +341,10 @@ public class ScanOrchestrator {
             moduleStatus.put(ScanCheck.TECH_FINGERPRINT.name(), moduleState(fingerprintFuture));
             moduleStatus.put(ScanCheck.CVE.name(),               moduleState(cveFuture));
             moduleStatus.put(ScanCheck.RELATED_HOSTS.name(),     moduleState(relatedHostsFuture));
+
+            // Quem estourou o teto de 120s continuaria "rodando" no feed para sempre:
+            // quem marca OK é a própria tarefa, e a que não terminou não marca nada.
+            progresso.sincroniza(moduleStatus);
 
             List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
@@ -419,32 +457,42 @@ public class ScanOrchestrator {
             ExecutorService activePool = Executors.newFixedThreadPool(6);
 
             var corsFuture     = CompletableFuture.supplyAsync(
-                    () -> corsAnalyzerService.analyze(target), activePool).exceptionally(e -> null);
+                    progresso.acompanha(ScanCheck.CORS,
+                            () -> corsAnalyzerService.analyze(target)), activePool).exceptionally(e -> null);
             var filesFuture    = CompletableFuture.supplyAsync(
-                    () -> sensitiveFileService.scan(target), activePool).exceptionally(e -> List.of());
+                    progresso.acompanha(ScanCheck.SENSITIVE_FILES,
+                            () -> sensitiveFileService.scan(target)), activePool).exceptionally(e -> List.of());
             var wafFuture      = CompletableFuture.supplyAsync(
-                    () -> wafDetectionService.scan(target), activePool).exceptionally(e -> null);
+                    progresso.acompanha(ScanCheck.WAF,
+                            () -> wafDetectionService.scan(target)), activePool).exceptionally(e -> null);
             var redirectFuture = CompletableFuture.supplyAsync(
-                    () -> openRedirectService.scan(target, true), activePool).exceptionally(e -> List.of());
+                    progresso.acompanha(ScanCheck.OPEN_REDIRECT,
+                            () -> openRedirectService.scan(target, true)), activePool).exceptionally(e -> List.of());
             var xssFuture = inputSurfaceDetected
-                    ? CompletableFuture.supplyAsync(() -> xssProbeService.reflectedMarkerAppears(target), activePool).exceptionally(e -> false)
+                    ? CompletableFuture.supplyAsync(progresso.acompanha(ScanCheck.REFLECTED_XSS,
+                            () -> xssProbeService.reflectedMarkerAppears(target)), activePool).exceptionally(e -> false)
                     : CompletableFuture.completedFuture(false);
             var dbFuture = inputSurfaceDetected
-                    ? CompletableFuture.supplyAsync(() -> errorDisclosureService.detectsDbErrorLeakage(target), activePool).exceptionally(e -> false)
+                    ? CompletableFuture.supplyAsync(progresso.acompanha(ScanCheck.DB_ERROR,
+                            () -> errorDisclosureService.detectsDbErrorLeakage(target)), activePool).exceptionally(e -> false)
                     : CompletableFuture.completedFuture(false);
             var pathTraversalFuture = inputSurfaceDetected
                     ? CompletableFuture.supplyAsync(
-                            () -> pathTraversalService.scan(target), activePool).exceptionally(e -> List.of())
+                            progresso.acompanha(ScanCheck.PATH_TRAVERSAL,
+                                    () -> pathTraversalService.scan(target)), activePool).exceptionally(e -> List.of())
                     : CompletableFuture.completedFuture(List.<PathTraversalFinding>of());
             // CRLF roda SEMPRE em modo ativo — inclui path injection que não depende de parâmetros
             var crlfFuture = CompletableFuture.supplyAsync(
-                    () -> crlfService.scan(target), activePool).exceptionally(e -> List.of());
+                    progresso.acompanha(ScanCheck.CRLF,
+                            () -> crlfService.scan(target)), activePool).exceptionally(e -> List.of());
             var ssrfFuture = inputSurfaceDetected
                     ? CompletableFuture.supplyAsync(
-                            () -> ssrfService.scan(target), activePool).exceptionally(e -> List.of())
+                            progresso.acompanha(ScanCheck.SSRF,
+                                    () -> ssrfService.scan(target)), activePool).exceptionally(e -> List.of())
                     : CompletableFuture.completedFuture(List.<SsrfFinding>of());
             var portFuture = (host != null && !host.isBlank())
-                    ? CompletableFuture.supplyAsync(() -> portScanService.scanCommonPorts(host), activePool).exceptionally(e -> List.of())
+                    ? CompletableFuture.supplyAsync(progresso.acompanha(ScanCheck.PORT_SCAN,
+                            () -> portScanService.scanCommonPorts(host)), activePool).exceptionally(e -> List.of())
                     : CompletableFuture.completedFuture(List.<PortFinding>of());
 
             try {
@@ -473,6 +521,10 @@ public class ScanOrchestrator {
                     inputSurfaceDetected ? moduleState(pathTraversalFuture) : "SKIPPED");
             moduleStatus.put(ScanCheck.SSRF.name(),
                     inputSurfaceDetected ? moduleState(ssrfFuture) : "SKIPPED");
+
+            // Além do timeout, esta passada é o que transforma em PULADO os probes que
+            // não tinham onde rodar — sem superfície de input, sem host para as portas.
+            progresso.sincroniza(moduleStatus);
 
             CorsResult                 corsResult            = corsFuture.getNow(null);
             List<SensitiveFileFinding> sensitiveFiles        = filesFuture.getNow(List.of());
