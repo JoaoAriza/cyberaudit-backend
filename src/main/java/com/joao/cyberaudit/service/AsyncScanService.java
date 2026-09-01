@@ -42,19 +42,22 @@ public class AsyncScanService {
     private final ScanEntitlementService scanEntitlement;
     private final MessageCatalog         catalog;
     private final BackgroundRunner       background;
+    private final PlanLimitService       planLimitService;
 
     public AsyncScanService(ScanOrchestrator scanOrchestrator,
                             EmailService emailService,
                             AppUserRepository appUserRepository,
                             ScanEntitlementService scanEntitlement,
                             MessageCatalog catalog,
-                            BackgroundRunner background) {
+                            BackgroundRunner background,
+                            PlanLimitService planLimitService) {
         this.scanOrchestrator  = scanOrchestrator;
         this.emailService      = emailService;
         this.appUserRepository = appUserRepository;
         this.scanEntitlement   = scanEntitlement;
         this.catalog           = catalog;
         this.background        = background;
+        this.planLimitService  = planLimitService;
     }
 
     /**
@@ -74,7 +77,8 @@ public class AsyncScanService {
         // Nasce junto com o scanId: o cliente pode perguntar o progresso antes mesmo
         // de a thread do scan começar, e recebe a lista inteira ainda pendente.
         put(scanId, new AsyncScanStatus(scanId, State.PENDING, null, null), ownerKey,
-                new ScanProgress(catalog, active));
+                new ScanProgress(catalog, active,
+                        planLimitService.activeScanAllowedByPlan(currentUser)));
         // O idioma tem de ser capturado AQUI, na thread da requisição. O
         // LocaleContextHolder é ThreadLocal e o scan roda em outra thread: sem
         // carregá-lo junto, todo scan assíncrono sairia no idioma padrão — e este

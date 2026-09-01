@@ -133,8 +133,7 @@ public class PlanLimitService {
         }
 
         // PESSOAL FREE — bloqueado
-        Plan plan = effectivePlan(account);
-        if (plan == Plan.FREE && account.getType() != AccountType.COMPANY) {
+        if (pessoalFree(account)) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "Scan ativo requer plano PRO ou superior.");
         }
@@ -160,6 +159,30 @@ public class PlanLimitService {
     /** Mantido para compatibilidade — chama a versão com host. */
     public void checkActiveScan(AppUser user) {
         checkActiveScan(user, null);
+    }
+
+    /**
+     * O PLANO permite scan ativo? Pergunta diferente de {@link #checkActiveScan}.
+     *
+     * Aquele método recusa por dois motivos distintos, e a saída de cada um é outra:
+     * plano insuficiente se resolve assinando, domínio não verificado se resolve
+     * verificando. Um PRO sem domínio verificado também é recusado lá — e seria
+     * errado mostrar "requer PRO" para ele.
+     *
+     * Serve ao feed de progresso, que exibe as sondas ativas como bloqueadas para
+     * quem não pode rodá-las de jeito nenhum. Compartilha {@link #pessoalFree} com
+     * o check de verdade para as duas respostas não divergirem.
+     */
+    public boolean activeScanAllowedByPlan(AppUser user) {
+        if (user == null) return false;                       // guest
+        if (platformStaffService.isStaff(user)) return true;
+        Account account = user.getAccount();
+        return account != null && !pessoalFree(account);
+    }
+
+    private boolean pessoalFree(Account account) {
+        return effectivePlan(account) == Plan.FREE
+                && account.getType() != AccountType.COMPANY;
     }
 
     private boolean isVerifiedForAccount(Account account, String host) {

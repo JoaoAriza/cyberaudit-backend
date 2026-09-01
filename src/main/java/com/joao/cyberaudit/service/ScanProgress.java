@@ -38,19 +38,32 @@ public class ScanProgress {
      * {@code PULADO} não é falha: é decisão do scan — probe de injeção sem
      * parâmetro para injetar, port scan sem host. Aparece separado de
      * {@code FALHOU} para o feed não acusar problema onde não houve.
+     *
+     * {@code BLOQUEADO} nunca é gravado: nasce no {@link #instantaneo()} para as
+     * sondas ativas de quem não pode rodá-las. É estado de exibição, não de
+     * execução — nada nunca transita para ele.
      */
-    public enum Estado { PENDENTE, RODANDO, OK, FALHOU, PULADO }
+    public enum Estado { PENDENTE, RODANDO, OK, FALHOU, PULADO, BLOQUEADO }
 
     /** Uma linha do feed, pronta para o cliente. */
     public record Etapa(String check, String module, String label, String phase, String state) {}
 
     private final MessageCatalog catalog;
-    private final boolean incluiAtivas;
+    private final boolean scanAtivo;
+    private final boolean planoPermiteAtivo;
     private final Map<ScanCheck, Estado> estados = new ConcurrentHashMap<>();
 
-    public ScanProgress(MessageCatalog catalog, boolean incluiAtivas) {
-        this.catalog      = catalog;
-        this.incluiAtivas = incluiAtivas;
+    /**
+     * @param scanAtivo         este scan roda as sondas ativas
+     * @param planoPermiteAtivo o plano de quem pediu permite scan ativo — decide o
+     *                          que fazer com as ativas quando {@code scanAtivo} é
+     *                          falso: omitir (pode, mas não pediu) ou mostrar
+     *                          bloqueadas (não pode de jeito nenhum)
+     */
+    public ScanProgress(MessageCatalog catalog, boolean scanAtivo, boolean planoPermiteAtivo) {
+        this.catalog           = catalog;
+        this.scanAtivo         = scanAtivo;
+        this.planoPermiteAtivo = planoPermiteAtivo;
     }
 
     /**
@@ -61,7 +74,7 @@ public class ScanProgress {
      * orquestrador não ter de checar em 25 lugares.
      */
     public static ScanProgress desligado() {
-        return new ScanProgress(null, false);
+        return new ScanProgress(null, false, false);
     }
 
     /**
@@ -121,18 +134,33 @@ public class ScanProgress {
      * Devolve todas — inclusive as pendentes — porque o feed mostra o caminho
      * completo desde o primeiro instante. Saber que faltam dezoito é informação;
      * ver linhas aparecerem do nada, não.
+     *
+     * <p>As sondas ativas num scan passivo têm dois destinos, e a diferença importa:
+     * <ul>
+     *   <li><b>quem PODE rodá-las</b> e escolheu não rodar não as vê. Listadas,
+     *       ficariam pendentes até o fim — e linha que nunca sai do lugar é
+     *       exatamente a sensação de travamento que este feed existe para desfazer;</li>
+     *   <li><b>quem NÃO pode</b> as vê bloqueadas. É estado assentado, não
+     *       pendente: não gira, não promete, e mostra o tamanho do produto para
+     *       quem está justamente parado olhando a tela.</li>
+     * </ul>
      */
     public List<Etapa> instantaneo() {
         if (catalog == null) return List.of();
         return Arrays.stream(ScanCheck.values())
-                .filter(c -> incluiAtivas || !c.ativa())
+                .filter(c -> !c.ativa() || scanAtivo || !planoPermiteAtivo)
                 .map(c -> new Etapa(
                         c.name(),
                         c.moduloUi(),
                         catalog.check(c.name()),
                         c.fase().name(),
-                        estados.getOrDefault(c, Estado.PENDENTE).name()))
+                        estadoDe(c).name()))
                 .toList();
+    }
+
+    private Estado estadoDe(ScanCheck check) {
+        if (check.ativa() && !scanAtivo) return Estado.BLOQUEADO;
+        return estados.getOrDefault(check, Estado.PENDENTE);
     }
 
     private static ScanCheck porNome(String nome) {

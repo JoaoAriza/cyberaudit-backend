@@ -26,12 +26,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ScanProgressTest {
 
-    private ScanProgress progresso(boolean incluiAtivas) {
+    private ScanProgress progresso(boolean scanAtivo) {
+        return progresso(scanAtivo, true);
+    }
+
+    private ScanProgress progresso(boolean scanAtivo, boolean planoPermiteAtivo) {
         var source = new ResourceBundleMessageSource();
         source.setBasename("messages");
         source.setDefaultEncoding("UTF-8");
         source.setFallbackToSystemLocale(false);
-        return new ScanProgress(new MessageCatalog(source), incluiAtivas);
+        return new ScanProgress(new MessageCatalog(source), scanAtivo, planoPermiteAtivo);
     }
 
     @AfterEach
@@ -59,14 +63,43 @@ class ScanProgressTest {
     }
 
     @Test
-    @DisplayName("scan passivo não lista as verificações ativas")
-    void passivoOmiteAsAtivas() {
-        // Elas nunca vão rodar. Listadas, ficariam pendentes para sempre — e uma
-        // linha que nunca sai do lugar faz o scan inteiro parecer travado.
-        var etapas = progresso(false).instantaneo();
+    @DisplayName("quem PODE rodar ativo e escolheu não rodar não vê as ativas")
+    void passivoPorEscolhaOmiteAsAtivas() {
+        // Elas nunca vão rodar neste scan. Listadas, ficariam pendentes para sempre —
+        // e uma linha que nunca sai do lugar faz o scan inteiro parecer travado.
+        var etapas = progresso(false, true).instantaneo();
 
+        assertEquals(15, etapas.size());
         assertTrue(etapas.stream().noneMatch(e -> e.phase().equals("ATIVA")));
         assertTrue(etapas.stream().anyMatch(e -> e.check().equals("HTTP_FETCH")));
+    }
+
+    @Test
+    @DisplayName("quem NÃO pode rodar ativo vê as sondas ativas bloqueadas")
+    void semPlanoVeAsAtivasBloqueadas() {
+        // Guest e FREE ficam parados olhando a tela do mesmo jeito. Mostrar o que o
+        // produto faz é o melhor uso daquele minuto — e bloqueado é estado assentado,
+        // não pendente: não gira e não promete que vai rodar.
+        var etapas = progresso(false, false).instantaneo();
+
+        assertEquals(25, etapas.size());
+        assertTrue(etapas.stream()
+                        .filter(e -> e.phase().equals("ATIVA"))
+                        .allMatch(e -> e.state().equals("BLOQUEADO")),
+                "sonda ativa apareceu como pendente para quem não pode rodá-la");
+        assertEquals("PENDENTE", estadoDe(etapas, ScanCheck.ROBOTS));
+    }
+
+    @Test
+    @DisplayName("scan ativo de verdade nunca marca bloqueado")
+    void ativoNaoBloqueiaNada() {
+        // O plano só decide o que fazer com as ativas quando elas NÃO rodam. Se o
+        // scan é ativo, a pergunta não se aplica — nem para quem chegou aqui por
+        // ser equipe da plataforma.
+        var etapas = progresso(true, false).instantaneo();
+
+        assertEquals(25, etapas.size());
+        assertTrue(etapas.stream().noneMatch(e -> e.state().equals("BLOQUEADO")));
     }
 
     @Test
