@@ -76,26 +76,18 @@ class AsyncScanSubmitTest {
             return mock(ScanOrchestrator.class);
         }
 
-        /** Sem stub: {@code activeScanAllowedByPlan} devolve false, como para um guest. */
-        @Bean
-        PlanLimitService planLimitService() {
-            return mock(PlanLimitService.class);
-        }
-
         @Bean
         AsyncScanService asyncScanService(ScanOrchestrator orquestrador,
                                           MessageCatalog catalog,
-                                          BackgroundRunner background,
-                                          PlanLimitService planos) {
+                                          BackgroundRunner background) {
             return new AsyncScanService(orquestrador, mock(EmailService.class),
                     mock(AppUserRepository.class), mock(ScanEntitlementService.class),
-                    catalog, background, planos);
+                    catalog, background);
         }
     }
 
     @Autowired AsyncScanService service;
     @Autowired ScanOrchestrator orquestrador;
-    @Autowired PlanLimitService planos;
 
     /** Faz o orquestrador travar até {@code solta} ser liberado. */
     private CountDownLatch prendeOScan(CountDownLatch comecou, CountDownLatch solta) {
@@ -138,11 +130,10 @@ class AsyncScanSubmitTest {
     }
 
     @Test
-    @DisplayName("guest em scan passivo vê as sondas ativas, bloqueadas")
-    void guestVeOTamanhoDoProduto() throws Exception {
-        // O usuário sem login fica parado olhando a tela como qualquer outro. O feed
-        // mostra as 25 — as 10 que ele não pode rodar aparecem bloqueadas, que é
-        // diferente de pendente: não giram e não prometem que vão rodar.
+    @DisplayName("guest em scan passivo recebe as 25, com as ativas marcadas como não executadas")
+    void guestVeOEscopoInteiro() throws Exception {
+        // O feed é o mesmo para todo mundo: não há regra de plano nele. O que muda
+        // entre planos é o acesso ao RESULTADO, e isso quem decide é outro serviço.
         CountDownLatch comecou = new CountDownLatch(1);
         CountDownLatch solta   = new CountDownLatch(1);
         prendeOScan(comecou, solta);
@@ -156,33 +147,9 @@ class AsyncScanSubmitTest {
             assertEquals(25, progresso.size());
             assertTrue(progresso.stream()
                     .filter(e -> e.phase().equals("ATIVA"))
-                    .allMatch(e -> e.state().equals("BLOQUEADO")));
+                    .allMatch(e -> e.state().equals("NAO_EXECUTADA")));
         } finally {
             solta.countDown();
-        }
-    }
-
-    @Test
-    @DisplayName("quem pode rodar ativo e escolheu passivo recebe só as 15")
-    void quemPodeNaoVeCadeadoInutil() throws Exception {
-        // Mostrar "requer PRO" para quem já tem PRO é ruído, e ruído de venda.
-        when(planos.activeScanAllowedByPlan(any())).thenReturn(true);
-
-        CountDownLatch comecou = new CountDownLatch(1);
-        CountDownLatch solta   = new CountDownLatch(1);
-        prendeOScan(comecou, solta);
-        String dono = "ip:198.51.100.11";
-
-        try {
-            String scanId = service.submit("https://exemplo.test", false, null, true, false, dono);
-            assertTrue(comecou.await(3, TimeUnit.SECONDS));
-
-            var progresso = service.getStatusFor(scanId, dono).getProgress();
-            assertEquals(15, progresso.size());
-            assertTrue(progresso.stream().noneMatch(e -> e.phase().equals("ATIVA")));
-        } finally {
-            solta.countDown();
-            when(planos.activeScanAllowedByPlan(any())).thenReturn(false);
         }
     }
 

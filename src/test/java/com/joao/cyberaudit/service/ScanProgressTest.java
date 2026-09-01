@@ -27,15 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ScanProgressTest {
 
     private ScanProgress progresso(boolean scanAtivo) {
-        return progresso(scanAtivo, true);
-    }
-
-    private ScanProgress progresso(boolean scanAtivo, boolean planoPermiteAtivo) {
         var source = new ResourceBundleMessageSource();
         source.setBasename("messages");
         source.setDefaultEncoding("UTF-8");
         source.setFallbackToSystemLocale(false);
-        return new ScanProgress(new MessageCatalog(source), scanAtivo, planoPermiteAtivo);
+        return new ScanProgress(new MessageCatalog(source), scanAtivo);
     }
 
     @AfterEach
@@ -63,43 +59,45 @@ class ScanProgressTest {
     }
 
     @Test
-    @DisplayName("quem PODE rodar ativo e escolheu não rodar não vê as ativas")
-    void passivoPorEscolhaOmiteAsAtivas() {
-        // Elas nunca vão rodar neste scan. Listadas, ficariam pendentes para sempre —
-        // e uma linha que nunca sai do lugar faz o scan inteiro parecer travado.
-        var etapas = progresso(false, true).instantaneo();
-
-        assertEquals(15, etapas.size());
-        assertTrue(etapas.stream().noneMatch(e -> e.phase().equals("ATIVA")));
-        assertTrue(etapas.stream().anyMatch(e -> e.check().equals("HTTP_FETCH")));
-    }
-
-    @Test
-    @DisplayName("quem NÃO pode rodar ativo vê as sondas ativas bloqueadas")
-    void semPlanoVeAsAtivasBloqueadas() {
-        // Guest e FREE ficam parados olhando a tela do mesmo jeito. Mostrar o que o
-        // produto faz é o melhor uso daquele minuto — e bloqueado é estado assentado,
-        // não pendente: não gira e não promete que vai rodar.
-        var etapas = progresso(false, false).instantaneo();
+    @DisplayName("scan passivo lista as 25 e diz quais não foram executadas")
+    void passivoMostraOEscopoInteiro() {
+        // As 25 saem para todo mundo, sem regra de plano. Esconder as ativas do FREE
+        // dava a impressão de escopo menor; marcá-las como "requer PRO" dava a
+        // impressão de que são a parte paga — e não são, o gating de detalhe pega
+        // quase todos os módulos, passivos inclusive.
+        var etapas = progresso(false).instantaneo();
 
         assertEquals(25, etapas.size());
         assertTrue(etapas.stream()
                         .filter(e -> e.phase().equals("ATIVA"))
-                        .allMatch(e -> e.state().equals("BLOQUEADO")),
-                "sonda ativa apareceu como pendente para quem não pode rodá-la");
+                        .allMatch(e -> e.state().equals("NAO_EXECUTADA")),
+                "sonda ativa em scan passivo tem de dizer que não rodou");
         assertEquals("PENDENTE", estadoDe(etapas, ScanCheck.ROBOTS));
     }
 
     @Test
-    @DisplayName("scan ativo de verdade nunca marca bloqueado")
-    void ativoNaoBloqueiaNada() {
-        // O plano só decide o que fazer com as ativas quando elas NÃO rodam. Se o
-        // scan é ativo, a pergunta não se aplica — nem para quem chegou aqui por
-        // ser equipe da plataforma.
-        var etapas = progresso(true, false).instantaneo();
+    @DisplayName("sonda ativa nunca aparece como verificada num scan passivo")
+    void passivoNuncaAfirmaTerVerificado() {
+        // A regra que não pode cair. Um ✓ numa sonda que não rodou é afirmar
+        // "verifiquei e está limpo" sobre o que ninguém olhou — o pior erro
+        // possível num produto de auditoria, e o mesmo que o ⚠ NÃO VERIFICADO já
+        // evita para os módulos que dão timeout.
+        ScanProgress p = progresso(false);
+        p.registra(ScanCheck.WAF, ScanProgress.Estado.OK);
+        p.sincroniza(Map.of(ScanCheck.PORT_SCAN.name(), "OK"));
+
+        var etapas = p.instantaneo();
+        assertEquals("NAO_EXECUTADA", estadoDe(etapas, ScanCheck.WAF));
+        assertEquals("NAO_EXECUTADA", estadoDe(etapas, ScanCheck.PORT_SCAN));
+    }
+
+    @Test
+    @DisplayName("scan ativo nunca marca não-executada")
+    void ativoExecutaTudo() {
+        var etapas = progresso(true).instantaneo();
 
         assertEquals(25, etapas.size());
-        assertTrue(etapas.stream().noneMatch(e -> e.state().equals("BLOQUEADO")));
+        assertTrue(etapas.stream().noneMatch(e -> e.state().equals("NAO_EXECUTADA")));
     }
 
     @Test
