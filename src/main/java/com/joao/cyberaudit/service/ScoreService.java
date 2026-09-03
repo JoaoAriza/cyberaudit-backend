@@ -750,6 +750,11 @@ public class ScoreService {
                 naoAplicadas.size(), nomesDe(naoAplicadas)));
     }
 
+    /** Visível ao teste: o nome de exibição de uma verificação. */
+    String nomeDe(ScanCheck check) {
+        return catalog.check(check.name());
+    }
+
     private String nomesDe(List<ScanCheck> checks) {
         return checks.stream()
                 .map(c -> catalog.check(c.name()))

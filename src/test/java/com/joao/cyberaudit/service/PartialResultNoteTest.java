@@ -143,6 +143,42 @@ class PartialResultNoteTest {
                 "a nota não explica o sentido da diferença: " + ultimaNota(s));
     }
 
+    @SuppressWarnings("unchecked")
+    private List<ScanCheck> checksAtivosDeProducao() {
+        // A lista real que o orquestrador passa no scan passivo, não uma cópia
+        // reconstruída aqui: se alguém reclassificar uma verificação no enum, este
+        // teste acompanha em vez de continuar afirmando o número antigo.
+        return (List<ScanCheck>) ReflectionTestUtils.getField(
+                ScanOrchestrator.class, "CHECKS_ATIVOS");
+    }
+
+    @Test
+    @DisplayName("a nota do passivo cobre as 10 sondas ativas de verdade, com os nomes")
+    void notaDoPassivoUsaAListaDeProducao() {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+        ScoreResult s = score();
+        List<ScanCheck> ativos = checksAtivosDeProducao();
+
+        service().appendPassiveScopeNote(s, ativos);
+        String nota = ultimaNota(s);
+
+        assertEquals(10, ativos.size(), "mudou a quantidade de sondas ativas");
+        assertTrue(nota.contains("10 verificações"), nota);
+
+        for (ScanCheck c : ativos) {
+            assertTrue(nota.contains(service().nomeDe(c)),
+                    c.name() + " não aparece na nota: " + nota);
+        }
+
+        // O contador vem de size() e a lista passa por distinct(): dois checks com o
+        // mesmo nome de exibição fariam a nota dizer "10 verificações" e listar nove.
+        // Contar vírgulas na frase não serve — a própria cauda dela tem uma.
+        assertEquals(ativos.size(),
+                ativos.stream().map(service()::nomeDe).distinct().count(),
+                "duas verificações compartilham o nome de exibição — o contador da "
+                        + "nota deixaria de fechar com a lista");
+    }
+
     @Test
     @DisplayName("a nota do passivo não se confunde com a de falha de coleta")
     void escopoNaoEFalha() {
