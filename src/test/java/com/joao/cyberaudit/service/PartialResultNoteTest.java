@@ -112,6 +112,78 @@ class PartialResultNoteTest {
         assertFalse(nota.contains("Resultado parcial"), "sobrou português no laudo em inglês: " + nota);
     }
 
+    // ── O escopo do scan passivo ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a nota do passivo diz quantas e quais sondas não foram aplicadas")
+    void notaDoPassivoNomeiaOQueNaoRodou() {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+        ScoreResult s = score();
+
+        service().appendPassiveScopeNote(s, List.of(ScanCheck.PORT_SCAN, ScanCheck.SSRF));
+
+        String nota = ultimaNota(s);
+        assertTrue(nota.contains("2 verificações"), nota);
+        assertTrue(nota.contains("Port scan"), nota);
+        assertTrue(nota.contains("SSRF"), nota);
+    }
+
+    @Test
+    @DisplayName("a nota do passivo avisa que o ativo pode dar nota MAIS BAIXA")
+    void notaDoPassivoExplicaOSentidoDoDesconto() {
+        // O ponto que a nota existe para desfazer: o score começa em 100 e só subtrai
+        // o que acha. Passivo não roda as ativas, não acha, não desconta — e sai mais
+        // alto que o ativo do mesmo host. Sem dizer isso, 92/100 se lê como veredito.
+        LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+        ScoreResult s = score();
+
+        service().appendPassiveScopeNote(s, List.of(ScanCheck.PORT_SCAN));
+
+        assertTrue(ultimaNota(s).contains("mais baixa"),
+                "a nota não explica o sentido da diferença: " + ultimaNota(s));
+    }
+
+    @Test
+    @DisplayName("a nota do passivo não se confunde com a de falha de coleta")
+    void escopoNaoEFalha() {
+        // Causas diferentes, textos diferentes. Se as duas dissessem "não concluiu",
+        // o cliente aprenderia a ler qualquer aviso como problema técnico nosso.
+        LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+
+        ScoreResult falha = score();
+        service().appendPartialNote(falha, List.of(ScanCheck.PORT_SCAN));
+
+        ScoreResult escopo = score();
+        service().appendPassiveScopeNote(escopo, List.of(ScanCheck.PORT_SCAN));
+
+        assertFalse(ultimaNota(escopo).equals(ultimaNota(falha)));
+        assertTrue(ultimaNota(falha).contains("não concluíram"), ultimaNota(falha));
+        assertTrue(ultimaNota(escopo).contains("não foram aplicadas"), ultimaNota(escopo));
+    }
+
+    @Test
+    @DisplayName("a nota do passivo segue o idioma do laudo")
+    void notaDoPassivoSegueOIdioma() {
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+        ScoreResult s = score();
+
+        service().appendPassiveScopeNote(s, List.of(ScanCheck.PORT_SCAN));
+
+        String nota = ultimaNota(s);
+        assertTrue(nota.contains("were not applied"), nota);
+        assertFalse(nota.contains("Scan passivo"), "sobrou português no laudo em inglês: " + nota);
+    }
+
+    @Test
+    @DisplayName("scan ativo não ganha a nota de escopo")
+    void ativoNaoGeraNotaDeEscopo() {
+        ScoreResult s = score();
+
+        service().appendPassiveScopeNote(s, List.of());
+
+        assertEquals(1, s.getNotes().size());
+    }
+
     // ── A armadilha ──────────────────────────────────────────────────────────
 
     @Test
@@ -188,6 +260,43 @@ class PartialResultNoteTest {
                 ScanCheck.CVE.name(),   "TIMEOUT");
 
         assertEquals(List.of("cve"), modulosDegradados(status));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> semVeredito(Map<String, String> moduleStatus) {
+        return (List<String>) ReflectionTestUtils.invokeMethod(
+                ScanOrchestrator.class, "semVeredito", moduleStatus);
+    }
+
+    @Test
+    @DisplayName("scan passivo não deixa Open Redirect, CRLF, Path Traversal e SSRF como SECURE")
+    void passivoNaoAfirmaSeguroSobreOQueNaoRodou() {
+        // O defeito: a lista de achados desses quatro vinha vazia num scan passivo, e
+        // vazio virava ✓ SECURE na barra lateral. Eles não entram no moduleStatus
+        // porque nem rodam, então o modulosDegradados não os enxergava — o mesmo
+        // "seguro que ninguém apurou" que o ⚠ NÃO VERIFICADO veio corrigir, só que
+        // por outra causa, e por isso passou.
+        var status = Map.of(ScanCheck.HTTP_FETCH.name(), "OK");
+
+        assertTrue(semVeredito(status).containsAll(
+                        List.of("redirect", "crlf", "traversal", "ssrf")),
+                "módulo de sonda ativa ficaria verde num scan passivo: " + semVeredito(status));
+    }
+
+    @Test
+    @DisplayName("o passivo soma as sondas não aplicadas às verificações que falharam")
+    void escopoESomadoAFalha() {
+        // As duas causas convergem no mesmo campo: para quem lê, "não concluiu" e
+        // "não foi aplicada" dizem a mesma coisa sobre o que se pode confiar.
+        var status = Map.of(
+                ScanCheck.CVE.name(),        "TIMEOUT",
+                ScanCheck.HTTP_FETCH.name(), "OK");
+
+        var modulos = semVeredito(status);
+        assertTrue(modulos.contains("cve"), modulos.toString());
+        assertTrue(modulos.contains("ssrf"), modulos.toString());
+        assertEquals(modulos.size(), modulos.stream().distinct().count(),
+                "módulo repetido acenderia o mesmo aviso duas vezes: " + modulos);
     }
 
     @Test

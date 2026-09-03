@@ -720,11 +720,40 @@ public class ScoreService {
     public void appendPartialNote(ScoreResult score, List<ScanCheck> naoConcluidas) {
         if (score == null || score.getNotes() == null || naoConcluidas.isEmpty()) return;
 
-        String nomes = naoConcluidas.stream()
+        score.getNotes().add(catalog.note("PARTIAL_RESULT", nomesDe(naoConcluidas)));
+    }
+
+    /**
+     * Diz, no breakdown, que a nota do scan passivo não cobre as sondas ativas.
+     *
+     * O score começa em 100 e só subtrai o que se acha. Em modo passivo os dez
+     * probes ativos não rodam, então não acham nada, então não descontam nada — e o
+     * número sai MAIS ALTO que o de um scan ativo do mesmo host, no mesmo dia. Não
+     * por leniência: por não ter olhado. Sem esta nota, 92/100 se lê como veredito
+     * quando a base foram 15 das 25 verificações.
+     *
+     * Separada do {@link #appendPartialNote} porque a causa é outra e o texto
+     * também: lá é falha de coleta ("não concluíram"), aqui é escopo do próprio
+     * scan ("não foram aplicadas"). Misturar as duas ensinaria o cliente a ler
+     * qualquer aviso como problema técnico nosso.
+     *
+     * <p><b>Não chega a guest nem a FREE:</b> o {@code ScanEntitlementService} zera
+     * as notas do breakdown para quem não tem acesso a detalhe — e é justamente
+     * quem só consegue rodar passivo. Para eles o aviso viaja pelo
+     * {@code degradedModules}, que atravessa o entitlement e acende o
+     * {@code ⚠ NÃO VERIFICADO} nos módulos.
+     */
+    public void appendPassiveScopeNote(ScoreResult score, List<ScanCheck> naoAplicadas) {
+        if (score == null || score.getNotes() == null || naoAplicadas.isEmpty()) return;
+
+        score.getNotes().add(catalog.note("PASSIVE_SCOPE",
+                naoAplicadas.size(), nomesDe(naoAplicadas)));
+    }
+
+    private String nomesDe(List<ScanCheck> checks) {
+        return checks.stream()
                 .map(c -> catalog.check(c.name()))
                 .distinct()
                 .collect(Collectors.joining(", "));
-
-        score.getNotes().add(catalog.note("PARTIAL_RESULT", nomes));
     }
 }

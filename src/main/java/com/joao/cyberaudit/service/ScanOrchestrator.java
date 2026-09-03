@@ -8,11 +8,13 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
+import java.util.stream.Stream;
 
 @Service
 public class ScanOrchestrator {
@@ -375,11 +377,12 @@ public class ScanOrchestrator {
             );
 
             scoreService.appendPartialNote(passiveScore, naoConcluidas(moduleStatus));
+            scoreService.appendPassiveScopeNote(passiveScore, CHECKS_ATIVOS);
 
             // ── Monta resultado passivo ────────────────────────────────────────
             ScanResult passiveResult = ScanResult.builder()
                     .lang(idiomaDaRequisicao())
-                    .degradedModules(modulosDegradados(moduleStatus))
+                    .degradedModules(semVeredito(moduleStatus))
                     .url(inputUrl).finalUrl(fetch.getFinalUrl())
                     .analyzedHost(analyzedHost)
                     .httpStatus(fetch.getStatusCode())
@@ -677,6 +680,36 @@ public class ScanOrchestrator {
     private static List<String> modulosDegradados(Map<String, String> moduleStatus) {
         return naoConcluidas(moduleStatus).stream()
                 .map(ScanCheck::moduloUi)
+                .distinct()
+                .toList();
+    }
+
+    /** As verificações que só rodam em scan ativo. */
+    private static final List<ScanCheck> CHECKS_ATIVOS =
+            Arrays.stream(ScanCheck.values()).filter(ScanCheck::ativa).toList();
+
+    /**
+     * Módulos sobre os quais um scan passivo não tem veredito.
+     *
+     * O {@link #modulosDegradados} cobria só a falha de coleta — timeout e erro. Num
+     * scan passivo os probes ativos simplesmente não rodam, então não entram no
+     * {@code moduleStatus}, então não eram reportados: Open Redirect, CRLF, Path
+     * Traversal e SSRF apareciam <b>SECURE</b> na barra lateral, porque a lista de
+     * achados deles vinha vazia e vazio virava verde.
+     *
+     * É o mesmo defeito que o {@code ⚠ NÃO VERIFICADO} foi criado para corrigir, só
+     * que por outra causa — e por isso passou. Aqui as duas causas convergem: para o
+     * cliente, "não concluiu" e "não foi aplicada" dizem a mesma coisa sobre o que
+     * ele pode confiar.
+     *
+     * Vale por outro motivo também: este campo atravessa o {@code applyEntitlement},
+     * e as notas do breakdown não. É o único canal que leva o aviso a guest e FREE —
+     * justamente quem só consegue rodar passivo.
+     */
+    private static List<String> semVeredito(Map<String, String> moduleStatus) {
+        return Stream.concat(
+                        modulosDegradados(moduleStatus).stream(),
+                        CHECKS_ATIVOS.stream().map(ScanCheck::moduloUi))
                 .distinct()
                 .toList();
     }
