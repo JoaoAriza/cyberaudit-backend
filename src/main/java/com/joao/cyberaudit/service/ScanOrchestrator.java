@@ -61,6 +61,7 @@ public class ScanOrchestrator {
     private final ScanConcurrencyLimiter          concurrencyLimiter;
     private final PlatformStaffService            platformStaffService;
     private final HostingProviderPolicy           hostingProviderPolicy;
+    private final MessageCatalog                  catalog;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -94,7 +95,8 @@ public class ScanOrchestrator {
             RelatedHostsHeaderService relatedHostsHeaderService,
             ScanConcurrencyLimiter concurrencyLimiter,
             PlatformStaffService platformStaffService,
-            HostingProviderPolicy hostingProviderPolicy) {
+            HostingProviderPolicy hostingProviderPolicy,
+            MessageCatalog catalog) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -137,6 +139,7 @@ public class ScanOrchestrator {
         this.concurrencyLimiter                 = concurrencyLimiter;
         this.platformStaffService               = platformStaffService;
         this.hostingProviderPolicy              = hostingProviderPolicy;
+        this.catalog                            = catalog;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -201,7 +204,7 @@ public class ScanOrchestrator {
         String     host       = extractHostSafe(httpsUrl);
         TlsDetails tlsDetails = (supportsHttps && host != null)
                 ? tlsVersionService.inspect(host, 443)
-                : new TlsDetails("N/A", "N/A", false, "HTTPS não disponível");
+                : new TlsDetails("N/A", "N/A", false, catalog.desc("TLS_UNAVAILABLE"));
 
         boolean redirectsToHttps = httpFetchService.traceRedirectToHttps(toHttp(inputUrl));
 

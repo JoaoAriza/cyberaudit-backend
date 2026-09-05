@@ -26,7 +26,7 @@ class TlsVersionI18nTest {
 
     private static final List<String> CHAVES = List.of(
             "desc.TLS_INVALID_HOST", "desc.TLS_INSPECT_FAILED", "desc.TLS_DEPRECATED",
-            "desc.TLS_12", "desc.TLS_13", "desc.TLS_OTHER");
+            "desc.TLS_12", "desc.TLS_13", "desc.TLS_OTHER", "desc.TLS_UNAVAILABLE");
 
     private TlsVersionService servico() {
         var source = new ResourceBundleMessageSource();

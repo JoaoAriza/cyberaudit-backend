@@ -127,10 +127,6 @@ public interface ScanRecordRepository extends JpaRepository<ScanRecord, UUID> {
             @Param("to") LocalDateTime to,
             Pageable pageable);
 
-    // ── Existência ────────────────────────────────────────────────────────────
-
-    boolean existsByHostAndScannedAtAfter(String host, LocalDateTime after);
-
     // ── Retenção de dados ─────────────────────────────────────────────────────
 
     /** Remove registros antigos de uma conta (retenção por plano). */
