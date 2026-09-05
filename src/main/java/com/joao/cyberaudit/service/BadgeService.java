@@ -1,7 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.RiskLevel;
-import com.joao.cyberaudit.model.ScanRecord;
+import com.joao.cyberaudit.model.ScanSummary;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -19,9 +19,9 @@ public class BadgeService {
      * Gera badge lendo do histórico de scans (fallback padrão).
      */
     public String generateBadge(String host, String style) {
-        List<ScanRecord> records = scanHistoryService.findLatestForBadge(host);
+        List<ScanSummary> records = scanHistoryService.findLatestForBadge(host);
         if (records.isEmpty()) return buildNotScannedBadge(host, style);
-        ScanRecord latest = records.get(0);
+        ScanSummary latest = records.get(0);
         return buildBadge(host, latest.getScore(), latest.getRiskLevel(), style);
     }
 

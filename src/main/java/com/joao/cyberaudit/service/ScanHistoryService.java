@@ -5,6 +5,7 @@ import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScanRecord;
 import com.joao.cyberaudit.model.ScanResult;
+import com.joao.cyberaudit.model.ScanSummary;
 import com.joao.cyberaudit.repository.ScanRecordRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -63,10 +64,20 @@ public class ScanHistoryService {
         }
     }
 
+    // ── Listagens ────────────────────────────────────────────────────────────
+    //
+    // Todas devolvem ScanSummary, não ScanRecord: o laudo inteiro mora em
+    // result_json e nenhuma delas o lê. Só getResult e findRecordById carregam a
+    // entidade, porque ali o laudo É o objetivo.
+
     /**
      * Último resultado de um host DENTRO da conta — base da detecção de mudanças.
      * Escopado por conta: comparar contra o scan de outro tenant vazaria o estado
      * anterior daquela conta no diff.
+     *
+     * Roda em TODO scan, e era o pior caso da entidade: carregava dez laudos
+     * completos para ler {@code activeMode} e um id, e então buscava o laudo de
+     * novo pelo id. Agora os dez vêm como resumo e só o escolhido é lido.
      */
     public Optional<ScanResult> findLastResult(String host, boolean activeMode, Account account) {
         if (account == null) return Optional.empty();
@@ -77,20 +88,23 @@ public class ScanHistoryService {
     }
 
     /** Scans de um host na conta, filtrando opcionalmente por origin. */
-    public List<ScanRecord> findByHost(Account account, String host, int limit, ScanOrigin origin) {
+    public List<ScanSummary> findByHost(Account account, String host, int limit, ScanOrigin origin) {
         if (account == null) return List.of();
         String normalized = host.startsWith("www.") ? host.substring(4) : host;
         PageRequest page  = PageRequest.of(0, limit);
-        List<ScanRecord> records = (origin != null)
-                ? repository.findByAccountAndHostAndOriginOrderByScannedAtDesc(account, normalized, origin, page)
-                : repository.findByAccountAndHostOrderByScannedAtDesc(account, normalized, page);
+        List<ScanSummary> records = buscaPorHost(account, normalized, origin, page);
         // Fallback para registros legados gravados com www.
         if (records.isEmpty()) {
-            records = (origin != null)
-                    ? repository.findByAccountAndHostAndOriginOrderByScannedAtDesc(account, "www." + normalized, origin, page)
-                    : repository.findByAccountAndHostOrderByScannedAtDesc(account, "www." + normalized, page);
+            records = buscaPorHost(account, "www." + normalized, origin, page);
         }
         return records;
+    }
+
+    private List<ScanSummary> buscaPorHost(Account account, String host,
+                                           ScanOrigin origin, PageRequest page) {
+        return (origin != null)
+                ? repository.findSummariesByAccountAndHostAndOrigin(account, host, origin, page)
+                : repository.findSummariesByAccountAndHost(account, host, page);
     }
 
     /**
@@ -98,45 +112,45 @@ public class ScanHistoryService {
      * expõe só score e nível de risco do alvo — nunca para devolver histórico a um
      * usuário. Todo o resto passa pelas variantes com Account.
      */
-    public List<ScanRecord> findLatestForBadge(String host) {
+    public List<ScanSummary> findLatestForBadge(String host) {
         String normalized = host.startsWith("www.") ? host.substring(4) : host;
         PageRequest page  = PageRequest.of(0, 1);
-        List<ScanRecord> records = repository.findByHostOrderByScannedAtDesc(normalized, page);
+        List<ScanSummary> records = repository.findSummariesByHost(normalized, page);
         if (records.isEmpty()) {
-            records = repository.findByHostOrderByScannedAtDesc("www." + normalized, page);
+            records = repository.findSummariesByHost("www." + normalized, page);
         }
         return records;
     }
 
     /** Último scan por host para uma conta (para Visão Geral). */
-    public List<ScanRecord> findLatestPerHost(Account account, int limit) {
+    public List<ScanSummary> findLatestPerHost(Account account, int limit) {
         if (account == null) return List.of();
-        return repository.findLatestPerHostByAccount(account, PageRequest.of(0, limit));
+        return repository.findLatestSummaryPerHostByAccount(account, PageRequest.of(0, limit));
     }
 
     /** Scans de um host da conta em um intervalo de datas (para gráfico intraday). */
-    public List<ScanRecord> findByHostBetween(Account account, String host,
-                                              LocalDateTime from, LocalDateTime to) {
+    public List<ScanSummary> findByHostBetween(Account account, String host,
+                                               LocalDateTime from, LocalDateTime to) {
         if (account == null) return List.of();
         String normalized = host.startsWith("www.") ? host.substring(4) : host;
         PageRequest page  = PageRequest.of(0, 200);
-        List<ScanRecord> records = repository
-                .findByAccountAndHostAndScannedAtBetweenOrderByScannedAtDesc(account, normalized, from, to, page);
+        List<ScanSummary> records = repository
+                .findSummariesByAccountAndHostBetween(account, normalized, from, to, page);
         if (records.isEmpty()) {
-            records = repository.findByAccountAndHostAndScannedAtBetweenOrderByScannedAtDesc(
+            records = repository.findSummariesByAccountAndHostBetween(
                     account, "www." + normalized, from, to, page);
         }
         return records;
     }
 
-    public List<ScanRecord> findRecent(Account account, int limit) {
+    public List<ScanSummary> findRecent(Account account, int limit) {
         if (account == null) return List.of();
-        return repository.findByAccountOrderByScannedAtDesc(account, PageRequest.of(0, limit));
+        return repository.findSummariesByAccount(account, PageRequest.of(0, limit));
     }
 
-    public List<ScanRecord> findRecentByOrigin(Account account, int limit, ScanOrigin origin) {
+    public List<ScanSummary> findRecentByOrigin(Account account, int limit, ScanOrigin origin) {
         if (account == null) return List.of();
-        return repository.findByAccountAndOriginOrderByScannedAtDesc(
+        return repository.findSummariesByAccountAndOrigin(
                 account, origin, PageRequest.of(0, limit));
     }
 

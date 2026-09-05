@@ -45,7 +45,7 @@ public class HistoryController {
         var records = (o != null)
                 ? historyService.findRecentByOrigin(account, 20, o)
                 : historyService.findRecent(account, 20);
-        return records.stream().map(ScanSummary::from).toList();
+        return records;
     }
 
     /**
@@ -67,12 +67,10 @@ public class HistoryController {
                     host,
                     fromDate.atStartOfDay(),
                     toDate.plusDays(1).atStartOfDay()
-            ).stream().map(ScanSummary::from).toList();
+            );
         }
         ScanOrigin o = parseOrigin(origin);
-        return historyService.findByHost(account, host, 50, o).stream()
-                .map(ScanSummary::from)
-                .toList();
+        return historyService.findByHost(account, host, 50, o);
     }
 
     /**
@@ -96,8 +94,7 @@ public class HistoryController {
     @GetMapping("/overview")
     public List<ScanSummary> overview(@AuthenticationPrincipal AppUser caller) {
         if (caller == null || caller.getAccount() == null) return List.of();
-        return historyService.findLatestPerHost(caller.getAccount(), 50)
-                .stream().map(ScanSummary::from).toList();
+        return historyService.findLatestPerHost(caller.getAccount(), 50);
     }
 
     private Account requireAccount(AppUser caller) {
