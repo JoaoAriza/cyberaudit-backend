@@ -1,0 +1,35 @@
+name = "cyberaudit-keepalive"
+main = "src/index.js"
+compatibility_date = "2026-09-06"
+
+# O que pingar. /actuator/health é público (SecurityConfig) e responde com
+# show-details=never — não vaza nada sobre a infraestrutura.
+[vars]
+ALVO = "https://api.cyberauditapp.com/actuator/health"
+
+# ── Horários ──────────────────────────────────────────────────────────────────
+#
+# TUDO AQUI É UTC, e não é coincidência: o container do Backend na Render também
+# roda em UTC (nenhum TZ é definido no Dockerfile), e o `preferredHour` dos
+# agendamentos já é documentado como 0-23 UTC. Um único fuso em toda a cadeia.
+#
+# Para ler em horário de Brasília, subtraia 3.
+#
+#   "*/10 11-23,0-2 * * *"  a cada 10 min das 11h às 02h59 UTC
+#                           = 08:00 às 23:59 em Brasília
+#                           Cobre a janela em que existe visitante de verdade.
+#                           De madrugada o serviço dorme, e tudo bem.
+#
+#   "55 2 * * *"            uma vez, às 02:55 UTC (23:55 em Brasília)
+#                           Acorda o serviço cinco minutos antes das 03:00 UTC,
+#                           que é quando o DataRetentionService roda. Sem isto,
+#                           a retenção só acontece nos dias em que alguém acessa
+#                           o site às 3h da manhã — ou seja, quase nunca.
+#
+# São dois gatilhos de propósito: o teto de crons por Worker no plano gratuito é
+# baixo, e dois cabem em qualquer versão dele. Confira o seu antes de somar mais.
+[triggers]
+crons = [
+  "*/10 11-23,0-2 * * *",
+  "55 2 * * *"
+]
