@@ -102,7 +102,9 @@ public class ComplianceMappingService {
         // Art. 48 — Comunicação de incidentes de segurança
         {
             List<String> findings = new ArrayList<>();
-            if (!r.isSecurityTxtPresent())
+            // Só afirma ausência quando o módulo concluiu: null é "não verificado",
+            // e apontar não-conformidade a partir disso é inventar achado.
+            if (Boolean.FALSE.equals(r.getSecurityTxtPresent()))
                 findings.add("Arquivo security.txt ausente — sem canal formal de reporte de vulnerabilidades");
 
             items.add(item("Art. 48", "Comunicação de incidentes à autoridade nacional",

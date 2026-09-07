@@ -273,7 +273,7 @@ public class ReportService {
         }
 
         // ── security.txt ──────────────────────────────────
-        if (r.isSecurityTxtPresent()) {
+        if (Boolean.TRUE.equals(r.getSecurityTxtPresent())) {
             s.append("== security.txt ==\n");
             s.append("  Present: true\n");
             if (r.getSecurityTxtContact() != null && !r.getSecurityTxtContact().isBlank())

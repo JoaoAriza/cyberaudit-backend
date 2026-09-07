@@ -49,7 +49,7 @@ public class ScoreService {
             boolean serverVersionExposed,
             List<SensitiveFileFinding> sensitiveFiles,
             List<HttpMethodFinding> dangerousHttpMethods,
-            boolean securityTxtPresent,
+            Boolean securityTxtPresent,
             List<OpenRedirectFinding> openRedirectFindings,
             List<DirectoryListingFinding> directoryListingFindings,
             DnsSecurityResult dnsSecurityResult,
@@ -287,7 +287,10 @@ public class ScoreService {
         // ═══════════════════════════════════════════════════════
         // 12. security.txt
         // ═══════════════════════════════════════════════════════
-        if (!securityTxtPresent) {
+        // null = módulo não concluiu. Descontar por ausência aqui era cobrar do
+        // alvo uma falha do scanner — e a nota de resultado parcial, que já
+        // avisa que a verificação não rodou, não desfazia o desconto.
+        if (Boolean.FALSE.equals(securityTxtPresent)) {
             score -= 3;
             notes.add(catalog.note("SECURITY_TXT_MISSING"));
             issues.add(achado("SECURITY_TXT_MISSING", "LOW"));

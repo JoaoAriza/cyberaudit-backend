@@ -42,11 +42,20 @@ public class ScanResult {
     private CorsResult          corsResult;
     private List<CookieFinding> cookieIssues;
     private List<String>        sensitiveRobotsPaths;
-    private boolean             robotsTxtPresent;
+
+    /**
+     * {@code null} = o módulo não concluiu (timeout ou erro), não "não existe".
+     *
+     * Enquanto era primitivo, um módulo que não terminou virava {@code false} e
+     * o laudo afirmava ausência de um arquivo que o scanner nunca chegou a
+     * pedir. Vale o mesmo para {@code securityTxtPresent}.
+     */
+    private Boolean             robotsTxtPresent;
 
     private List<SensitiveFileFinding>    sensitiveFiles;
     private List<HttpMethodFinding>       dangerousHttpMethods;
-    private boolean                       securityTxtPresent;
+    /** {@code null} = não verificado. Ver {@link #robotsTxtPresent}. */
+    private Boolean                       securityTxtPresent;
     private String                        securityTxtContact;
     private DnsSecurityResult             dnsSecurityResult;
     private List<OpenRedirectFinding>     openRedirectFindings;

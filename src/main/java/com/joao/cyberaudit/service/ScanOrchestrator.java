@@ -271,7 +271,7 @@ public class ScanOrchestrator {
             var robotsFuture = CompletableFuture.supplyAsync(
                             progresso.acompanha(ScanCheck.ROBOTS,
                                     () -> robotsTxtService.check(target)), passivePool)
-                    .exceptionally(e -> RobotsTxtService.RobotsTxtResult.ausente());
+                    .exceptionally(e -> null);   // null = não verificado, ver getNow abaixo
             var secTxtFuture = CompletableFuture.supplyAsync(
                             progresso.acompanha(ScanCheck.SECURITY_TXT,
                                     () -> securityTxtService.check(target)), passivePool)
@@ -351,9 +351,15 @@ public class ScanOrchestrator {
             // quem marca OK é a própria tarefa, e a que não terminou não marca nada.
             progresso.sincroniza(moduleStatus);
 
-            RobotsTxtService.RobotsTxtResult robots                 = robotsFuture.getNow(
-                    RobotsTxtService.RobotsTxtResult.ausente());
-            List<String>                  sensitiveRobotsPaths     = robots.sensitivePaths();
+            // getNow devolve null tanto para o módulo que não terminou dentro do
+            // teto quanto para o que terminou em exceção — e nos dois casos o
+            // que sabemos é nada, não "nada encontrado". Quem só quer a lista de
+            // achados segue com lista vazia; quem responde "existe?" responde null.
+            RobotsTxtService.RobotsTxtResult robots                 = robotsFuture.getNow(null);
+            List<String>                  sensitiveRobotsPaths     = robots == null
+                    ? List.of() : robots.sensitivePaths();
+            Boolean                       robotsTxtPresent         = robots == null
+                    ? null : robots.present();
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
             List<DirectoryListingFinding> directoryListingFindings = dirListFuture.getNow(List.of());
             DnsSecurityResult             dnsSecurityResult        = dnsFuture.getNow(null);
@@ -368,8 +374,8 @@ public class ScanOrchestrator {
             List<RelatedHostHeaders>      relatedHostHeaders       = relatedHostsFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
-            boolean secTxtFound   = securityTxt != null && securityTxt.found();
-            String  secTxtContact = securityTxt != null ? securityTxt.contact() : null;
+            Boolean secTxtFound   = securityTxt == null ? null : securityTxt.found();
+            String  secTxtContact = securityTxt == null ? null : securityTxt.contact();
 
             ScoreResult passiveScore = scoreService.calculate(
                     sslInfo, tlsDetails, analyzedHeaders, redirectsToHttps,
@@ -398,7 +404,7 @@ public class ScanOrchestrator {
                     .dbErrorLeakageSuspected(false).xssProbePerformed(false)
                     .reflectedXssSuspected(false).openPorts(List.of())
                     .corsResult(null).cookieIssues(cookieIssues)
-                    .sensitiveRobotsPaths(sensitiveRobotsPaths).robotsTxtPresent(robots.present())
+                    .sensitiveRobotsPaths(sensitiveRobotsPaths).robotsTxtPresent(robotsTxtPresent)
                     .sensitiveFiles(List.of())
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
@@ -576,7 +582,7 @@ public class ScanOrchestrator {
                     .reflectedXssSuspected(reflectedXssSuspected)
                     .openPorts(openPorts).corsResult(corsResult)
                     .cookieIssues(cookieIssues)
-                    .sensitiveRobotsPaths(sensitiveRobotsPaths).robotsTxtPresent(robots.present())
+                    .sensitiveRobotsPaths(sensitiveRobotsPaths).robotsTxtPresent(robotsTxtPresent)
                     .sensitiveFiles(sensitiveFiles)
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
