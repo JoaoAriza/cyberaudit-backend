@@ -24,7 +24,7 @@ git -C Backend add docs/ && git -C Backend commit -m "docs: plano de execucao e 
 
 | # | ação | por quê |
 |---|---|---|
-| 0.2.1 | **Backup do Postgres do Render** | o plano gratuito expira ~30 dias após a criação (criada ~12/08 → vence por volta de **11/09**). O dono disse que compra em setembro; se a compra for depois do vencimento, os dados somem. Um dump agora custa nada |
+| 0.2.1 | ~~**Backup do Postgres do Render**~~ ✅ **feito em 06/09/2026** | `cyberaudit-2026-09-06-2304.dump`, 343,8 KB, 13 tabelas para 13 entidades JPA. Procedimento em `deploy/README.md` (seção "Backup do banco"), scripts em `deploy/dump-postgres.ps1` e `restore-postgres.ps1`. **Falta a migração para o plano pago** — o Free vence por volta de 11/09 |
 | 0.2.2 | Rodar `deploy/audit-action-check.sql` | o enum `audit_logs.action` não é atualizado pelo `ddl-auto`. Sem rodar, a redefinição de senha quebra ao gravar o log |
 | 0.2.3 | Rodar `deploy/cleanup-free-domains.sql` | domínios de contas FREE ainda na base, de antes do gating |
 | 0.2.4 | `MP_ACCESS_TOKEN` de volta para produção | conferir a linha `[MercadoPago]` no boot, que informa o ambiente |

@@ -111,6 +111,51 @@ done
 Trocar o `X-Forwarded-For` a cada chamada **não pode** renovar a cota de guest:
 depois de 5, o resto tem que vir 429.
 
+## Backup do banco
+
+Dois scripts, ambos por Docker — não há `pg_dump` instalado nesta máquina, e o
+contêiner ainda resolve o casamento de versão de graça.
+
+```bash
+# gerar o dump (pede a External Database URL, sem eco e sem histórico)
+powershell -ExecutionPolicy Bypass -File deploy/dump-postgres.ps1
+
+# restaurar numa instância nova
+powershell -ExecutionPolicy Bypass -File deploy/restore-postgres.ps1 -Arquivo "CAMINHO\DO.dump"
+```
+
+Grava em `%USERPROFILE%\backups-cyberaudit\cyberaudit-AAAA-MM-DD-HHMM.dump`.
+**Fora do repositório de propósito** — o arquivo tem e-mails, hashes de senha e
+histórico de scans. O `.gitignore` bloqueia `*.dump` como segunda barreira, mas a
+primeira é o destino.
+
+### Pré-requisitos e armadilhas
+
+| item | detalhe |
+|---|---|
+| **Docker Desktop precisa estar rodando** | o CLI instalado não basta; o script checa e avisa |
+| **URL tem de ser a External** | a Internal só resolve de dentro da Render |
+| **Versão do cliente ≥ servidor** | `pg_dump` recusa servidor mais novo. Em 06/09/2026 a Render rodava **18.4**; o script detecta pela mensagem de erro e repete com a imagem certa |
+| **`--no-owner --no-privileges`** | sem isso o restore tenta atribuir objetos a um role que não existe na instância nova |
+
+### Conferir que o dump presta
+
+O script já roda `pg_restore --list` e imprime as tabelas. A verificação que
+importa é **contar**: o dump tem de trazer uma tabela para cada entidade JPA.
+
+```bash
+grep -l "@Entity" src/main/java/com/joao/cyberaudit/model/*.java | wc -l
+```
+
+Em 06/09/2026: **13 entidades, 13 tabelas no dump**, 343,8 KB. Um dump faltando
+tabela tem a mesma aparência de um bom até a hora de restaurar.
+
+### Histórico
+
+| data | arquivo | tamanho | observação |
+|---|---|---|---|
+| 2026-09-06 | `cyberaudit-2026-09-06-2304.dump` | 343,8 KB | antes da migração do Free para o pago |
+
 ## ⚠ Antes de tudo: avise o suporte do Render
 
 O backend faz **port scan e dispara probes de injeção contra hosts de
