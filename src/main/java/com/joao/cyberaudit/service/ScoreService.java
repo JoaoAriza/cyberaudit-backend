@@ -105,9 +105,11 @@ public class ScoreService {
         // 2. Protocolo TLS
         // ═══════════════════════════════════════════
         if (tlsDetails != null && tlsDetails.isWeakProtocol()) {
+            // getWeakProtocolLabel: nomeia os deprecados oferecidos (ex.: "TLSv1, TLSv1.1"),
+            // não o negociado — que costuma ser 1.3 mesmo com 1.0/1.1 ainda ligados.
             score -= 20;
-            notes.add(catalog.note("WEAK_TLS_PROTOCOL", tlsDetails.getNegotiatedProtocol()));
-            issues.add(achado("WEAK_TLS_PROTOCOL", "HIGH", tlsDetails.getNegotiatedProtocol()));
+            notes.add(catalog.note("WEAK_TLS_PROTOCOL", tlsDetails.getWeakProtocolLabel()));
+            issues.add(achado("WEAK_TLS_PROTOCOL", "HIGH", tlsDetails.getWeakProtocolLabel()));
         }
 
         // ═══════════════════════════════════════════
