@@ -25,6 +25,17 @@ public class DnsSecurityResult {
     private boolean caaPresent;
     private String  caaRecord;
 
+    /**
+     * Todos os registros CAA do domínio, não só o primeiro.
+     *
+     * `caaRecord` guarda um registro só e é o que a UI exibe. Usá-lo para
+     * decidir se um emissor é autorizado comparava o certificado contra uma
+     * única CA de uma lista que costuma ter seis ou mais — num domínio com
+     * `issue "comodoca.com"` na frente, certificados legítimos de Let's Encrypt
+     * apareciam como violação de CAA.
+     */
+    private List<String> caaRecords;
+
     private boolean mxPresent;
     private List<String> mxRecords;
 

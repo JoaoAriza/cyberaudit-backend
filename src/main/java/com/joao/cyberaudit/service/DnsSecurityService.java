@@ -10,6 +10,7 @@ import org.xbill.DNS.TXTRecord;
 import org.xbill.DNS.Type;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -645,7 +646,14 @@ public class DnsSecurityService {
         try {
             org.xbill.DNS.Record[] records = consultar(domain, Type.CAA, falhou);
             if (records == null || records.length == 0) { b.caaPresent(false); return false; }
-            b.caaPresent(true).caaRecord(records[0].toString());
+
+            // caaRecord (singular) é o que a UI mostra; caaRecords carrega a lista
+            // inteira, que é o que a checagem de emissor no CT precisa ver.
+            List<String> todos = Arrays.stream(records)
+                    .map(org.xbill.DNS.Record::toString)
+                    .collect(Collectors.toList());
+
+            b.caaPresent(true).caaRecord(records[0].toString()).caaRecords(todos);
             return true;
         } catch (Exception e) {
             b.caaPresent(false);
