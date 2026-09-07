@@ -177,7 +177,7 @@ public class CrtShService {
 
                 String nameValue   = String.join("\n", dnsNames);
                 String commonName  = dnsNames.get(0);
-                String issuerOrg   = cert.path("issuer").path("name").asText("Unknown");
+                String issuerDn    = cert.path("issuer").path("name").asText("Unknown");
                 String notBefore   = cert.path("not_before").asText("");
                 String notAfter    = cert.path("not_after").asText("");
 
@@ -185,7 +185,7 @@ public class CrtShService {
                 ObjectNode node = jackson.createObjectNode();
                 node.put("name_value",        nameValue);
                 node.put("common_name",        commonName);
-                node.put("issuer_name",        "O=" + issuerOrg);
+                node.put("issuer_name",        normalizeIssuerDn(issuerDn));
                 node.put("not_before",         notBefore);
                 node.put("not_after",          notAfter);
                 node.put("entry_timestamp",    notBefore);
@@ -201,5 +201,20 @@ public class CrtShService {
             System.out.println("[CrtShService] certspotter exception: " + e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * O campo issuer.name do certspotter já vem como DN completo
+     * ("C=US, O=Let's Encrypt, CN=E5"). Prefixar "O=" cegamente produzia
+     * "O=C=US, O=Let's Encrypt, ..." e o extractIssuerOrg do
+     * CertTransparencyService lia o primeiro "o=" do DN — devolvendo "c=us"
+     * como emissor e acusando todo certificado de violar o CAA.
+     *
+     * Só prefixa quando o valor não é um DN (não tem "="), para o caso de a
+     * API passar a devolver o nome solto da organização.
+     */
+    private String normalizeIssuerDn(String issuerName) {
+        if (issuerName == null || issuerName.isBlank()) return "O=Unknown";
+        return issuerName.contains("=") ? issuerName : "O=" + issuerName;
     }
 }
