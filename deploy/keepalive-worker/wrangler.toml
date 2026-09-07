@@ -15,21 +15,33 @@ ALVO = "https://api.cyberauditapp.com/actuator/health"
 #
 # Para ler em horário de Brasília, subtraia 3.
 #
-#   "*/10 11-23,0-2 * * *"  a cada 10 min das 11h às 02h59 UTC
-#                           = 08:00 às 23:59 em Brasília
-#                           Cobre a janela em que existe visitante de verdade.
-#                           De madrugada o serviço dorme, e tudo bem.
+#   "*/10 9-23,0-4 * * *"   a cada 10 min das 09h às 04h59 UTC
+#                           = 06:00 às 01:59 em Brasília — 20h por dia
+#
+#                           A janela nasceu em 08:00-23:59 (16h) e foi ampliada
+#                           por causa do LinkedIn: o post circula em horários que
+#                           não se controla, e quem vê de outro fuso — Europa,
+#                           Estados Unidos — caía justo na madrugada brasileira e
+#                           esperava um minuto numa tela branca.
+#
+#                           Sobra o serviço dormindo das 02:00 às 05:59 BRT, que
+#                           é quando não há tráfego de lugar nenhum.
 #
 #   "55 2 * * *"            uma vez, às 02:55 UTC (23:55 em Brasília)
-#                           Acorda o serviço cinco minutos antes das 03:00 UTC,
-#                           que é quando o DataRetentionService roda. Sem isto,
-#                           a retenção só acontece nos dias em que alguém acessa
-#                           o site às 3h da manhã — ou seja, quase nunca.
+#                           Acorda cinco minutos antes das 03:00 UTC, que é
+#                           quando o DataRetentionService roda. Sem isto, a
+#                           retenção só acontece nos dias em que alguém acessa o
+#                           site às 3h — ou seja, quase nunca.
 #
-# São dois gatilhos de propósito: o teto de crons por Worker no plano gratuito é
-# baixo, e dois cabem em qualquer versão dele. Confira o seu antes de somar mais.
+#                           HOJE É REDUNDANTE: a janela acima já cobre a hora 2.
+#                           Fica de propósito, como guarda — se um dia a janela
+#                           encolher de novo, a retenção continua protegida sem
+#                           ninguém precisar lembrar dela.
+#
+# Dois gatilhos: o teto de crons por Worker no plano gratuito é baixo, e dois
+# cabem em qualquer versão dele. Confira o seu antes de somar mais.
 [triggers]
 crons = [
-  "*/10 11-23,0-2 * * *",
+  "*/10 9-23,0-4 * * *",
   "55 2 * * *"
 ]

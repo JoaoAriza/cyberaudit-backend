@@ -40,14 +40,27 @@ Tudo em **UTC**, igual ao container da Render (nenhum `TZ` no Dockerfile) e ao
 
 | cron | quando | para quê |
 |---|---|---|
-| `*/10 11-23,0-2 * * *` | 08:00–23:59 BRT, a cada 10 min | visitante real |
-| `55 2 * * *` | 23:55 BRT | acorda para a retenção das 03:00 UTC |
+| `*/10 9-23,0-4 * * *` | 06:00–01:59 BRT, a cada 10 min | visitante real |
+| `55 2 * * *` | 23:55 BRT | guarda da retenção das 03:00 UTC |
 
-Cobre ~15h por dia em vez de 24h. De madrugada o serviço dorme, o que é
-desejável: ninguém está acessando, e as horas não são gastas.
+Cobre **20h por dia**. O serviço dorme das 02:00 às 05:59 BRT, quando não há
+tráfego de lugar nenhum.
+
+A janela começou em 16h (08:00–23:59) e foi ampliada por causa da divulgação: um
+post circula em horários que não se controla, e quem vê de outro fuso caía na
+madrugada brasileira — esperando um minuto numa tela branca.
+
+O segundo cron é **redundante hoje** (a janela já cobre a hora 2). Fica como
+guarda: se a janela encolher de novo, a retenção continua protegida.
 
 **Se você tem agendamento em hora da madrugada**, some um cron para ela — o
 `preferredHour` é UTC, então confira o valor gravado antes de escolher.
+
+## Quanto custa em horas de instância
+
+20h/dia ≈ **600 h/mês** na Render. Confira o teto do seu plano antes de ampliar
+mais: estourar significa serviço **suspenso**, que é pior que hibernando. Cobrir
+24h seria ~730 h/mês — margem fina demais para valer a pena.
 
 ## Publicar
 

@@ -44,3 +44,6 @@ build/
 
 ### Ferramentas locais de preview (config de outro projeto, nao deste repo) ###
 .claude/
+# Dumps do banco: contem dados pessoais (LGPD). Nunca versionar.
+*.dump
+*.sql.gz
