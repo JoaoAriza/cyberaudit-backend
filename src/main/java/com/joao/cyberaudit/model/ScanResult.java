@@ -42,6 +42,7 @@ public class ScanResult {
     private CorsResult          corsResult;
     private List<CookieFinding> cookieIssues;
     private List<String>        sensitiveRobotsPaths;
+    private boolean             robotsTxtPresent;
 
     private List<SensitiveFileFinding>    sensitiveFiles;
     private List<HttpMethodFinding>       dangerousHttpMethods;

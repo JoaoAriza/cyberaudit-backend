@@ -270,8 +270,8 @@ public class ScanOrchestrator {
         try {
             var robotsFuture = CompletableFuture.supplyAsync(
                             progresso.acompanha(ScanCheck.ROBOTS,
-                                    () -> robotsTxtService.findSensitivePaths(target)), passivePool)
-                    .exceptionally(e -> List.of());
+                                    () -> robotsTxtService.check(target)), passivePool)
+                    .exceptionally(e -> RobotsTxtService.RobotsTxtResult.ausente());
             var secTxtFuture = CompletableFuture.supplyAsync(
                             progresso.acompanha(ScanCheck.SECURITY_TXT,
                                     () -> securityTxtService.check(target)), passivePool)
@@ -351,7 +351,9 @@ public class ScanOrchestrator {
             // quem marca OK é a própria tarefa, e a que não terminou não marca nada.
             progresso.sincroniza(moduleStatus);
 
-            List<String>                  sensitiveRobotsPaths     = robotsFuture.getNow(List.of());
+            RobotsTxtService.RobotsTxtResult robots                 = robotsFuture.getNow(
+                    RobotsTxtService.RobotsTxtResult.ausente());
+            List<String>                  sensitiveRobotsPaths     = robots.sensitivePaths();
             List<HttpMethodFinding>       dangerousHttpMethods     = methodsFuture.getNow(List.of());
             List<DirectoryListingFinding> directoryListingFindings = dirListFuture.getNow(List.of());
             DnsSecurityResult             dnsSecurityResult        = dnsFuture.getNow(null);
@@ -396,7 +398,8 @@ public class ScanOrchestrator {
                     .dbErrorLeakageSuspected(false).xssProbePerformed(false)
                     .reflectedXssSuspected(false).openPorts(List.of())
                     .corsResult(null).cookieIssues(cookieIssues)
-                    .sensitiveRobotsPaths(sensitiveRobotsPaths).sensitiveFiles(List.of())
+                    .sensitiveRobotsPaths(sensitiveRobotsPaths).robotsTxtPresent(robots.present())
+                    .sensitiveFiles(List.of())
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
                     .openRedirectFindings(List.of())
@@ -573,7 +576,8 @@ public class ScanOrchestrator {
                     .reflectedXssSuspected(reflectedXssSuspected)
                     .openPorts(openPorts).corsResult(corsResult)
                     .cookieIssues(cookieIssues)
-                    .sensitiveRobotsPaths(sensitiveRobotsPaths).sensitiveFiles(sensitiveFiles)
+                    .sensitiveRobotsPaths(sensitiveRobotsPaths).robotsTxtPresent(robots.present())
+                    .sensitiveFiles(sensitiveFiles)
                     .dangerousHttpMethods(dangerousHttpMethods)
                     .securityTxtPresent(secTxtFound).securityTxtContact(secTxtContact)
                     .openRedirectFindings(openRedirectFindings)
