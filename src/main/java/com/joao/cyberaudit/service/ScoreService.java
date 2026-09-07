@@ -556,7 +556,12 @@ public class ScoreService {
             }
         }
 
-        score = Math.max(0, score);
+        // Teto além do piso. O bônus de WAF soma até +8 (ver a seção 16) e um alvo
+        // sem nenhuma penalidade chega aqui com 100 — o badge público de
+        // cyberauditapp.com chegou a exibir "104/100" em produção. Num produto que
+        // vende avaliação de segurança, uma nota impossível custa a credibilidade
+        // do número inteiro.
+        score = Math.max(0, Math.min(100, score));
 
         // ── Risk level — 5 tiers ─────────────────────────────────────────────
         RiskLevel risk;
