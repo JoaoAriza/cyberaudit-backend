@@ -30,7 +30,7 @@ public class ReportService {
 
         // ── Overview ──────────────────────────────────────
         s.append("== Overview ==\n");
-        s.append("Generated:    ").append(LocalDateTime.now()).append("\n");
+        s.append("Generated:    ").append(LocalDateTime.now()).append(" UTC\n");
         s.append("URL analyzed: ").append(r.getUrl()).append("\n");
         s.append("Final URL:    ").append(r.getFinalUrl()).append("\n");
         s.append("HTTP Status:  ").append(r.getHttpStatus()).append("\n");

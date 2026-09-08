@@ -67,7 +67,7 @@ public class PublicStatusController {
         return ResponseEntity.ok(new PublicStatusDto(
                 account.getDisplayName(),
                 account.getPlan() != null ? account.getPlan().name() : "FREE",
-                LocalDateTime.now().format(FMT),
+                LocalDateTime.now().format(FMT) + " UTC",
                 overallScore,
                 overallRisk,
                 domainDtos
@@ -93,7 +93,7 @@ public class PublicStatusController {
                 domain.isVerified(),
                 latest.getScore(),
                 latest.getRiskLevel() != null ? latest.getRiskLevel().name() : null,
-                latest.getScannedAt().format(FMT),
+                latest.getScannedAt().format(FMT) + " UTC",
                 latest.isActiveMode(),
                 countBySeverity(result)
         );

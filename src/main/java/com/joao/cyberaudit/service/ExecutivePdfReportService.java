@@ -317,7 +317,7 @@ public class ExecutivePdfReportService {
         txt("CYBERAUDIT", M + 10, PH - 24, bold, 22, ACCENT);
         txt("Executive Security Report", M + 10, PH - 44, normal, 11, WHITE);
         String now = java.time.LocalDateTime.now().format(DT_FMT);
-        txtR("Generated on " + now, PW - M, PH - 28, normal, 8, MUTED);
+        txtR("Generated on " + now + " UTC", PW - M, PH - 28, normal, 8, MUTED);
         txtR("CONFIDENTIAL", PW - M, PH - 42, bold, 8, MUTED);
         String scopeLabel = switch (scope) {
             case TEAM_SCANS -> "Team Scans";

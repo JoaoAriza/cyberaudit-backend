@@ -6,6 +6,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.security.Security;
+import java.util.TimeZone;
 
 @SpringBootApplication
 @EnableAsync
@@ -22,6 +23,7 @@ public class CyberauditApplication {
             System.setProperty("jdk.httpclient.allowRestrictedHeaders", restricted + ",host");
         }
 
+        pinTimeZone();
         pinDnsCache();
 
         SpringApplication.run(CyberauditApplication.class, args);
@@ -50,5 +52,24 @@ public class CyberauditApplication {
                 || "-1".equals(current.trim())) {
             Security.setProperty(property, value);
         }
+    }
+
+    /**
+     * Fixa o fuso da JVM em UTC.
+     *
+     * Todo LocalDateTime.now() da aplicação — auditoria, agendamento, validade de
+     * token, histórico — passa a significar a mesma coisa na máquina do dev
+     * (UTC-3) e no contêiner do Render (UTC). Sem isso o mesmo código grava horas
+     * de fusos diferentes na MESMA coluna, e a linha não guarda nada que permita
+     * saber depois qual é qual.
+     *
+     * Também é o que sustenta o "Z" que o TimeConfig carimba na saída da API:
+     * carimbar UTC em hora que não é UTC seria pior do que não carimbar.
+     *
+     * Precisa rodar antes do Spring subir — pool de conexões, agendador e Jackson
+     * leem TimeZone.getDefault() na inicialização.
+     */
+    private static void pinTimeZone() {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
     }
 }

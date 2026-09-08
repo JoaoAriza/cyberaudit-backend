@@ -237,7 +237,7 @@ public class PdfReportService {
         // ── Data e confidencial ───────────────────────────────────────────────
         String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
         float rightX = brandLogoBytes != null ? PW - M - 130 : PW - M;
-        txtR("Generated: " + date, rightX, PH - 38, normal, 8, MUTED);
+        txtR("Generated: " + date + " UTC", rightX, PH - 38, normal, 8, MUTED);
         txtR("CONFIDENTIAL", rightX, PH - 52, bold, 7, MUTED);
         cy = PH - 100;
     }
