@@ -196,9 +196,15 @@ public class ComplianceMappingService {
         {
             List<String> findings = new ArrayList<>();
             if (notEmpty(r.getOpenPorts())) {
+                // 80/443 são o próprio serviço web — estar aberto é o que coloca o
+                // site no ar, não um desvio de controle. Só entram como não
+                // conformidade as portas que não deveriam estar expostas na borda
+                // (mesma regra que o ScoreService usa para não penalizar 80/443).
                 List<String> ports = r.getOpenPorts().stream()
+                        .filter(p -> p.getPort() != 80 && p.getPort() != 443)
                         .map(p -> p.getPort() + "/" + p.getService()).toList();
-                findings.add("Portas abertas: " + String.join(", ", ports));
+                if (!ports.isEmpty())
+                    findings.add("Portas expostas além do serviço web: " + String.join(", ", ports));
             }
             CorsResult cors = r.getCorsResult();
             if (cors != null && (cors.isWildcardOrigin() || cors.isReflectsOrigin()))
