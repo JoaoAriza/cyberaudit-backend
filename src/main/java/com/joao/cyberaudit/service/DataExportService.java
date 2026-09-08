@@ -47,6 +47,7 @@ public class DataExportService {
         profile.put("role",             user.getRole().name());
         profile.put("jobTitle",         user.getJobTitle());
         profile.put("country",          user.getCountry());
+        profile.put("timezone",         user.getTimezone());
         profile.put("active",           user.isActive());
         profile.put("createdAt",        user.getCreatedAt() != null ? user.getCreatedAt().format(FMT) : null);
         profile.put("termsAccepted",    user.isTermsAccepted());

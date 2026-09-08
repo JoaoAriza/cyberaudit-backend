@@ -15,6 +15,10 @@ public class UserDto {
     private Role role;
     private String jobTitle;
     private String country;
+
+    /** Identificador IANA; vazio quando o usuário segue o navegador. */
+    private String timezone;
+    private boolean timezoneManual;
     private AccountDto account;
 
     private Integer remainingScans;
@@ -39,6 +43,8 @@ public class UserDto {
         dto.setRole(u.getRole());
         dto.setJobTitle(u.getJobTitle());
         dto.setCountry(u.getCountry());
+        dto.setTimezone(u.getTimezone());
+        dto.setTimezoneManual(u.isTimezoneManual());
         dto.setAccount(AccountDto.from(u.getAccount()));
         dto.setTotpEnabled(u.isTotpEnabled());
         dto.setEmailOtpEnabled(u.isEmailOtpEnabled());
@@ -61,6 +67,8 @@ public class UserDto {
         dto.setRole(u.getRole());
         dto.setJobTitle(u.getJobTitle());
         dto.setCountry(u.getCountry());
+        dto.setTimezone(u.getTimezone());
+        dto.setTimezoneManual(u.isTimezoneManual());
         dto.setAccount(AccountDto.from(u.getAccount(), effectivePlan));
         dto.setTotpEnabled(u.isTotpEnabled());
         dto.setEmailOtpEnabled(u.isEmailOtpEnabled());

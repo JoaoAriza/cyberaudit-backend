@@ -3,7 +3,7 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.model.*;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -25,12 +25,18 @@ import java.util.List;
 @Service
 public class ReportService {
 
+    /** Sem usuário conhecido (scan de convidado): carimbo em UTC. */
     public String generateReport(ScanResult r) {
+        return generateReport(r, UserTimeZoneService.PADRAO);
+    }
+
+    /** @param zona fuso de quem pediu o relatório — o documento leva o fuso escrito. */
+    public String generateReport(ScanResult r, ZoneId zona) {
         StringBuilder s = new StringBuilder();
 
         // ── Overview ──────────────────────────────────────
         s.append("== Overview ==\n");
-        s.append("Generated:    ").append(LocalDateTime.now()).append(" UTC\n");
+        s.append("Generated:    ").append(UserTimeZoneService.carimbo(zona)).append("\n");
         s.append("URL analyzed: ").append(r.getUrl()).append("\n");
         s.append("Final URL:    ").append(r.getFinalUrl()).append("\n");
         s.append("HTTP Status:  ").append(r.getHttpStatus()).append("\n");

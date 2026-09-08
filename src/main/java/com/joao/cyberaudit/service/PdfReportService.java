@@ -9,8 +9,7 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.Base64;
 import java.util.stream.Collectors;
@@ -68,16 +67,23 @@ public class PdfReportService {
     private float[]  brandAccent;   // cor de destaque (padrão = ACCENT)
     private String   brandName;     // nome no header (padrão = "CYBERAUDIT")
     private byte[]   brandLogoBytes;// logo decodificado (null = sem logo)
+    private ZoneId   zona = UserTimeZoneService.PADRAO; // fuso do carimbo "Generated"
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
     /** Gera PDF sem branding (scan de convidado ou usuário sem conta EMPRESA). */
     public byte[] generatePdf(ScanResult r, String ignored) {
-        return generatePdf(r, ignored, null);
+        return generatePdf(r, ignored, null, UserTimeZoneService.PADRAO);
     }
 
     /** Gera PDF com branding da conta, se configurado. */
     public byte[] generatePdf(ScanResult r, String ignored, Account account) {
+        return generatePdf(r, ignored, account, UserTimeZoneService.PADRAO);
+    }
+
+    /** @param zona fuso de quem pediu o PDF — o carimbo "Generated" sai nele. */
+    public byte[] generatePdf(ScanResult r, String ignored, Account account, ZoneId zona) {
+        this.zona = zona;
         try {
             // ── Inicializa branding ──────────────────────────────────────────
             brandAccent    = ACCENT;
@@ -235,9 +241,9 @@ public class PdfReportService {
         txt("Web Security Report", M + 8, PH - 52, normal, 11, WHITE);
 
         // ── Data e confidencial ───────────────────────────────────────────────
-        String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
+        String date = UserTimeZoneService.carimbo(zona);
         float rightX = brandLogoBytes != null ? PW - M - 130 : PW - M;
-        txtR("Generated: " + date + " UTC", rightX, PH - 38, normal, 8, MUTED);
+        txtR("Generated: " + date, rightX, PH - 38, normal, 8, MUTED);
         txtR("CONFIDENTIAL", rightX, PH - 52, bold, 7, MUTED);
         cy = PH - 100;
     }

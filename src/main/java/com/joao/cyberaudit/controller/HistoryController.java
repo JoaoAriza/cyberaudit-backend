@@ -7,6 +7,7 @@ import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.model.ScanSummary;
 import com.joao.cyberaudit.service.ScanEntitlementService;
 import com.joao.cyberaudit.service.ScanHistoryService;
+import com.joao.cyberaudit.service.UserTimeZoneService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -27,11 +28,14 @@ public class HistoryController {
 
     private final ScanHistoryService     historyService;
     private final ScanEntitlementService scanEntitlement;
+    private final UserTimeZoneService    userTimeZone;
 
     public HistoryController(ScanHistoryService historyService,
-                             ScanEntitlementService scanEntitlement) {
+                             ScanEntitlementService scanEntitlement,
+                             UserTimeZoneService userTimeZone) {
         this.historyService  = historyService;
         this.scanEntitlement = scanEntitlement;
+        this.userTimeZone    = userTimeZone;
     }
 
     /**
@@ -65,8 +69,8 @@ public class HistoryController {
             return historyService.findByHostBetween(
                     account,
                     host,
-                    fromDate.atStartOfDay(),
-                    toDate.plusDays(1).atStartOfDay()
+                    UserTimeZoneService.inicioDoDia(fromDate, userTimeZone.zonaDe(caller)),
+                    UserTimeZoneService.inicioDoDia(toDate.plusDays(1), userTimeZone.zonaDe(caller))
             );
         }
         ScanOrigin o = parseOrigin(origin);

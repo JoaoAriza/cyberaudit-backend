@@ -62,6 +62,21 @@ public class ScheduledScan {
     @Column(length = 16)
     private String locale;
 
+    /**
+     * Fuso em que {@code preferredHour} deve ser lido (ex: "America/Sao_Paulo").
+     *
+     * Fica no agendamento, e não só no usuário, porque a intenção pertence ao
+     * agendamento: quem monta a rotina para as 8h do horário de Brasília e depois
+     * se muda para Lisboa quer o scan continuando às 8h de Brasília, junto com o
+     * time que lê o relatório. Ler o fuso do usuário na hora de executar mudaria
+     * o horário de uma rotina existente por causa de uma viagem.
+     *
+     * Nulo nos agendamentos criados antes desta coluna existir — nesse caso vale
+     * UTC, que é como a hora deles foi escolhida e continua sendo exibida.
+     */
+    @Column(length = 64)
+    private String timezone;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;

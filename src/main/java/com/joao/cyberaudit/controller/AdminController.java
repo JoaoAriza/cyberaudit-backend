@@ -14,6 +14,7 @@ import com.joao.cyberaudit.service.AuditService;
 import com.joao.cyberaudit.service.ExecutivePdfReportService;
 import com.joao.cyberaudit.service.InviteService;
 import com.joao.cyberaudit.service.PlanLimitService;
+import com.joao.cyberaudit.service.UserTimeZoneService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -39,6 +40,7 @@ public class AdminController {
     private final DomainRepository       domainRepository;
     private final ExecutivePdfReportService pdfReportService;
     private final PlanLimitService       planLimitService;
+    private final UserTimeZoneService    userTimeZone;
 
     public AdminController(AppUserRepository userRepository,
                            AccountRepository accountRepository,
@@ -46,7 +48,8 @@ public class AdminController {
                            AuditService auditService,
                            DomainRepository domainRepository,
                            ExecutivePdfReportService pdfReportService,
-                           PlanLimitService planLimitService) {
+                           PlanLimitService planLimitService,
+                           UserTimeZoneService userTimeZone) {
         this.userRepository    = userRepository;
         this.accountRepository = accountRepository;
         this.inviteService     = inviteService;
@@ -54,6 +57,7 @@ public class AdminController {
         this.domainRepository  = domainRepository;
         this.pdfReportService  = pdfReportService;
         this.planLimitService  = planLimitService;
+        this.userTimeZone      = userTimeZone;
     }
 
     @GetMapping("/users")
@@ -267,7 +271,8 @@ public class AdminController {
         LocalDate dateTo   = to   != null ? LocalDate.parse(to)   : null;
 
         List<Domain> domains = domainRepository.findByAccountOrderByCreatedAtDesc(account);
-        byte[] pdfBytes = pdfReportService.generate(account, domains, reportScope, dateFrom, dateTo);
+        byte[] pdfBytes = pdfReportService.generate(account, domains, reportScope, dateFrom, dateTo,
+                userTimeZone.zonaDe(caller));
 
         String suffix = from != null && to != null ? "_" + from + "_a_" + to
                       : from != null ? "_desde_" + from

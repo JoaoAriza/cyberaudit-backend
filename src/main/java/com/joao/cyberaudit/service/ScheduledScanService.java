@@ -14,6 +14,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
@@ -27,17 +30,20 @@ public class ScheduledScanService {
     private final EmailService             emailService;
     private final PlanLimitService         planLimitService;
     private final ScanEntitlementService   scanEntitlement;
+    private final UserTimeZoneService      userTimeZone;
 
     public ScheduledScanService(ScheduledScanRepository repo,
                                 ScanOrchestrator orchestrator,
                                 EmailService emailService,
                                 PlanLimitService planLimitService,
-                                ScanEntitlementService scanEntitlement) {
+                                ScanEntitlementService scanEntitlement,
+                                UserTimeZoneService userTimeZone) {
         this.repo             = repo;
         this.orchestrator     = orchestrator;
         this.emailService     = emailService;
         this.planLimitService = planLimitService;
         this.scanEntitlement  = scanEntitlement;
+        this.userTimeZone     = userTimeZone;
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -55,16 +61,21 @@ public class ScheduledScanService {
 
         Frequency freq = Frequency.valueOf(req.getFrequency().toUpperCase());
 
+        // Fuso de quem cria, congelado no agendamento: a hora escolhida é a hora
+        // dele, e continua sendo mesmo que ele mude de fuso depois.
+        ZoneId zona = userTimeZone.zonaDe(user);
+
         ScheduledScan scan = ScheduledScan.builder()
                 .host(sanitizeHost(req.getHost()))
                 .active(req.isActive())
                 .frequency(freq)
                 .preferredHour(Math.max(0, Math.min(23, req.getPreferredHour())))
-                .nextRun(calcNextRun(freq, req.getPreferredHour()))
+                .nextRun(calcNextRun(freq, req.getPreferredHour(), zona))
                 .enabled(true)
                 .notifyEmail(req.isNotifyEmail())
                 // Capturado aqui porque a execução roda fora de requisição.
                 .locale(LocaleContextHolder.getLocale().toLanguageTag())
+                .timezone(zona.getId())
                 .user(user)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -82,7 +93,7 @@ public class ScheduledScanService {
         ScheduledScan scan = getOwned(id, user);
         scan.setEnabled(!scan.isEnabled());
         if (scan.isEnabled() && scan.getNextRun() == null) {
-            scan.setNextRun(calcNextRun(scan.getFrequency(), scan.getPreferredHour()));
+            scan.setNextRun(calcNextRun(scan.getFrequency(), scan.getPreferredHour(), zonaDe(scan)));
         }
         return ScheduledScanDto.from(repo.save(scan));
     }
@@ -118,7 +129,8 @@ public class ScheduledScanService {
                         scan.getHost(), scan.isActive(), scan.getUser(), true, ScanOrigin.SCHEDULED);
 
                 // Persiste nextRun e lastRun em transação curta separada
-                markSuccess(scan.getId(), calcNextRun(scan.getFrequency(), scan.getPreferredHour()));
+                markSuccess(scan.getId(),
+                        calcNextRun(scan.getFrequency(), scan.getPreferredHour(), zonaDe(scan)));
 
                 // Reconfere o plano na hora de enviar: entre a criação do agendamento
                 // e esta rodada a assinatura pode ter caído. Variante que não lança —
@@ -183,15 +195,39 @@ public class ScheduledScanService {
                 .orElseThrow(() -> new RuntimeException("Agendamento não encontrado"));
     }
 
-    private LocalDateTime calcNextRun(Frequency freq, int preferredHour) {
-        LocalDateTime now  = LocalDateTime.now();
-        LocalDateTime next = now.truncatedTo(ChronoUnit.DAYS)
-                               .withHour(preferredHour);
+    /**
+     * Próxima execução, em UTC — que é como a coluna nextRun é comparada com
+     * LocalDateTime.now() na consulta do agendador.
+     *
+     * A conta é feita NO FUSO do agendamento e só então convertida: "todo dia às
+     * 8h" é uma hora local, não um intervalo de 24 horas. Somar dias sobre o
+     * ZonedDateTime é o que mantém as 8h nas duas metades do ano em país com
+     * horário de verão — somar 24 horas sobre o instante deslocaria para 7h ou 9h
+     * na virada.
+     */
+    static LocalDateTime calcNextRun(Frequency freq, int preferredHour, ZoneId zona) {
+        ZonedDateTime agora = ZonedDateTime.now(zona);
+        ZonedDateTime prox  = agora.truncatedTo(ChronoUnit.DAYS)
+                                   .withHour(preferredHour);
         // Se o horário de hoje já passou, empurra para o próximo ciclo
-        if (!next.isAfter(now)) {
-            next = next.plusDays(freq == Frequency.WEEKLY ? 7 : 1);
+        if (!prox.isAfter(agora)) {
+            prox = prox.plusDays(freq == Frequency.WEEKLY ? 7 : 1);
         }
-        return next;
+        return prox.withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+    }
+
+    /**
+     * Fuso do agendamento. Criado antes da coluna existir, vem nulo e cai em UTC —
+     * que é o fuso em que aquela hora foi escolhida, e continua sendo exibida.
+     */
+    private ZoneId zonaDe(ScheduledScan scan) {
+        String id = scan.getTimezone();
+        if (id == null || id.isBlank()) return UserTimeZoneService.PADRAO;
+        try {
+            return ZoneId.of(id);
+        } catch (Exception e) {
+            return UserTimeZoneService.PADRAO;
+        }
     }
 
     private String sanitizeHost(String host) {

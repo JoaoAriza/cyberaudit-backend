@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.io.*;
 import java.net.URI;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -77,6 +78,9 @@ public class ExecutivePdfReportService {
             DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     // ── Estado por chamada (synchronized) ────────────────────────────────────
+    /** Fuso do carimbo da capa; instância é synchronized, como os demais campos de render. */
+    private ZoneId               zona = UserTimeZoneService.PADRAO;
+
     private PDDocument           doc;
     private PDPageContentStream  cs;
     private float                cy;
@@ -108,8 +112,16 @@ public class ExecutivePdfReportService {
      */
     public synchronized byte[] generate(Account account, List<Domain> domains,
                                         ReportScope scope, LocalDate from, LocalDate to) {
-        LocalDateTime dtFrom = from != null ? from.atStartOfDay()             : LocalDateTime.MIN;
-        LocalDateTime dtTo   = to   != null ? to.atTime(23, 59, 59)           : LocalDateTime.MAX;
+        return generate(account, domains, scope, from, to, UserTimeZoneService.PADRAO);
+    }
+
+    /** @param zona fuso de quem pediu o relatório — vale para o carimbo da capa. */
+    public synchronized byte[] generate(Account account, List<Domain> domains,
+                                        ReportScope scope, LocalDate from, LocalDate to,
+                                        ZoneId zona) {
+        this.zona = zona;
+        LocalDateTime dtFrom = from != null ? UserTimeZoneService.inicioDoDia(from, zona) : LocalDateTime.MIN;
+        LocalDateTime dtTo   = to   != null ? UserTimeZoneService.fimDoDia(to, zona)      : LocalDateTime.MAX;
         boolean hasDateFilter = from != null || to != null;
 
         try {
@@ -316,8 +328,8 @@ public class ExecutivePdfReportService {
         fill(0, PH - 80, 5, 80, ACCENT);
         txt("CYBERAUDIT", M + 10, PH - 24, bold, 22, ACCENT);
         txt("Executive Security Report", M + 10, PH - 44, normal, 11, WHITE);
-        String now = java.time.LocalDateTime.now().format(DT_FMT);
-        txtR("Generated on " + now + " UTC", PW - M, PH - 28, normal, 8, MUTED);
+        String now = UserTimeZoneService.carimbo(zona);
+        txtR("Generated on " + now, PW - M, PH - 28, normal, 8, MUTED);
         txtR("CONFIDENTIAL", PW - M, PH - 42, bold, 8, MUTED);
         String scopeLabel = switch (scope) {
             case TEAM_SCANS -> "Team Scans";

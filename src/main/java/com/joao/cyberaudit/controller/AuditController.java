@@ -4,6 +4,7 @@ import com.joao.cyberaudit.dto.AuditLogDto;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.repository.AuditLogRepository;
+import com.joao.cyberaudit.service.UserTimeZoneService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -25,11 +26,14 @@ public class AuditController {
 
     private final AuditLogRepository auditLogRepository;
     private final com.joao.cyberaudit.service.PlanLimitService planLimitService;
+    private final com.joao.cyberaudit.service.UserTimeZoneService userTimeZone;
 
     public AuditController(AuditLogRepository auditLogRepository,
-                           com.joao.cyberaudit.service.PlanLimitService planLimitService) {
+                           com.joao.cyberaudit.service.PlanLimitService planLimitService,
+                           com.joao.cyberaudit.service.UserTimeZoneService userTimeZone) {
         this.auditLogRepository = auditLogRepository;
         this.planLimitService   = planLimitService;
+        this.userTimeZone       = userTimeZone;
     }
 
     /**
@@ -67,10 +71,10 @@ public class AuditController {
         Page<com.joao.cyberaudit.model.AuditLog> result;
         if (from != null || to != null) {
             LocalDateTime dtFrom = from != null
-                    ? LocalDate.parse(from).atStartOfDay()
+                    ? UserTimeZoneService.inicioDoDia(LocalDate.parse(from), userTimeZone.zonaDe(caller))
                     : LocalDateTime.MIN;
             LocalDateTime dtTo = to != null
-                    ? LocalDate.parse(to).atTime(23, 59, 59)
+                    ? UserTimeZoneService.fimDoDia(LocalDate.parse(to), userTimeZone.zonaDe(caller))
                     : LocalDateTime.MAX;
             result = auditLogRepository
                     .findByAccountIdAndTimestampBetweenOrderByTimestampDesc(

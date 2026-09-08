@@ -27,6 +27,7 @@ public class ScanController {
     private final PlanLimitService        planLimitService;
     private final ScanEntitlementService  scanEntitlement;
     private final ClientIpResolver        clientIpResolver;
+    private final UserTimeZoneService     userTimeZone;
 
     public ScanController(
             ScanOrchestrator scanOrchestrator,
@@ -38,7 +39,8 @@ public class ScanController {
             GuestRateLimitService guestRateLimitService,
             PlanLimitService planLimitService,
             ScanEntitlementService scanEntitlement,
-            ClientIpResolver clientIpResolver) {
+            ClientIpResolver clientIpResolver,
+            UserTimeZoneService userTimeZone) {
         this.scanOrchestrator        = scanOrchestrator;
         this.asyncScanService        = asyncScanService;
         this.reportService           = reportService;
@@ -49,6 +51,7 @@ public class ScanController {
         this.planLimitService        = planLimitService;
         this.scanEntitlement         = scanEntitlement;
         this.clientIpResolver        = clientIpResolver;
+        this.userTimeZone            = userTimeZone;
     }
 
     // ── Scan síncrono ─────────────────────────────────────────────────────────
@@ -76,7 +79,8 @@ public class ScanController {
         // público — sem isso era o caminho para scan ativo anônimo e ilimitado.
         enforceScanLimits(url, active, currentUser, request);
         return reportService.generateReport(scanEntitlement.applyEntitlement(
-                scanOrchestrator.execute(url, active, currentUser, false), currentUser));
+                scanOrchestrator.execute(url, active, currentUser, false), currentUser),
+                userTimeZone.zonaDe(currentUser));
     }
 
     // ── Relatório PDF — via scanId (sem re-scan, resultado já em memória) ───────
@@ -103,7 +107,8 @@ public class ScanController {
         // saber qual scan é. O status guardado já vem com o gating de detalhe.
         planLimitService.checkPdfExport(currentUser, result.getUrl());
         byte[] pdf = pdfReportService.generatePdf(
-                result, reportService.generateReport(result), currentUser.getAccount());
+                result, reportService.generateReport(result, userTimeZone.zonaDe(currentUser)),
+                currentUser.getAccount(), userTimeZone.zonaDe(currentUser));
 
         String filename = "cyberaudit-" + (result.getUrl() != null
                 ? result.getUrl().replaceAll("[^a-zA-Z0-9]", "-") : "report") + ".pdf";
@@ -135,7 +140,8 @@ public class ScanController {
         ScanResult result = scanEntitlement.applyEntitlement(
                 scanOrchestrator.execute(url, active, currentUser, false), currentUser);
         return pdfReportService.generatePdf(
-                result, reportService.generateReport(result), currentUser.getAccount());
+                result, reportService.generateReport(result, userTimeZone.zonaDe(currentUser)),
+                currentUser.getAccount(), userTimeZone.zonaDe(currentUser));
     }
 
     // ── Scan assíncrono ───────────────────────────────────────────────────────

@@ -40,6 +40,35 @@ public class AppUser implements UserDetails {
     private String jobTitle;
     private String country;
 
+    /**
+     * Fuso do usuário, no identificador IANA ({@code America/Sao_Paulo}) — nunca
+     * um offset como "-03:00". O offset é um fato sobre um INSTANTE, não sobre um
+     * lugar: guardado, erra na próxima virada de horário de verão. O identificador
+     * carrega as regras e o {@code ZoneId} aplica a da data certa.
+     *
+     * Vale para o que o servidor gera sem navegador na frente — hora do
+     * agendamento, carimbo do PDF, corte de dia nos filtros. O que é renderizado
+     * na tela não passa por aqui: ali o próprio navegador converte o instante UTC
+     * que a API manda, e acompanha quem viaja.
+     *
+     * Nulo em quem nunca abriu a interface depois desta coluna existir — cai em
+     * UTC, que é o que essas pessoas já recebiam.
+     */
+    @Column(length = 64)
+    private String timezone;
+
+    /**
+     * Marca a escolha feita no perfil, para a detecção automática do navegador não
+     * atropelá-la no próximo login. Sem isto, quem administra do exterior o servidor
+     * de casa não conseguiria manter o relatório no fuso da operação.
+     */
+    // DEFAULT explicito: com ddl-auto=update esta coluna NOT NULL entra numa tabela
+    // que ja tem linhas, e sem default o Postgres recusa o ALTER. Mesmo motivo do
+    // columnDefinition em ScanRecord.origin.
+    @Builder.Default
+    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private boolean timezoneManual = false;
+
     @Column(nullable = false)
     private boolean active;
 
