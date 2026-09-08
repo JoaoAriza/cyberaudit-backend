@@ -2,6 +2,7 @@ package com.joao.cyberaudit.dto;
 
 import com.joao.cyberaudit.model.AuditLog;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 public record AuditLogDto(
@@ -12,7 +13,11 @@ public record AuditLogDto(
         String action,
         String details,
         String ipAddress,
-        String timestamp,
+        // LocalDateTime, e NÃO String: o carimbo de fuso do TimeConfig só alcança o
+        // que chega ao Jackson como data. Convertido para String aqui, o instante saía
+        // como "2026-09-08T19:03:51" e o navegador lia isso como hora LOCAL — era o
+        // que fazia o painel admin mostrar os eventos três horas no futuro.
+        LocalDateTime timestamp,
         boolean success
 ) {
     public static AuditLogDto from(AuditLog log) {
@@ -24,7 +29,7 @@ public record AuditLogDto(
                 log.getAction().name(),
                 log.getDetails(),
                 log.getIpAddress(),
-                log.getTimestamp().toString(),
+                log.getTimestamp(),
                 log.isSuccess()
         );
     }

@@ -1,6 +1,9 @@
 package com.joao.cyberaudit.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.joao.cyberaudit.dto.AuditLogDto;
+import com.joao.cyberaudit.model.AuditAction;
+import com.joao.cyberaudit.model.AuditLog;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -10,6 +13,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,6 +60,34 @@ class TimeConfigTest {
 
             assertEquals(Instant.parse("2026-09-08T12:24:58Z"), Instant.parse(iso));
             assertTrue(iso.endsWith("Z"), "sem o Z o navegador interpreta como hora local: " + iso);
+        });
+    }
+
+    /**
+     * O teste que faltava na primeira tentativa.
+     *
+     * O serializador do TimeConfig só alcança campo que chega ao Jackson COMO data.
+     * O AuditLogDto convertia o instante para String antes disso, então o painel
+     * admin continuou três horas à frente mesmo com o resto do sistema corrigido.
+     * Serializar o DTO de verdade, e não um Map de exemplo, é o que trava isso.
+     */
+    @Test
+    @DisplayName("o DTO da auditoria entrega a data ao Jackson, não uma String pronta")
+    void auditLogDtoSaiComFuso() {
+        runner.run(ctx -> {
+            ObjectMapper mapper = ctx.getBean(ObjectMapper.class);
+
+            AuditLog log = AuditLog.builder()
+                    .id(UUID.randomUUID())
+                    .action(AuditAction.LOGIN_SUCCESS)
+                    .timestamp(LocalDateTime.of(2026, 9, 8, 19, 3, 51))
+                    .success(true)
+                    .build();
+
+            String json = mapper.writeValueAsString(AuditLogDto.from(log));
+
+            assertTrue(json.contains("\"timestamp\":\"2026-09-08T19:03:51Z\""),
+                    "o painel admin joga este campo direto no new Date(): " + json);
         });
     }
 }
