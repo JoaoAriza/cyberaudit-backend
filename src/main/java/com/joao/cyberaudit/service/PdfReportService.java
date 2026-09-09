@@ -40,6 +40,21 @@ public class PdfReportService {
     private static final float PW = PDRectangle.A4.getWidth();    // 595.28
     private static final float CW = PW - 2 * M;                   // ~505
 
+    // ── Grade horizontal ──────────────────────────────────────────────────────
+    // Antes cada seção escolhia seu próprio recuo: título de seção em M+10, caixa
+    // de resumo em M+12, linhas em M+8, alinhamentos à direita em PW-M-8, -12 e
+    // PW-M. Cinco réguas diferentes na mesma página — é o que dava a impressão de
+    // conteúdo solto. Passam a existir duas: a MOLDURA (M .. PW-M), que é a borda
+    // das caixas e do rodapé, e o CONTEÚDO (LX .. RX), que é tudo que vive dentro
+    // de uma caixa.
+    private static final float PAD = 8f;               // respiro interno das caixas
+    private static final float LX  = M + PAD;          // 53  — coluna de conteúdo
+    private static final float RX  = PW - M - PAD;     // 542 — limite direito do conteúdo
+    private static final float LX2 = LX + 6;           // 59  — indentação de 2º nível
+    private static final float VX  = M + 155;          // 200 — coluna dos valores
+    private static final float CIW = RX - LX;          // largura útil dentro da caixa
+    private static final float VW  = RX - VX;          // largura de quebra dos valores
+
     // ── Color palette (R G B, range 0-1) ─────────────────────────────────────
     private static final float[] NAVY    = {0.05f, 0.08f, 0.12f};
     private static final float[] DARK    = {0.09f, 0.13f, 0.19f};
@@ -232,17 +247,17 @@ public class PdfReportService {
                 float scale = Math.min(maxW / logo.getWidth(), maxH / logo.getHeight());
                 float lw = logo.getWidth()  * scale;
                 float lh = logo.getHeight() * scale;
-                cs.drawImage(logo, PW - M - lw, PH - 85 + (85 - lh) / 2f, lw, lh);
+                cs.drawImage(logo, RX - lw, PH - 85 + (85 - lh) / 2f, lw, lh);
             } catch (Exception ignored) { /* logo inválido — ignora */ }
         }
 
         // ── Nome e subtítulo ──────────────────────────────────────────────────
-        txt(brandName, M + 8, PH - 34, bold, 22, brandAccent);
-        txt("Web Security Report", M + 8, PH - 52, normal, 11, WHITE);
+        txt(brandName, LX, PH - 34, bold, 22, brandAccent);
+        txt("Web Security Report", LX, PH - 52, normal, 11, WHITE);
 
         // ── Data e confidencial ───────────────────────────────────────────────
         String date = UserTimeZoneService.carimbo(zona);
-        float rightX = brandLogoBytes != null ? PW - M - 130 : PW - M;
+        float rightX = brandLogoBytes != null ? RX - 130 : RX;
         txtR("Generated: " + date, rightX, PH - 38, normal, 8, MUTED);
         txtR("CONFIDENTIAL", rightX, PH - 52, bold, 7, MUTED);
         cy = PH - 100;
@@ -255,22 +270,22 @@ public class PdfReportService {
         fill(M, cy - boxH, 3, boxH, ACCENT);
 
         String url = s(r.getFinalUrl() != null ? r.getFinalUrl() : r.getUrl());
-        txt("TARGET", M + 12, cy - 12, bold, 7, MUTED);
-        wrapTxt(url, M + 12, cy - 24, mono, 9, TEXT, CW / 2);
+        txt("TARGET", LX, cy - 12, bold, 7, MUTED);
+        wrapTxt(url, LX, cy - 24, mono, 9, TEXT, CIW / 2);
 
         // Scan type + status (right side, before cy update)
         String scanType = r.isActiveMode() ? "ACTIVE SCAN" : "PASSIVE SCAN";
-        txtR(scanType, PW - M - 12, cy - 14, bold, 8, MUTED);
+        txtR(scanType, RX, cy - 14, bold, 8, MUTED);
         if (r.getHttpStatus() > 0)
-            txtR("HTTP " + r.getHttpStatus(), PW - M - 12, cy - 27, normal, 9, TEXT);
+            txtR("HTTP " + r.getHttpStatus(), RX, cy - 27, normal, 9, TEXT);
 
         if (r.getScore() != null) {
             int score = r.getScore().getScore();
             String risk = r.getScore().getRiskLevel() != null ? r.getScore().getRiskLevel().name() : "UNKNOWN";
             float[] rc  = riskColor(risk);
-            txt("SCORE", M + 12, cy - 42, bold, 7, MUTED);
-            txt(score + " / 100", M + 12, cy - 57, bold, 20, rc);
-            float bx = M + 12 + sw(score + " / 100", bold, 20) + 12;
+            txt("SCORE", LX, cy - 42, bold, 7, MUTED);
+            txt(score + " / 100", LX, cy - 57, bold, 20, rc);
+            float bx = LX + sw(score + " / 100", bold, 20) + 12;
             float[] bgc = riskBg(risk);
             float bw = sw(risk, bold, 8) + 14;
             fill(bx, cy - 59, bw, 14, bgc);
@@ -291,18 +306,20 @@ public class PdfReportService {
         long tot = nc + nh + nm + nl;
         if (tot == 0) return;
 
-        txt("SEVERITY DISTRIBUTION", M, cy - 2, bold, 7, MUTED);
+        // Barra, rótulo e legenda na coluna de CONTEÚDO: no documento inteiro, texto
+        // começa em LX e só borda de caixa começa em M.
+        txt("SEVERITY DISTRIBUTION", LX, cy - 2, bold, 7, MUTED);
         cy -= 13;
 
-        float bx = M, bh = 9;
-        fill(bx, cy - bh, CW, bh, BORDER);
-        if (nc > 0) { float w = CW * nc / tot; fill(bx, cy - bh, w, bh, CRIT); bx += w; }
-        if (nh > 0) { float w = CW * nh / tot; fill(bx, cy - bh, w, bh, HIGH); bx += w; }
-        if (nm > 0) { float w = CW * nm / tot; fill(bx, cy - bh, w, bh, MED);  bx += w; }
-        if (nl > 0) { float w = CW * nl / tot; fill(bx, cy - bh, w, bh, LOW_C); }
+        float bx = LX, bh = 9;
+        fill(bx, cy - bh, CIW, bh, BORDER);
+        if (nc > 0) { float w = CIW * nc / tot; fill(bx, cy - bh, w, bh, CRIT); bx += w; }
+        if (nh > 0) { float w = CIW * nh / tot; fill(bx, cy - bh, w, bh, HIGH); bx += w; }
+        if (nm > 0) { float w = CIW * nm / tot; fill(bx, cy - bh, w, bh, MED);  bx += w; }
+        if (nl > 0) { float w = CIW * nl / tot; fill(bx, cy - bh, w, bh, LOW_C); }
         cy -= 13;
 
-        bx = M;
+        bx = LX;
         if (nc > 0) { bx = legend(bx, cy, CRIT,  "CRITICAL " + nc); bx += 14; }
         if (nh > 0) { bx = legend(bx, cy, HIGH,  "HIGH "     + nh); bx += 14; }
         if (nm > 0) { bx = legend(bx, cy, MED,   "MEDIUM "   + nm); bx += 14; }
@@ -323,7 +340,7 @@ public class PdfReportService {
         cy -= 10;
         fill(M,     cy - 18, CW, 18, DARK);
         fill(M,     cy - 18, 3,  18, ACCENT);
-        txt(title,  M + 10,  cy - 13, bold, 9, WHITE);
+        txt(title,  LX,  cy - 13, bold, 9, WHITE);
         cy -= 30;  // 18px header + 12px gap (4pt clearance above bold cap-height)
     }
 
@@ -333,10 +350,10 @@ public class PdfReportService {
 
     private void kv(String key, String val, float[] col) throws IOException {
         if (val == null || val.isBlank()) return;
-        int lines = lineCount(s(val), normal, 9, CW - 155);
+        int lines = lineCount(s(val), normal, 9, VW);
         need(LH * lines + 4);
-        txt(key.toUpperCase(), M + 8, cy, normal, 7, MUTED);
-        float lastY = wrapTxt(s(val), M + 155, cy, normal, 9, col, CW - 155);
+        txt(key.toUpperCase(), LX, cy, normal, 7, MUTED);
+        float lastY = wrapTxt(s(val), VX, cy, normal, 9, col, VW);
         cy = lastY - LH - 1;
     }
 
@@ -346,7 +363,7 @@ public class PdfReportService {
 
     private void sep() throws IOException {
         need(8);
-        fill(M + 8, cy - 2, CW - 16, 0.4f, BORDER);
+        fill(LX, cy - 2, CIW, 0.4f, BORDER);
         cy -= 8;
     }
 
@@ -354,7 +371,7 @@ public class PdfReportService {
 
     private void issueRow(SecurityIssue issue) throws IOException {
         final float FBW = 58f;
-        final float TX  = M + 8 + FBW + 8;  // M+74 — badge right edge + 8px gap
+        final float TX  = LX + FBW + 8;  // M+74 — badge right edge + 8px gap
         // Impact/Fix labels sit at TX; value at TX+IL, same column as title
         final float IL  = sw("Impact: ", bold, 7);   // ~32px — avoids hardcoded guesses
 
@@ -362,8 +379,8 @@ public class PdfReportService {
                 ? issue.getRecommendation().replaceAll("\\s*Ref:\\s*https?://\\S+", "").trim() : "";
 
         // All widths relative to TX so height estimate matches actual rendering
-        float txtW  = CW - (TX - M);               // title wrap width
-        float valW  = CW - (TX - M) - IL;           // impact/fix value wrap width
+        float txtW  = RX - TX;                     // title wrap width
+        float valW  = RX - TX - IL;                // impact/fix value wrap width
 
         int titleLines  = lineCount(s(issue.getTitle()), bold, 9, txtW);
         int impactLines = issue.getImpact() != null && !issue.getImpact().isBlank()
@@ -378,8 +395,8 @@ public class PdfReportService {
         float[] sb = sevBg(issue.getSeverity());
         float startY = cy;
 
-        fill(M + 8, cy - LH + 1, FBW, 11, sb);
-        txt(issue.getSeverity(), M + 8 + (FBW - sw(issue.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+        fill(LX, cy - LH + 1, FBW, 11, sb);
+        txt(issue.getSeverity(), LX + (FBW - sw(issue.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
 
         float titleX = TX;
         if (issue.getId() != null && issue.getId().startsWith("CVE_")) {
@@ -388,7 +405,7 @@ public class PdfReportService {
             titleX += 34;
         }
 
-        float lastY = wrapTxt(s(issue.getTitle()), titleX, cy, bold, 9, TEXT, CW - (titleX - M));
+        float lastY = wrapTxt(s(issue.getTitle()), titleX, cy, bold, 9, TEXT, RX - titleX);
         cy = lastY - LH;
 
         // Impact / Fix: labels at TX (same column as title), values at TX+IL
@@ -418,10 +435,10 @@ public class PdfReportService {
         fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5,  BGLIGHT);  // top = cy
 
         final float FBW_CV = 58f;
-        fill(M + 8, cy - LH + 1, FBW_CV, 11, sb);
-        txt(cve.getSeverity(), M + 8 + (FBW_CV - sw(cve.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+        fill(LX, cy - LH + 1, FBW_CV, 11, sb);
+        txt(cve.getSeverity(), LX + (FBW_CV - sw(cve.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
 
-        float cx2 = M + 8 + FBW_CV + 8;
+        float cx2 = LX + FBW_CV + 8;
         txt(s(cve.getCveId()), cx2, cy, bold, 10, TEXT);
         float cx3 = cx2 + sw(s(cve.getCveId()), bold, 10) + 8;
         String cvssLabel = "CVSS " + String.format("%.1f", cve.getCvssScore());
@@ -430,17 +447,17 @@ public class PdfReportService {
         cy -= LH + 3;
 
         if (cve.getAffectedSoftware() != null) {
-            txt("Software", M + 14, cy, bold, 7, MUTED);
-            txt(s(cve.getAffectedSoftware()), M + 65, cy, normal, 9, TEXT);
+            txt("Software", LX2, cy, bold, 7, MUTED);
+            txt(s(cve.getAffectedSoftware()), VX, cy, normal, 9, TEXT);
             cy -= LH;
         }
         if (cve.getDescription() != null && !cve.getDescription().isBlank()) {
-            float lastDescY = wrapTxt(s(cve.getDescription()), M + 14, cy, normal, 8, MUTED, CW - 20);
+            float lastDescY = wrapTxt(s(cve.getDescription()), LX2, cy, normal, 8, MUTED, RX - LX2);
             cy = lastDescY - LH;
         }
         if (cve.getPublishedDate() != null) {
-            txt("Published", M + 14, cy, bold, 7, MUTED);
-            txt(s(cve.getPublishedDate()), M + 65, cy, normal, 8, MUTED);
+            txt("Published", LX2, cy, bold, 7, MUTED);
+            txt(s(cve.getPublishedDate()), VX, cy, normal, 8, MUTED);
         }
         cy -= 8;
     }
@@ -465,7 +482,7 @@ public class PdfReportService {
         float ny = wrapTxt(s("Potential: correlation based on the reported banner version - may be a "
                         + "false positive if the vendor backported the fix without changing the "
                         + "version number. Confirm the exact version before acting."),
-                M + 8, cy, normal, 7, MUTED, CW - 16);
+                LX, cy, normal, 7, MUTED, CIW);
         cy = ny - 6;
         for (CVEFinding c : cves) cveRow(c);
         cy -= 6;
@@ -506,8 +523,8 @@ public class PdfReportService {
         secHead("RELATED HOSTS  —  security headers (informational, not scored)");
         for (RelatedHostHeaders rh : r.getRelatedHostHeaders()) {
             need(LH + 4);
-            txt(s(rh.getHost()), M + 8, cy, bold, 9, TEXT);
-            txtR(rh.getMissingCount() + " missing", PW - M - 8, cy, normal, 8, MUTED);
+            txt(s(rh.getHost()), LX, cy, bold, 9, TEXT);
+            txtR(rh.getMissingCount() + " missing", RX, cy, normal, 8, MUTED);
             cy -= LH + 2;
             if (rh.getHeaders() != null)
                 for (Map.Entry<String, String> e : rh.getHeaders().entrySet())
@@ -536,7 +553,7 @@ public class PdfReportService {
             kv("Libraries", String.join(", ", t.getLibraries()));
         if (t.getDetectedVersions() != null && !t.getDetectedVersions().isEmpty()) {
             sep();
-            txt("DETECTED VERSIONS", M + 8, cy, bold, 7, MUTED);
+            txt("DETECTED VERSIONS", LX, cy, bold, 7, MUTED);
             cy -= LH + 2;
             for (Map.Entry<String, String> e : t.getDetectedVersions().entrySet())
                 kv(e.getKey(), e.getValue());
@@ -580,11 +597,11 @@ public class PdfReportService {
             kv("Certificate issuers", String.join(", ", ct.getIssuers()));
         if (ct.getDiscoveredSubdomains() != null && !ct.getDiscoveredSubdomains().isEmpty()) {
             sep();
-            txt("DISCOVERED SUBDOMAINS (" + ct.getDiscoveredSubdomains().size() + ")", M + 8, cy, bold, 7, MUTED);
+            txt("DISCOVERED SUBDOMAINS (" + ct.getDiscoveredSubdomains().size() + ")", LX, cy, bold, 7, MUTED);
             cy -= LH + 2;
             for (String sub : ct.getDiscoveredSubdomains()) {
                 need(LH);
-                txt("•  " + s(sub), M + 16, cy, mono, 8, TEXT);
+                txt("•  " + s(sub), LX2, cy, mono, 8, TEXT);
                 cy -= LH;
             }
         }
@@ -599,9 +616,9 @@ public class PdfReportService {
             float[] sb = sevBg(f.getSeverity());
             fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5,  BGLIGHT);  // top = cy
             final float bw = 58f;
-            fill(M + 8, cy - LH + 1, bw, 11, sb);
-            txt(f.getSeverity(), M + 8 + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            txt(s(f.getSubdomain()), M + 8 + bw + 8, cy, bold, 9, TEXT);
+            fill(LX, cy - LH + 1, bw, 11, sb);
+            txt(f.getSeverity(), LX + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(f.getSubdomain()), LX + bw + 8, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("CNAME target",  f.getCnameTarget());
             kv("Service",       f.getService());
@@ -620,9 +637,9 @@ public class PdfReportService {
             float[] sb = sevBg(cf.getRisk());
             fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5,  BGLIGHT);  // top = cy
             final float bw = 58f;
-            fill(M + 8, cy - LH + 1, bw, 11, sb);
-            txt(cf.getRisk(), M + 8 + (bw - sw(cf.getRisk(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            txt(s(cf.getName()), M + 8 + bw + 8, cy, bold, 9, TEXT);
+            fill(LX, cy - LH + 1, bw, 11, sb);
+            txt(cf.getRisk(), LX + (bw - sw(cf.getRisk(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(cf.getName()), LX + bw + 8, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("HttpOnly", o(cf.isHttpOnly()), cf.isHttpOnly() ? OK : CRIT);
             kv("Secure",   o(cf.isSecure()),   cf.isSecure()   ? OK : CRIT);
@@ -645,11 +662,11 @@ public class PdfReportService {
         need(LH * 2);
         float y = wrapTxt(s("These checks did not complete (timeout/error). Absence of findings "
                 + "in these modules does NOT mean absence of risk."),
-                M + 8, cy, normal, 8, MUTED, CW - 16);
+                LX, cy, normal, 8, MUTED, CIW);
         cy = y - LH;
         for (String d : degraded) {
             need(LH);
-            txt(s("- " + d), M + 14, cy, normal, 9, TEXT);
+            txt(s("- " + d), LX2, cy, normal, 9, TEXT);
             cy -= LH;
         }
         cy -= 6;
@@ -661,9 +678,9 @@ public class PdfReportService {
             need(LH * 2 + 8);
             float[] sc = sevColor(m.getSeverity());
             final float bw = 58f;
-            fill(M + 8, cy - LH + 1, bw, 11, sevBg(m.getSeverity()));
-            txt(m.getSeverity(), M + 8 + (bw - sw(m.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            final float methTX = M + 8 + bw + 8;
+            fill(LX, cy - LH + 1, bw, 11, sevBg(m.getSeverity()));
+            txt(m.getSeverity(), LX + (bw - sw(m.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            final float methTX = LX + bw + 8;
             txt(s(m.getMethod()), methTX, cy, bold, 10, TEXT);
             txt("HTTP " + m.getStatusCode(), methTX + sw(s(m.getMethod()), bold, 10) + 8, cy, normal, 8, MUTED);
             cy -= LH + 3;
@@ -682,9 +699,9 @@ public class PdfReportService {
             need(LH * 3 + 8);
             float[] sc = sevColor(f.getSeverity());
             final float bw = 58f;
-            fill(M + 8, cy - LH + 1, bw, 11, sevBg(f.getSeverity()));
-            txt(f.getSeverity(), M + 8 + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            float lastRedY = wrapTxt(s(f.getTestedUrl()), M + 8 + bw + 8, cy, mono, 8, TEXT, CW - bw - 20);
+            fill(LX, cy - LH + 1, bw, 11, sevBg(f.getSeverity()));
+            txt(f.getSeverity(), LX + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            float lastRedY = wrapTxt(s(f.getTestedUrl()), LX + bw + 8, cy, mono, 8, TEXT, RX - (LX + bw + 8));
             cy = lastRedY - LH + 1;
             kv("Redirected to", f.getRedirectedTo());
             kv("Parameter",     f.getParameter());
@@ -702,10 +719,10 @@ public class PdfReportService {
             need(LH * 2 + 8);
             float[] sc = sevColor(f.getSeverity());
             final float bw = 58f;
-            fill(M + 8, cy - LH + 1, bw, 11, sevBg(f.getSeverity()));
-            txt(f.getSeverity(), M + 8 + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            txt(s(f.getPath()), M + 8 + bw + 8, cy, mono, 9, TEXT);
-            txtR("HTTP " + f.getStatusCode(), PW - M - 8, cy, normal, 8, MUTED);
+            fill(LX, cy - LH + 1, bw, 11, sevBg(f.getSeverity()));
+            txt(f.getSeverity(), LX + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            txt(s(f.getPath()), LX + bw + 8, cy, mono, 9, TEXT);
+            txtR("HTTP " + f.getStatusCode(), RX, cy, normal, 8, MUTED);
             cy -= LH + 3;
             if (f.getEvidence() != null && !f.getEvidence().isBlank()) kv("Evidence", f.getEvidence());
             cy -= 3;
@@ -720,12 +737,12 @@ public class PdfReportService {
             float[] sc = sevColor(p.getSeverity());
             final float bw = 58f;
             fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5,  BGLIGHT);  // top = cy
-            fill(M + 8, cy - LH + 1, bw, 11, sevBg(p.getSeverity()));
-            txt(p.getSeverity(), M + 8 + (bw - sw(p.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            final float portTX = M + 8 + bw + 8;   // fixed column for port title
+            fill(LX, cy - LH + 1, bw, 11, sevBg(p.getSeverity()));
+            txt(p.getSeverity(), LX + (bw - sw(p.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            final float portTX = LX + bw + 8;   // fixed column for port title
             txt("Port " + p.getPort(), portTX, cy, bold, 10, TEXT);
             txt(s(p.getService()), portTX + sw("Port " + p.getPort(), bold, 10) + 8, cy, normal, 9, MUTED);
-            txtR("state: " + p.getState(), PW - M - 8, cy, normal, 8, MUTED);
+            txtR("state: " + p.getState(), RX, cy, normal, 8, MUTED);
             cy -= LH + 3;
             kv("Latency",        p.getLatencyMs() + " ms");
             kv("Impact",         p.getImpact());
@@ -771,9 +788,9 @@ public class PdfReportService {
             need(LH * rows + 10);
             fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
-            fill(M + 8, cy - LH + 1, FBW, 11, HIGH);
-            txt("HIGH", M + 8 + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
+            final float TX  = LX + FBW + 8;
+            fill(LX, cy - LH + 1, FBW, 11, HIGH);
+            txt("HIGH", LX + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
             txt("param: " + s(crlf.getParameter()) + "  [" + s(crlf.getInjectionType()) + "]", TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("Payload",  crlf.getPayload());
@@ -790,11 +807,11 @@ public class PdfReportService {
             need(LH * rows + 10);
             fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
+            final float TX  = LX + FBW + 8;
             float[] sc = sevColor(sm.getSeverity());
             float[] sb = sevBg(sm.getSeverity());
-            fill(M + 8, cy - LH + 1, FBW, 11, sb);
-            txt(sm.getSeverity(), M + 8 + (FBW - sw(sm.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            fill(LX, cy - LH + 1, FBW, 11, sb);
+            txt(sm.getSeverity(), LX + (FBW - sw(sm.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt("[" + s(sm.getType()) + "]", TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("URL",      sm.getUrl());
@@ -811,11 +828,11 @@ public class PdfReportService {
             need(LH * rows + 10);
             fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
+            final float TX  = LX + FBW + 8;
             float[] sc = sevColor("HIGH");
             float[] sb = sevBg("HIGH");
-            fill(M + 8, cy - LH + 1, FBW, 11, sb);
-            txt("HIGH", M + 8 + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            fill(LX, cy - LH + 1, FBW, 11, sb);
+            txt("HIGH", LX + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(hh.getInjectedHeader()) + "  →  reflected in " + s(hh.getReflectionPoint()), TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("Injected",   hh.getInjectedValue());
@@ -832,9 +849,9 @@ public class PdfReportService {
             need(LH * rows + 10);
             fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
-            fill(M + 8, cy - LH + 1, FBW, 11, CRIT);
-            txt("CRITICAL", M + 8 + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
+            final float TX  = LX + FBW + 8;
+            fill(LX, cy - LH + 1, FBW, 11, CRIT);
+            txt("CRITICAL", LX + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
             txt("param: " + s(ssrf.getParameter()), TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("Indicator", ssrf.getIndicator());
@@ -852,9 +869,9 @@ public class PdfReportService {
             need(LH * rows + 10);
             fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
-            fill(M + 8, cy - LH + 1, FBW, 11, CRIT);
-            txt("CRITICAL", M + 8 + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
+            final float TX  = LX + FBW + 8;
+            fill(LX, cy - LH + 1, FBW, 11, CRIT);
+            txt("CRITICAL", LX + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
             txt("param: " + s(pt.getParameter()) + "  →  " + s(pt.getTarget()), TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("Payload",  pt.getPayload());
@@ -873,9 +890,9 @@ public class PdfReportService {
             float[] sb = sevBg(jwt.getSeverity());
             fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
-            fill(M + 8, cy - LH + 1, FBW, 11, sb);
-            txt(jwt.getSeverity(), M + 8 + (FBW - sw(jwt.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            final float TX  = LX + FBW + 8;
+            fill(LX, cy - LH + 1, FBW, 11, sb);
+            txt(jwt.getSeverity(), LX + (FBW - sw(jwt.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(jwt.getSource()) + "  (alg=" + s(jwt.getAlgorithm()) + ")", TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             String expStr = !jwt.isHasExpiry() ? "MISSING" : jwt.isExpired() ? "EXPIRED" : "present";
@@ -901,9 +918,9 @@ public class PdfReportService {
             float[] sb = sevBg(gql.getSeverity());
             fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
-            fill(M + 8, cy - LH + 1, FBW, 11, sb);
-            txt(gql.getSeverity(), M + 8 + (FBW - sw(gql.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            final float TX  = LX + FBW + 8;
+            fill(LX, cy - LH + 1, FBW, 11, sb);
+            txt(gql.getSeverity(), LX + (FBW - sw(gql.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(gql.getEndpoint()), TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("Introspection", o(gql.isIntrospectionEnabled()),
@@ -926,9 +943,9 @@ public class PdfReportService {
             float[] sb = sevBg(f.getSeverity());
             fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5, BGLIGHT);
             final float FBW = 58f;
-            final float TX  = M + 8 + FBW + 8;
-            fill(M + 8, cy - LH + 1, FBW, 11, sb);
-            txt(f.getSeverity(), M + 8 + (FBW - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            final float TX  = LX + FBW + 8;
+            fill(LX, cy - LH + 1, FBW, 11, sb);
+            txt(f.getSeverity(), LX + (FBW - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(f.getPath()), TX, cy, bold, 9, TEXT);
             cy -= LH + 3;
             kv("Type",     f.getType());
@@ -946,9 +963,9 @@ public class PdfReportService {
             float[] sc = sevColor(ch.getSeverity());
             final float bw = 58f;
             fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5,  BGLIGHT);  // top = cy
-            fill(M + 8, cy - LH + 1, bw, 11, sevBg(ch.getSeverity()));
-            txt(ch.getSeverity(), M + 8 + (bw - sw(ch.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
-            final float chgTX = M + 8 + bw + 8;
+            fill(LX, cy - LH + 1, bw, 11, sevBg(ch.getSeverity()));
+            txt(ch.getSeverity(), LX + (bw - sw(ch.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
+            final float chgTX = LX + bw + 8;
             txt("[" + s(ch.getChangeType()) + "]", chgTX, cy, bold, 8, sc);
             txt(s(ch.getCategory()) + "  /  " + s(ch.getField()),
                     chgTX + sw("[" + ch.getChangeType() + "]", bold, 8) + 8, cy, normal, 8, TEXT);
@@ -965,21 +982,21 @@ public class PdfReportService {
         List<String> notes = r.getScore().getNotes();
         secHead("SCORE BREAKDOWN");
         cy -= 4; // extra gap below section header
-        txt("Starting score: 100 / 100", M + 8, cy, normal, 9, MUTED);
+        txt("Starting score: 100 / 100", LX, cy, normal, 9, MUTED);
         cy -= LH + 6;
         for (String note : notes) {
-            int noteLines = lineCount(s(note), normal, 9, CW - 22);
+            int noteLines = lineCount(s(note), normal, 9, RX - (LX + 10));
             need(LH * noteLines + 2);
             boolean deduction = note.contains(": -");
             float[] nc = deduction ? CRIT : OK;
-            txt("•", M + 8, cy, normal, 9, nc);
-            float lastNoteY = wrapTxt(s(note), M + 18, cy, normal, 9, nc, CW - 22);
+            txt("•", LX, cy, normal, 9, nc);
+            float lastNoteY = wrapTxt(s(note), LX + 10, cy, normal, 9, nc, RX - (LX + 10));
             cy = lastNoteY - LH;
         }
         sep();
         txt("Final score: " + r.getScore().getScore() + " / 100  [" +
                 (r.getScore().getRiskLevel() != null ? r.getScore().getRiskLevel().name() : "") + "]",
-                M + 8, cy, bold, 11, riskColor(r.getScore().getRiskLevel() != null ? r.getScore().getRiskLevel().name() : ""));
+                LX, cy, bold, 11, riskColor(r.getScore().getRiskLevel() != null ? r.getScore().getRiskLevel().name() : ""));
         cy -= LH + 4;
     }
 

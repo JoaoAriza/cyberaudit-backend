@@ -57,6 +57,12 @@ public class ExecutivePdfReportService {
     private static final float PW = PDRectangle.A4.getWidth();    // 595.28
     private static final float CW = PW - 2 * M;                  // ~505
 
+    // Mesma grade do PdfReportService: MOLDURA (M..PW-M) para borda de caixa,
+    // tabela e rodapé; CONTEÚDO (LX..RX) para todo texto que vive dentro delas.
+    private static final float PAD = 8f;
+    private static final float LX  = M + PAD;
+    private static final float RX  = PW - M - PAD;
+
     // ── Cores (R G B, 0-1) ───────────────────────────────────────────────────
     private static final float[] NAVY    = {0.05f, 0.08f, 0.12f};
     private static final float[] ACCENT  = {0f,    0.83f, 0.63f};
@@ -326,17 +332,17 @@ public class ExecutivePdfReportService {
         // ── Header bar (compact: 80px) ────────────────────────────────────────
         fill(0, PH - 80, PW, 80, NAVY);
         fill(0, PH - 80, 5, 80, ACCENT);
-        txt("CYBERAUDIT", M + 10, PH - 24, bold, 22, ACCENT);
-        txt("Executive Security Report", M + 10, PH - 44, normal, 11, WHITE);
+        txt("CYBERAUDIT", LX, PH - 24, bold, 22, ACCENT);
+        txt("Executive Security Report", LX, PH - 44, normal, 11, WHITE);
         String now = UserTimeZoneService.carimbo(zona);
-        txtR("Generated on " + now, PW - M, PH - 28, normal, 8, MUTED);
-        txtR("CONFIDENTIAL", PW - M, PH - 42, bold, 8, MUTED);
+        txtR("Generated on " + now, RX, PH - 28, normal, 8, MUTED);
+        txtR("CONFIDENTIAL", RX, PH - 42, bold, 8, MUTED);
         String scopeLabel = switch (scope) {
             case TEAM_SCANS -> "Team Scans";
             case BOTH       -> "Domains + Team";
             default         -> "Registered Domains";
         };
-        txtR(scopeLabel, PW - M, PH - 56, bold, 8, ACCENT);
+        txtR(scopeLabel, RX, PH - 56, bold, 8, ACCENT);
 
         // Período do filtro
         String periodoStr;
@@ -350,7 +356,7 @@ public class ExecutivePdfReportService {
         } else {
             periodoStr = "Period: all records";
         }
-        txtR(periodoStr, PW - M, PH - 68, normal, 8, MUTED);
+        txtR(periodoStr, RX, PH - 68, normal, 8, MUTED);
 
         cy = PH - 92;
 
@@ -359,11 +365,11 @@ public class ExecutivePdfReportService {
         fill(M, cy - 38, CW, 38, BGLIGHT);
         strokeRect(M, cy - 38, CW, 38, BORDER);
         fill(M, cy - 38, 4, 38, ACCENT);
-        txt(account.getDisplayName(), M + 14, cy - 12, bold, 12, TEXT);
+        txt(account.getDisplayName(), LX, cy - 12, bold, 12, TEXT);
         String accountMeta = "Account " + account.getType().name()
                 + (account.getPlan() != null ? "  ·  Plan " + account.getPlan().name() : "")
                 + (account.getCompanyName() != null ? "  ·  " + account.getCompanyName() : "");
-        txt(accountMeta, M + 14, cy - 28, normal, 8, MUTED);
+        txt(accountMeta, LX, cy - 28, normal, 8, MUTED);
         cy -= 44;
 
         // ── Stats row (compact: 54px) ─────────────────────────────────────────
@@ -402,7 +408,7 @@ public class ExecutivePdfReportService {
             String noDataMsg = scope == ReportScope.DOMAINS
                     ? "No domain registered, or none scanned yet."
                     : "No scan found for this account in the selected period.";
-            txt(noDataMsg, M, cy, normal, 9, MUTED);
+            txt(noDataMsg, LX, cy, normal, 9, MUTED);
             cy -= 14;
         }
 
@@ -444,12 +450,12 @@ public class ExecutivePdfReportService {
 
         // Cabeçalho
         fill(M, cy - rowH, CW, rowH, BGDARK);
-        txt("HOST",         xCols[0] + 4, cy - 7, bold, 8, MUTED);
-        txt("SCORE",        xCols[1] + 4, cy - 7, bold, 8, MUTED);
-        txt("RISK",        xCols[2] + 4, cy - 7, bold, 8, MUTED);
-        txt("LAST SCAN",  xCols[3] + 4, cy - 7, bold, 8, MUTED);
-        txt("MODE",         xCols[4] + 4, cy - 7, bold, 8, MUTED);
-        if (showVerified) txt("STATUS", xCols[5] + 4, cy - 7, bold, 8, MUTED);
+        txt("HOST",         xCols[0] + PAD, cy - 7, bold, 8, MUTED);
+        txt("SCORE",        xCols[1] + PAD, cy - 7, bold, 8, MUTED);
+        txt("RISK",        xCols[2] + PAD, cy - 7, bold, 8, MUTED);
+        txt("LAST SCAN",  xCols[3] + PAD, cy - 7, bold, 8, MUTED);
+        txt("MODE",         xCols[4] + PAD, cy - 7, bold, 8, MUTED);
+        if (showVerified) txt("STATUS", xCols[5] + PAD, cy - 7, bold, 8, MUTED);
         cy -= rowH;
 
         boolean alt = false;
@@ -460,7 +466,7 @@ public class ExecutivePdfReportService {
 
             // HOST
             txt(truncate(dr.host(), showVerified ? 22 : 26),
-                xCols[0] + 4, cy - 7, mono, 9, TEXT);
+                xCols[0] + PAD, cy - 7, mono, 9, TEXT);
 
             if (dr.latest() != null) {
                 // SCORE
@@ -474,29 +480,29 @@ public class ExecutivePdfReportService {
                 // RISCO
                 String risk = dr.latest().getRiskLevel() != null
                         ? dr.latest().getRiskLevel().name() : "—";
-                txt(risk, xCols[2] + 4, cy - 7, bold, 8, riskColor(risk));
+                txt(risk, xCols[2] + PAD, cy - 7, bold, 8, riskColor(risk));
 
                 // DATA
                 txt(dr.latest().getScannedAt().format(D_FMT),
-                    xCols[3] + 4, cy - 7, normal, 8, TEXT);
+                    xCols[3] + PAD, cy - 7, normal, 8, TEXT);
 
                 // MODO
                 String modo    = dr.latest().isActiveMode() ? "ACTIVE" : "PASSIVE";
                 float[] modCol = dr.latest().isActiveMode() ? ACCENT : MUTED;
-                txt(modo, xCols[4] + 4, cy - 7, bold, 8, modCol);
+                txt(modo, xCols[4] + PAD, cy - 7, bold, 8, modCol);
             } else {
-                txt("—", xCols[1] + 4, cy - 7, normal, 8, MUTED);
-                txt("—", xCols[2] + 4, cy - 7, normal, 8, MUTED);
-                txt("Never scanned", xCols[3] + 4, cy - 7, normal, 8, MUTED);
-                txt("—", xCols[4] + 4, cy - 7, normal, 8, MUTED);
+                txt("—", xCols[1] + PAD, cy - 7, normal, 8, MUTED);
+                txt("—", xCols[2] + PAD, cy - 7, normal, 8, MUTED);
+                txt("Never scanned", xCols[3] + PAD, cy - 7, normal, 8, MUTED);
+                txt("—", xCols[4] + PAD, cy - 7, normal, 8, MUTED);
             }
 
             // VERIFICADO
             if (showVerified) {
                 if (dr.verified()) {
-                    txt("Verified", xCols[5] + 4, cy - 7, bold, 8, ACCENT);
+                    txt("Verified", xCols[5] + PAD, cy - 7, bold, 8, ACCENT);
                 } else {
-                    txt("Pending", xCols[5] + 4, cy - 7, normal, 8, MUTED);
+                    txt("Pending", xCols[5] + PAD, cy - 7, normal, 8, MUTED);
                 }
             }
 
@@ -536,7 +542,7 @@ public class ExecutivePdfReportService {
         need(28);
         fill(M, cy - 20, CW, 20, BGDARK);
         fill(M, cy - 20, 3, 20, ACCENT);
-        txt(title, M + 10, cy - 7, bold, 9, ACCENT);
+        txt(title, LX, cy - 7, bold, 9, ACCENT);
         cy -= 22;
     }
 
