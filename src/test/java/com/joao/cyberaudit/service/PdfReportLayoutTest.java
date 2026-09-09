@@ -88,10 +88,15 @@ class PdfReportLayoutTest {
                     float x0 = ini.getXDirAdj();
                     float x1 = fim.getXDirAdj() + fim.getWidthDirAdj();
 
-                    // Rodapé é o único texto que vive na moldura, e não numa caixa.
-                    boolean rodape = texto.contains("Confidential") || texto.startsWith("Page ");
-                    float limEsq = rodape ? M      : LX;
-                    float limDir = rodape ? PW - M : RX;
+                    // Texto que rotula um elemento de largura cheia acompanha a MOLDURA,
+                    // porque a borda de referência dele é a do próprio elemento: o rodapé
+                    // e a legenda da barra de severidade, que fica encostada na caixa de
+                    // resumo e no cabeçalho da primeira seção.
+                    boolean naMoldura = texto.contains("Confidential")
+                            || texto.startsWith("Page ")
+                            || texto.startsWith("SEVERITY DISTRIBUTION");
+                    float limEsq = naMoldura ? M      : LX;
+                    float limDir = naMoldura ? PW - M : RX;
 
                     if (x0 < limEsq - TOLERANCIA || x1 > limDir + TOLERANCIA) {
                         fora.add(String.format("x0=%.1f x1=%.1f (esperado %.1f..%.1f) \"%s\"",

@@ -306,20 +306,26 @@ public class PdfReportService {
         long tot = nc + nh + nm + nl;
         if (tot == 0) return;
 
-        // Barra, rótulo e legenda na coluna de CONTEÚDO: no documento inteiro, texto
-        // começa em LX e só borda de caixa começa em M.
-        txt("SEVERITY DISTRIBUTION", LX, cy - 2, bold, 7, MUTED);
+        // Bloco de largura cheia, na MOLDURA — e não na coluna de conteúdo.
+        //
+        // A barra fica empilhada entre a caixa de resumo e o cabeçalho da primeira
+        // seção, ambos de M a PW-M. Recuá-la 8pt de cada lado para seguir a régua
+        // do texto deixava justamente ela desalinhada das duas vizinhas — o olho
+        // compara com o que está encostado, não com uma regra do documento. Rótulo
+        // e legenda acompanham a barra, que é a borda de referência deles.
+
+        txt("SEVERITY DISTRIBUTION", M, cy - 2, bold, 7, MUTED);
         cy -= 13;
 
-        float bx = LX, bh = 9;
-        fill(bx, cy - bh, CIW, bh, BORDER);
-        if (nc > 0) { float w = CIW * nc / tot; fill(bx, cy - bh, w, bh, CRIT); bx += w; }
-        if (nh > 0) { float w = CIW * nh / tot; fill(bx, cy - bh, w, bh, HIGH); bx += w; }
-        if (nm > 0) { float w = CIW * nm / tot; fill(bx, cy - bh, w, bh, MED);  bx += w; }
-        if (nl > 0) { float w = CIW * nl / tot; fill(bx, cy - bh, w, bh, LOW_C); }
+        float bx = M, bh = 9;
+        fill(bx, cy - bh, CW, bh, BORDER);
+        if (nc > 0) { float w = CW * nc / tot; fill(bx, cy - bh, w, bh, CRIT); bx += w; }
+        if (nh > 0) { float w = CW * nh / tot; fill(bx, cy - bh, w, bh, HIGH); bx += w; }
+        if (nm > 0) { float w = CW * nm / tot; fill(bx, cy - bh, w, bh, MED);  bx += w; }
+        if (nl > 0) { float w = CW * nl / tot; fill(bx, cy - bh, w, bh, LOW_C); }
         cy -= 13;
 
-        bx = LX;
+        bx = M;
         if (nc > 0) { bx = legend(bx, cy, CRIT,  "CRITICAL " + nc); bx += 14; }
         if (nh > 0) { bx = legend(bx, cy, HIGH,  "HIGH "     + nh); bx += 14; }
         if (nm > 0) { bx = legend(bx, cy, MED,   "MEDIUM "   + nm); bx += 14; }
