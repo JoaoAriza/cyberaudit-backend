@@ -283,7 +283,9 @@ public class PdfReportService {
             int score = r.getScore().getScore();
             String risk = r.getScore().getRiskLevel() != null ? r.getScore().getRiskLevel().name() : "UNKNOWN";
             float[] rc  = riskColor(risk);
-            txt("SCORE", LX, cy - 42, bold, 7, MUTED);
+            // 38, e nao 42: os digitos de 20pt sobem 14,4pt acima da linha de base, entao
+            // com 42 o topo do "8 / 100" encostava na base do rotulo — 0,6pt de folga.
+            txt("SCORE", LX, cy - 38, bold, 7, MUTED);
             txt(score + " / 100", LX, cy - 57, bold, 20, rc);
             float bx = LX + sw(score + " / 100", bold, 20) + 12;
             float[] bgc = riskBg(risk);
@@ -371,10 +373,58 @@ public class PdfReportService {
         kv(key, val ? "YES" : "NO", val == goodIfTrue ? OK : CRIT);
     }
 
+    /**
+     * Linha divisória, com folga suficiente para a PRÓXIMA linha de texto.
+     *
+     * Eram 8pt, e a régua da linha caía dentro da altura do texto seguinte: o
+     * "Final score: 8 / 100" saía riscado no meio. O texto mais alto que aparece
+     * logo depois de um separador é o negrito 11 do breakdown, cuja ascendente
+     * sobe ~8pt acima da linha de base — por isso o recuo tem de ser uma linha
+     * inteira, não meia.
+     */
     private void sep() throws IOException {
-        need(8);
+        need(LH + 4);
         fill(LX, cy - 2, CIW, 0.4f, BORDER);
-        cy -= 8;
+        cy -= LH;
+    }
+
+
+    // ── Faixa de fundo de uma linha ───────────────────────────────────────────
+
+    /**
+     * Abre a faixa cinza de uma linha, dimensionada pelo CONTEÚDO.
+     *
+     * A altura era escrita à mão em cada seção — {@code LH * 3}, {@code LH * 4} —
+     * enquanto o texto de dentro quebra em 2, 3 ou 4 linhas conforme o tamanho.
+     * Quando quebrava, o fim do conteúdo saía embaixo da faixa e encostava na
+     * linha seguinte; foi o que apareceu em NETWORK EXPOSURE e nos CVEs.
+     *
+     * Também resolve um problema de quebra de página: o {@code need} do tamanho
+     * inteiro roda ANTES de pintar o fundo, então a faixa não fica órfã no fim de
+     * uma página com o conteúdo dela na página seguinte.
+     *
+     * Convenção de quem chama: cada linha desce exatamente {@code LH}, e o cy do
+     * fim da linha é o valor devolvido — não o ponto onde o texto parou.
+     *
+     * @param linhas quantas linhas de texto serão desenhadas, título incluído
+     * @return o cy que a seção deve assumir ao terminar a linha
+     */
+    private float faixa(int linhas) throws IOException {
+        final float TOPO = 9f;   // topo da faixa -> linha de base da 1ª linha
+        // O piso mantém o selo de severidade dentro da faixa quando só há o
+        // título: ele é desenhado 12pt abaixo da linha de base e não acompanha
+        // a contagem de linhas.
+        float altura = Math.max(TOPO + LH * (linhas - 1) + 7f, 24f);
+        need(altura + 8);
+        float topo = cy;
+        fill(M, topo - altura, CW, altura, BGLIGHT);
+        cy = topo - TOPO;
+        return topo - altura - 8;
+    }
+
+    /** Quantas linhas um valor de {@link #kv} ocupa; 0 quando ele nem é desenhado. */
+    private int kvLinhas(String val) {
+        return (val == null || val.isBlank()) ? 0 : lineCount(s(val), normal, 9, VW);
     }
 
     // ── Issue row ─────────────────────────────────────────────────────────────
@@ -432,17 +482,37 @@ public class PdfReportService {
 
         fill(M, cy, 3, startY - cy + LH, sc);
         fill(M, cy - 1, CW, 0.3f, BORDER);
-        cy -= 5;
+        // LH+1, e nao 5: o titulo da issue seguinte e negrito 9, cuja ascendente
+        // sobe ~6,5pt acima da linha de base. Com 5pt de recuo, a divisoria passava
+        // POR DENTRO do titulo de baixo — era o risco em "Permissions-Policy ausente".
+        cy -= LH + 1;
     }
 
     // ── CVE row ───────────────────────────────────────────────────────────────
 
+    /**
+     * Linha de CVE, com a faixa de fundo medida pelo CONTEÚDO.
+     *
+     * A altura era fixa em 3 linhas enquanto a descrição quebra em 2, 3 ou 4: o
+     * "Published" caía fora da própria faixa cinza e encostava na linha seguinte.
+     * E a linha de base do título ficava EM CIMA da borda da caixa, então o texto
+     * saía metade dentro, metade fora. Agora a caixa é dimensionada como no
+     * issueRow — conta as linhas antes de desenhar — e o conteúdo começa uma
+     * altura de ascendente abaixo do topo.
+     */
     private void cveRow(CVEFinding cve) throws IOException {
-        need(LH * 3 + 12);
+        String desc = cve.getDescription() != null && !cve.getDescription().isBlank()
+                ? s(cve.getDescription()) : null;
+
+        int linhas = 1                                                   // selo + id + CVSS
+                + (cve.getAffectedSoftware() != null ? 1 : 0)
+                + (desc != null ? lineCount(desc, normal, 8, RX - LX2) : 0)
+                + (cve.getPublishedDate() != null ? 1 : 0);
+
         float[] sc = sevColor(cve.getSeverity());
         float[] sb = sevBg(cve.getSeverity());
 
-        fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5,  BGLIGHT);  // top = cy
+        float fim = faixa(linhas);
 
         final float FBW_CV = 58f;
         fill(LX, cy - LH + 1, FBW_CV, 11, sb);
@@ -454,22 +524,25 @@ public class PdfReportService {
         String cvssLabel = "CVSS " + String.format("%.1f", cve.getCvssScore());
         fill(cx3, cy - LH + 1, sw(cvssLabel, bold, 8) + 10, 12, sb);
         txt(cvssLabel, cx3 + 5, cy - 1, bold, 8, sc);
-        cy -= LH + 3;
+        cy -= LH;
 
         if (cve.getAffectedSoftware() != null) {
             txt("Software", LX2, cy, bold, 7, MUTED);
             txt(s(cve.getAffectedSoftware()), VX, cy, normal, 9, TEXT);
             cy -= LH;
         }
-        if (cve.getDescription() != null && !cve.getDescription().isBlank()) {
-            float lastDescY = wrapTxt(s(cve.getDescription()), LX2, cy, normal, 8, MUTED, RX - LX2);
-            cy = lastDescY - LH;
+        if (desc != null) {
+            float ultima = wrapTxt(desc, LX2, cy, normal, 8, MUTED, RX - LX2);
+            cy = ultima - LH;
         }
         if (cve.getPublishedDate() != null) {
             txt("Published", LX2, cy, bold, 7, MUTED);
             txt(s(cve.getPublishedDate()), VX, cy, normal, 8, MUTED);
         }
-        cy -= 8;
+
+        // Fecha pela caixa, e não pelo ponto onde o texto parou: as duas coisas
+        // divergiam justamente quando a descrição tinha mais de uma linha.
+        cy = fim;
     }
 
     // ── Section renderers ─────────────────────────────────────────────────────
@@ -493,7 +566,10 @@ public class PdfReportService {
                         + "false positive if the vendor backported the fix without changing the "
                         + "version number. Confirm the exact version before acting."),
                 LX, cy, normal, 7, MUTED, CIW);
-        cy = ny - 6;
+        // Uma linha inteira: com 6pt, a ascendente do negrito 10 do primeiro CVE subia
+        // POR CIMA da ultima linha da nota — era o "Confirm the exact version before
+        // acting." aparecendo riscado pelo "CVE-2024-3566".
+        cy = ny - LH - 2;
         for (CVEFinding c : cves) cveRow(c);
         cy -= 6;
     }
@@ -621,20 +697,22 @@ public class PdfReportService {
     private void takeoverSection(ScanResult r) throws IOException {
         secHead("SUBDOMAIN TAKEOVER");
         for (SubdomainTakeoverFinding f : r.getSubdomainTakeover()) {
-            need(LH * 4 + 10);
             float[] sc = sevColor(f.getSeverity());
             float[] sb = sevBg(f.getSeverity());
-            fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5,  BGLIGHT);  // top = cy
             final float bw = 58f;
+            float fim = faixa(1 + kvLinhas(f.getCnameTarget())
+                                + kvLinhas(f.getService())
+                                + kvLinhas(f.getStatus())
+                                + kvLinhas(f.getVulnerability()));
             fill(LX, cy - LH + 1, bw, 11, sb);
             txt(f.getSeverity(), LX + (bw - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(f.getSubdomain()), LX + bw + 8, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("CNAME target",  f.getCnameTarget());
             kv("Service",       f.getService());
             kv("Status",        f.getStatus(), "VULNERABLE".equals(f.getStatus()) ? CRIT : MED);
             if (f.getVulnerability() != null) kv("Vulnerability", f.getVulnerability());
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -642,20 +720,22 @@ public class PdfReportService {
     private void cookieSection(ScanResult r) throws IOException {
         secHead("COOKIE SECURITY");
         for (CookieFinding cf : r.getCookieIssues()) {
-            need(LH * 4 + 10);
             float[] sc = sevColor(cf.getRisk());
             float[] sb = sevBg(cf.getRisk());
-            fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5,  BGLIGHT);  // top = cy
             final float bw = 58f;
+            float fim = faixa(1 + kvLinhas(o(cf.isHttpOnly()))
+                                + kvLinhas(o(cf.isSecure()))
+                                + kvLinhas(cf.getSameSite())
+                                + kvLinhas(cf.getIssues()));
             fill(LX, cy - LH + 1, bw, 11, sb);
             txt(cf.getRisk(), LX + (bw - sw(cf.getRisk(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(cf.getName()), LX + bw + 8, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("HttpOnly", o(cf.isHttpOnly()), cf.isHttpOnly() ? OK : CRIT);
             kv("Secure",   o(cf.isSecure()),   cf.isSecure()   ? OK : CRIT);
             kv("SameSite", cf.getSameSite());
             if (cf.getIssues() != null && !cf.getIssues().isBlank()) kv("Issues", cf.getIssues());
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -743,21 +823,22 @@ public class PdfReportService {
     private void portsSection(ScanResult r) throws IOException {
         secHead("NETWORK EXPOSURE  —  " + r.getOpenPorts().size() + " open port(s)");
         for (PortFinding p : r.getOpenPorts()) {
-            need(LH * 3 + 10);
             float[] sc = sevColor(p.getSeverity());
             final float bw = 58f;
-            fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5,  BGLIGHT);  // top = cy
+            float fim = faixa(1 + kvLinhas(p.getLatencyMs() + " ms")
+                                + kvLinhas(p.getImpact())
+                                + kvLinhas(p.getRecommendation()));
             fill(LX, cy - LH + 1, bw, 11, sevBg(p.getSeverity()));
             txt(p.getSeverity(), LX + (bw - sw(p.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             final float portTX = LX + bw + 8;   // fixed column for port title
             txt("Port " + p.getPort(), portTX, cy, bold, 10, TEXT);
             txt(s(p.getService()), portTX + sw("Port " + p.getPort(), bold, 10) + 8, cy, normal, 9, MUTED);
             txtR("state: " + p.getState(), RX, cy, normal, 8, MUTED);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Latency",        p.getLatencyMs() + " ms");
             kv("Impact",         p.getImpact());
             kv("Recommendation", p.getRecommendation());
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -794,18 +875,16 @@ public class PdfReportService {
     private void crlfSection(ScanResult r) throws IOException {
         secHead("CRLF INJECTION");
         for (CrlfFinding crlf : r.getCrlfFindings()) {
-            int rows = 3;
-            need(LH * rows + 10);
-            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            float fim = faixa(1 + kvLinhas(crlf.getPayload()) + kvLinhas(crlf.getEvidence() != null ? crlf.getEvidence() : "n/a"));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             fill(LX, cy - LH + 1, FBW, 11, HIGH);
             txt("HIGH", LX + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
             txt("param: " + s(crlf.getParameter()) + "  [" + s(crlf.getInjectionType()) + "]", TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Payload",  crlf.getPayload());
             kv("Evidence", crlf.getEvidence() != null ? crlf.getEvidence() : "n/a");
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -813,9 +892,7 @@ public class PdfReportService {
         private void sourceMapSection(ScanResult r) throws IOException {
         secHead("SOURCE MAP / DEBUG EXPOSURE");
         for (SourceMapFinding sm : r.getSourceMapFindings()) {
-            int rows = 2;
-            need(LH * rows + 10);
-            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            float fim = faixa(1 + kvLinhas(sm.getUrl()) + kvLinhas(sm.getEvidence() != null ? sm.getEvidence() : "n/a"));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             float[] sc = sevColor(sm.getSeverity());
@@ -823,10 +900,10 @@ public class PdfReportService {
             fill(LX, cy - LH + 1, FBW, 11, sb);
             txt(sm.getSeverity(), LX + (FBW - sw(sm.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt("[" + s(sm.getType()) + "]", TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("URL",      sm.getUrl());
             kv("Evidence", sm.getEvidence() != null ? sm.getEvidence() : "n/a");
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -834,9 +911,7 @@ public class PdfReportService {
         private void hostHeaderSection(ScanResult r) throws IOException {
         secHead("HOST HEADER INJECTION");
         for (HostHeaderFinding hh : r.getHostHeaderFindings()) {
-            int rows = 3;
-            need(LH * rows + 10);
-            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            float fim = faixa(1 + kvLinhas(hh.getInjectedValue()) + kvLinhas(hh.getEvidence() != null ? hh.getEvidence() : "n/a"));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             float[] sc = sevColor("HIGH");
@@ -844,10 +919,10 @@ public class PdfReportService {
             fill(LX, cy - LH + 1, FBW, 11, sb);
             txt("HIGH", LX + (FBW - sw("HIGH", bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(hh.getInjectedHeader()) + "  →  reflected in " + s(hh.getReflectionPoint()), TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Injected",   hh.getInjectedValue());
             kv("Evidence",   hh.getEvidence() != null ? hh.getEvidence() : "n/a");
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -855,19 +930,17 @@ public class PdfReportService {
         private void ssrfSection(ScanResult r) throws IOException {
         secHead("SSRF — SERVER-SIDE REQUEST FORGERY");
         for (SsrfFinding ssrf : r.getSsrfFindings()) {
-            int rows = 3;
-            need(LH * rows + 10);
-            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            float fim = faixa(1 + kvLinhas(ssrf.getIndicator()) + kvLinhas(ssrf.getPayload()) + kvLinhas(ssrf.getEvidence() != null ? ssrf.getEvidence() : "n/a"));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             fill(LX, cy - LH + 1, FBW, 11, CRIT);
             txt("CRITICAL", LX + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
             txt("param: " + s(ssrf.getParameter()), TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Indicator", ssrf.getIndicator());
             kv("Payload",   ssrf.getPayload());
             kv("Evidence",  ssrf.getEvidence() != null ? ssrf.getEvidence() : "n/a");
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -875,18 +948,16 @@ public class PdfReportService {
         private void pathTraversalSection(ScanResult r) throws IOException {
         secHead("PATH TRAVERSAL / LFI");
         for (PathTraversalFinding pt : r.getPathTraversal()) {
-            int rows = 3;
-            need(LH * rows + 10);
-            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            float fim = faixa(1 + kvLinhas(pt.getPayload()) + kvLinhas(pt.getEvidence() != null ? pt.getEvidence() : "n/a"));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             fill(LX, cy - LH + 1, FBW, 11, CRIT);
             txt("CRITICAL", LX + (FBW - sw("CRITICAL", bold, 7)) / 2f, cy - 2, bold, 7, new float[]{1,1,1});
             txt("param: " + s(pt.getParameter()) + "  →  " + s(pt.getTarget()), TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Payload",  pt.getPayload());
             kv("Evidence", pt.getEvidence() != null ? pt.getEvidence() : "n/a");
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -894,17 +965,18 @@ public class PdfReportService {
     private void jwtSection(ScanResult r) throws IOException {
         secHead("JWT SECURITY");
         for (JwtSecurityFinding jwt : r.getJwtSecurity()) {
-            int rows = 3 + jwt.getIssues().size();
-            need(LH * rows + 10);
+            int linhas = 1 + 3;   // titulo + Expiry/Issuer/Audience, uma linha cada
+            if (jwt.getIssues() != null)
+                for (String issue : jwt.getIssues()) linhas += kvLinhas(issue);
             float[] sc = sevColor(jwt.getSeverity());
             float[] sb = sevBg(jwt.getSeverity());
-            fill(M, cy - LH * rows - 5, CW, LH * rows + 5, BGLIGHT);
+            float fim = faixa(linhas);
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             fill(LX, cy - LH + 1, FBW, 11, sb);
             txt(jwt.getSeverity(), LX + (FBW - sw(jwt.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(jwt.getSource()) + "  (alg=" + s(jwt.getAlgorithm()) + ")", TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             String expStr = !jwt.isHasExpiry() ? "MISSING" : jwt.isExpired() ? "EXPIRED" : "present";
             float[] expCol = !jwt.isHasExpiry() || jwt.isExpired() ? CRIT : OK;
             kv("Expiry",   expStr, expCol);
@@ -915,7 +987,7 @@ public class PdfReportService {
             if (jwt.getIssues() != null) {
                 for (String issue : jwt.getIssues()) kv("Issue", issue);
             }
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -923,16 +995,17 @@ public class PdfReportService {
     private void graphQlSection(ScanResult r) throws IOException {
         secHead("GRAPHQL INTROSPECTION");
         for (GraphQlIntrospectionFinding gql : r.getGraphQlIntrospection()) {
-            need(LH * 4 + 10);
             float[] sc = sevColor(gql.getSeverity());
             float[] sb = sevBg(gql.getSeverity());
-            fill(M, cy - LH * 4 - 5, CW, LH * 4 + 5, BGLIGHT);
+            float fim = faixa(1 + 2                                    // titulo + Introspection/Playground
+                    + (gql.getTypeCount() > 0 ? 1 : 0)
+                    + kvLinhas(gql.getEvidence()));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             fill(LX, cy - LH + 1, FBW, 11, sb);
             txt(gql.getSeverity(), LX + (FBW - sw(gql.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(gql.getEndpoint()), TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Introspection", o(gql.isIntrospectionEnabled()),
                     gql.isIntrospectionEnabled() ? CRIT : OK);
             kv("Playground",    o(gql.isPlaygroundExposed()),
@@ -940,7 +1013,7 @@ public class PdfReportService {
             if (gql.getTypeCount() > 0)
                 kv("Types exposed", String.valueOf(gql.getTypeCount()));
             if (gql.getEvidence() != null) kv("Evidence", gql.getEvidence());
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -948,20 +1021,19 @@ public class PdfReportService {
     private void apiDocsSection(ScanResult r) throws IOException {
         secHead("API DOCUMENTATION EXPOSURE");
         for (ApiDocsExposureFinding f : r.getApiDocsExposure()) {
-            need(LH * 3 + 10);
             float[] sc = sevColor(f.getSeverity());
             float[] sb = sevBg(f.getSeverity());
-            fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5, BGLIGHT);
+            float fim = faixa(1 + kvLinhas(f.getType()) + kvLinhas(f.getEvidence()) + kvLinhas(f.getDescription()));
             final float FBW = 58f;
             final float TX  = LX + FBW + 8;
             fill(LX, cy - LH + 1, FBW, 11, sb);
             txt(f.getSeverity(), LX + (FBW - sw(f.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             txt(s(f.getPath()), TX, cy, bold, 9, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Type",     f.getType());
             kv("Evidence", f.getEvidence());
             if (f.getDescription() != null) kv("Risk", f.getDescription());
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
@@ -969,21 +1041,22 @@ public class PdfReportService {
     private void changesSection(ScanResult r) throws IOException {
         secHead("CHANGES DETECTED  —  " + r.getChanges().size() + " change(s)");
         for (ScanChange ch : r.getChanges()) {
-            need(LH * 3 + 10);
             float[] sc = sevColor(ch.getSeverity());
             final float bw = 58f;
-            fill(M, cy - LH * 3 - 5, CW, LH * 3 + 5,  BGLIGHT);  // top = cy
+            float fim = faixa(1 + kvLinhas(ch.getOldValue())
+                                + kvLinhas(ch.getNewValue())
+                                + kvLinhas(ch.getDescription()));
             fill(LX, cy - LH + 1, bw, 11, sevBg(ch.getSeverity()));
             txt(ch.getSeverity(), LX + (bw - sw(ch.getSeverity(), bold, 7)) / 2f, cy - 2, bold, 7, sc);
             final float chgTX = LX + bw + 8;
             txt("[" + s(ch.getChangeType()) + "]", chgTX, cy, bold, 8, sc);
             txt(s(ch.getCategory()) + "  /  " + s(ch.getField()),
                     chgTX + sw("[" + ch.getChangeType() + "]", bold, 8) + 8, cy, normal, 8, TEXT);
-            cy -= LH + 3;
+            cy -= LH;
             kv("Before", ch.getOldValue());
             kv("After",  ch.getNewValue(), OK);
             if (ch.getDescription() != null) kv("Note", ch.getDescription());
-            cy -= 5;
+            cy = fim;
         }
         cy -= 6;
     }
