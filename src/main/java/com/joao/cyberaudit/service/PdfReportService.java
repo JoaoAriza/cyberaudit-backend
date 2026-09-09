@@ -323,7 +323,11 @@ public class PdfReportService {
         if (nh > 0) { float w = CW * nh / tot; fill(bx, cy - bh, w, bh, HIGH); bx += w; }
         if (nm > 0) { float w = CW * nm / tot; fill(bx, cy - bh, w, bh, MED);  bx += w; }
         if (nl > 0) { float w = CW * nl / tot; fill(bx, cy - bh, w, bh, LOW_C); }
-        cy -= 13;
+        // 21, e nao 13: a legenda desenha o quadradinho 6pt ABAIXO da linha de
+        // base (legend faz fill(x, y-6, ...)), entao um recuo igual ao de cima
+        // colava a legenda na barra — 11pt de folga em cima contra 3pt embaixo.
+        // Este valor iguala as duas folgas.
+        cy -= 21;
 
         bx = M;
         if (nc > 0) { bx = legend(bx, cy, CRIT,  "CRITICAL " + nc); bx += 14; }
