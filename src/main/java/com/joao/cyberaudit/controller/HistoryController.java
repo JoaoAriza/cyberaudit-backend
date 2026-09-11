@@ -73,7 +73,8 @@ public class HistoryController {
                                      @PathVariable String host,
                                      @RequestParam(required = false) String origin,
                                      @RequestParam(required = false) String from,
-                                     @RequestParam(required = false) String to) {
+                                     @RequestParam(required = false) String to,
+                                     @RequestParam(required = false) String path) {
         Account account = requireAccount(caller);
         if (from != null && to != null) {
             LocalDate fromDate = LocalDate.parse(from);
@@ -86,7 +87,14 @@ public class HistoryController {
             );
         }
         ScanOrigin o = parseOrigin(origin);
-        return historyService.findByHost(account, host, 50, o);
+        List<ScanSummary> scans = historyService.findByHost(account, host, 50, o);
+        // Com path, so a pagina pedida: o agendamento do /login nao mostra o
+        // historico da home do mesmo dominio. Sem path, o dominio inteiro, como antes.
+        if (path == null || path.isBlank()) return scans;
+        String alvo = ScanHistoryService.normalizarCaminho(path);
+        return scans.stream()
+                .filter(s -> ScanHistoryService.caminhoDe(s.getUrl()).equals(alvo))
+                .toList();
     }
 
     /**

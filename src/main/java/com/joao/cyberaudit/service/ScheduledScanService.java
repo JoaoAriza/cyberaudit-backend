@@ -9,9 +9,11 @@ import com.joao.cyberaudit.model.ScheduledScan;
 import com.joao.cyberaudit.model.ScheduledScan.Frequency;
 import com.joao.cyberaudit.repository.ScheduledScanRepository;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -51,12 +53,26 @@ public class ScheduledScanService {
     @Transactional
     public ScheduledScanDto create(ScheduledScanRequest req, AppUser user) {
         // Verifica se o plano permite mais agendamentos
-        int currentCount = repo.findByUserOrderByCreatedAtDesc(user).size();
-        planLimitService.checkScheduledScanSlots(user, currentCount);
+        List<ScheduledScan> existentes = repo.findByUserOrderByCreatedAtDesc(user);
+        planLimitService.checkScheduledScanSlots(user, existentes.size());
+
+        // Host e caminho saem do mesmo campo: a tela manda a URL inteira.
+        String hostNovo = sanitizeHost(req.getHost());
+        String pathNovo = ScanHistoryService.normalizarCaminho(caminhoPedido(req));
+
+        // A mesma página duas vezes na lista só duplica o scan e o e-mail. Frequência
+        // não conta: diário e semanal do mesmo endereço é o diário com um extra.
+        if (existentes.stream().anyMatch(s -> mesmaFamilia(s.getHost(), hostNovo)
+                && ScanHistoryService.normalizarCaminho(s.getPath()).equals(pathNovo))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Este endereço já tem um agendamento. Pause ou remova o atual para mudar a frequência.");
+        }
+
         // Agendar já é PRO+, mas notificar por e-mail carrega a regra de domínio:
-        // o Pro pessoal só recebe laudo do que é dele.
+        // o Pro pessoal só recebe laudo do que é dele. Host já limpo — com o
+        // caminho grudado, "site.com/login" não casaria com o domínio verificado.
         if (req.isNotifyEmail()) {
-            planLimitService.checkEmailNotify(user, req.getHost());
+            planLimitService.checkEmailNotify(user, hostNovo);
         }
 
         Frequency freq = Frequency.valueOf(req.getFrequency().toUpperCase());
@@ -66,7 +82,7 @@ public class ScheduledScanService {
         ZoneId zona = userTimeZone.zonaDe(user);
 
         ScheduledScan scan = ScheduledScan.builder()
-                .host(sanitizeHost(req.getHost()))
+                .host(hostNovo)
                 .active(req.isActive())
                 .frequency(freq)
                 .preferredHour(Math.max(0, Math.min(23, req.getPreferredHour())))
@@ -75,7 +91,7 @@ public class ScheduledScanService {
                 .notifyEmail(req.isNotifyEmail())
                 // Capturado aqui porque a execução roda fora de requisição.
                 .locale(LocaleContextHolder.getLocale().toLanguageTag())
-                .path(ScanHistoryService.normalizarCaminho(caminhoPedido(req)))
+                .path(pathNovo)
                 .timezone(zona.getId())
                 .user(user)
                 .createdAt(LocalDateTime.now())
@@ -231,7 +247,6 @@ public class ScheduledScanService {
         }
     }
 
-
     /**
      * Alvo real do scan: domínio mais caminho.
      *
@@ -259,6 +274,19 @@ public class ScheduledScanService {
         String host = req.getHost() == null ? "" : req.getHost().replaceFirst("^https?://", "");
         int barra = host.indexOf('/');
         return barra >= 0 ? host.substring(barra) : "/";
+    }
+
+    /**
+     * Dois hosts são da mesma família quando só diferem pelo "www." — é o mesmo
+     * site, e o histórico já os trata como um (ver ScanHistoryService.save).
+     */
+    static boolean mesmaFamilia(String a, String b) {
+        if (a == null || b == null) return false;
+        return semWww(a).equalsIgnoreCase(semWww(b));
+    }
+
+    private static String semWww(String host) {
+        return host.startsWith("www.") ? host.substring(4) : host;
     }
 
     private String sanitizeHost(String host) {

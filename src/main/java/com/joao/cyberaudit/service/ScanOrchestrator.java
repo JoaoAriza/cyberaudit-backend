@@ -257,7 +257,9 @@ public class ScanOrchestrator {
 
         // ── Busca scan anterior ANTES de salvar (para change detection) ───────
         ScanResult previousScan = (host != null)
-                ? scanHistoryService.findLastResult(host, active,
+                // Mesmo caminho, não só mesmo host: comparar o /login com a home
+                // gerava mudanças que eram só a diferença entre duas páginas.
+                ? scanHistoryService.findLastResult(host, ScanHistoryService.caminhoDe(inputUrl), active,
                         currentUser != null ? currentUser.getAccount() : null).orElse(null)
                 : null;
 

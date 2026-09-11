@@ -75,18 +75,28 @@ public class ScanHistoryService {
     // entidade, porque ali o laudo É o objetivo.
 
     /**
-     * Último resultado de um host DENTRO da conta — base da detecção de mudanças.
-     * Escopado por conta: comparar contra o scan de outro tenant vazaria o estado
-     * anterior daquela conta no diff.
+     * Último resultado da MESMA PÁGINA dentro da conta — base da detecção de mudanças.
      *
-     * Roda em TODO scan, e era o pior caso da entidade: carregava dez laudos
-     * completos para ler {@code activeMode} e um id, e então buscava o laudo de
-     * novo pelo id. Agora os dez vêm como resumo e só o escolhido é lido.
+     * Comparava só por host, então escanear o /login depois da home gerava
+     * "CHANGES DETECTED" que eram apenas a diferença entre duas páginas. Com
+     * agendamento por família (a raiz e vários caminhos do mesmo domínio rodando
+     * todo dia) isso virava ruído permanente: cada rodada comparava com a página
+     * que tinha rodado antes, fosse ela qual fosse.
+     *
+     * A janela subiu de 10 para 30 porque o filtro por caminho descarta linhas:
+     * numa família com vários caminhos, os 10 últimos scans do host podem não
+     * conter nenhum da página pedida.
+     *
+     * Escopado por conta: comparar contra o scan de outro tenant vazaria o estado
+     * anterior daquela conta no diff. E só o laudo escolhido é lido — a janela
+     * vem como resumo, sem o result_json.
      */
-    public Optional<ScanResult> findLastResult(String host, boolean activeMode, Account account) {
+    public Optional<ScanResult> findLastResult(String host, String path, boolean activeMode, Account account) {
         if (account == null) return Optional.empty();
-        return findByHost(account, host, 10, null).stream()
+        String alvo = normalizarCaminho(path);
+        return findByHost(account, host, 30, null).stream()
                 .filter(r -> r.isActiveMode() == activeMode)
+                .filter(r -> caminhoDe(r.getUrl()).equals(alvo))
                 .findFirst()
                 .flatMap(r -> getResult(r.getId(), account));
     }
