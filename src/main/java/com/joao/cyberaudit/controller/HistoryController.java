@@ -76,21 +76,30 @@ public class HistoryController {
                                      @RequestParam(required = false) String to,
                                      @RequestParam(required = false) String path) {
         Account account = requireAccount(caller);
+        boolean porCaminho = path != null && !path.isBlank();
+
+        List<ScanSummary> scans;
         if (from != null && to != null) {
             LocalDate fromDate = LocalDate.parse(from);
             LocalDate toDate   = LocalDate.parse(to);
-            return historyService.findByHostBetween(
+            scans = historyService.findByHostBetween(
                     account,
                     host,
                     UserTimeZoneService.inicioDoDia(fromDate, userTimeZone.zonaDe(caller)),
                     UserTimeZoneService.inicioDoDia(toDate.plusDays(1), userTimeZone.zonaDe(caller))
             );
+        } else {
+            // Com caminho, a janela é maior ANTES de filtrar: os 50 scans mais
+            // recentes do domínio podem ser todos da home, e o /login sumiria do
+            // gráfico mesmo tendo histórico. É projeção, sem o laudo — 300 linhas
+            // custam pouco.
+            scans = historyService.findByHost(account, host, porCaminho ? 300 : 50, parseOrigin(origin));
         }
-        ScanOrigin o = parseOrigin(origin);
-        List<ScanSummary> scans = historyService.findByHost(account, host, 50, o);
-        // Com path, so a pagina pedida: o agendamento do /login nao mostra o
-        // historico da home do mesmo dominio. Sem path, o dominio inteiro, como antes.
-        if (path == null || path.isBlank()) return scans;
+
+        // Com path, só a página pedida — vale também para o intraday, que antes
+        // devolvia o dia inteiro do domínio e misturava as páginas no gráfico.
+        // Sem path, o domínio inteiro, como antes.
+        if (!porCaminho) return scans;
         String alvo = ScanHistoryService.normalizarCaminho(path);
         return scans.stream()
                 .filter(s -> ScanHistoryService.caminhoDe(s.getUrl()).equals(alvo))
