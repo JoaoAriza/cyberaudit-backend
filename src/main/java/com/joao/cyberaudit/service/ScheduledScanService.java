@@ -75,6 +75,7 @@ public class ScheduledScanService {
                 .notifyEmail(req.isNotifyEmail())
                 // Capturado aqui porque a execução roda fora de requisição.
                 .locale(LocaleContextHolder.getLocale().toLanguageTag())
+                .path(ScanHistoryService.normalizarCaminho(caminhoPedido(req)))
                 .timezone(zona.getId())
                 .user(user)
                 .createdAt(LocalDateTime.now())
@@ -126,7 +127,7 @@ public class ScheduledScanService {
 
                 // Executa scan fora de qualquer transação — pode durar longos segundos
                 var result = orchestrator.execute(
-                        scan.getHost(), scan.isActive(), scan.getUser(), true, ScanOrigin.SCHEDULED);
+                        alvoDe(scan), scan.isActive(), scan.getUser(), true, ScanOrigin.SCHEDULED);
 
                 // Persiste nextRun e lastRun em transação curta separada
                 markSuccess(scan.getId(),
@@ -228,6 +229,36 @@ public class ScheduledScanService {
         } catch (Exception e) {
             return UserTimeZoneService.PADRAO;
         }
+    }
+
+
+    /**
+     * Alvo real do scan: domínio mais caminho.
+     *
+     * Agendamento criado antes da coluna de caminho existir vem com path nulo e
+     * cai na raiz — que é o que ele já escaneava.
+     */
+    private static String alvoDe(ScheduledScan scan) {
+        String path = scan.getPath();
+        if (path == null || path.isBlank() || "/".equals(path)) return scan.getHost();
+        return scan.getHost() + path;
+    }
+
+    /**
+     * Caminho pedido na criação, venha ele no campo próprio ou grudado no host.
+     *
+     * Aceitar as duas formas é o que impede a regressão silenciosa: quem digita
+     * "site.com/login" no campo de domínio continua agendando o /login, em vez de
+     * ver o caminho ser descartado.
+     */
+    private static String caminhoPedido(ScheduledScanRequest req) {
+        if (req.getPath() != null && !req.getPath().isBlank()) {
+            String p = req.getPath().trim();
+            return p.startsWith("/") ? p : "/" + p;
+        }
+        String host = req.getHost() == null ? "" : req.getHost().replaceFirst("^https?://", "");
+        int barra = host.indexOf('/');
+        return barra >= 0 ? host.substring(barra) : "/";
     }
 
     private String sanitizeHost(String host) {

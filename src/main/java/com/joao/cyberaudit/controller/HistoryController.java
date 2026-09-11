@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.controller;
 
+import com.joao.cyberaudit.dto.PathSummaryDto;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AppUser;
 import com.joao.cyberaudit.model.ScanOrigin;
@@ -50,6 +51,17 @@ public class HistoryController {
                 ? historyService.findRecentByOrigin(account, 20, o)
                 : historyService.findRecent(account, 20);
         return records;
+    }
+
+    /**
+     * Um card por CAMINHO scaneado, com o score do scan mais recente dele.
+     *
+     * Complementa o /overview, que responde por domínio: aqui o /login e a home
+     * do mesmo domínio aparecem separados, cada um com a sua nota.
+     */
+    @GetMapping("/paths")
+    public List<PathSummaryDto> paths(@AuthenticationPrincipal AppUser caller) {
+        return historyService.findLatestPerPath(requireAccount(caller), 500);
     }
 
     /**

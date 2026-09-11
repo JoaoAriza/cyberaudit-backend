@@ -77,6 +77,21 @@ public class ScheduledScan {
     @Column(length = 64)
     private String timezone;
 
+    /**
+     * Caminho dentro do domínio (ex: {@code /login}). Nulo ou "/" = a raiz.
+     *
+     * Antes o caminho era descartado na criação — {@code split("/")[0]} reduzia
+     * {@code site.com/login} a {@code site.com}, e a rotina passava a monitorar
+     * em silêncio uma página diferente da pedida. Guardar separado mantém o
+     * {@code host} como a unidade de domínio (plano, e-mail, verificação) e o
+     * caminho como o alvo real do scan.
+     *
+     * Nulo nos agendamentos criados antes desta coluna existir — e nesse caso a
+     * raiz é exatamente o que eles já escaneavam.
+     */
+    @Column(length = 300)
+    private String path;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;

@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.joao.cyberaudit.dto.PathSummaryDto;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScanRecord;
@@ -12,7 +13,10 @@ import org.springframework.stereotype.Service;
 
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -126,6 +130,67 @@ public class ScanHistoryService {
     public List<ScanSummary> findLatestPerHost(Account account, int limit) {
         if (account == null) return List.of();
         return repository.findLatestSummaryPerHostByAccount(account, PageRequest.of(0, limit));
+    }
+
+
+    // ── Caminhos dentro de um domínio ────────────────────────────────────────
+
+    /**
+     * Último scan de cada CAMINHO da conta, do mais recente para o mais antigo.
+     *
+     * A Visão Geral responde "qual o score de cada domínio"; isto responde "quais
+     * páginas daquele domínio foram medidas, e quanto cada uma tirou". Sem isso,
+     * escanear a home e depois o /login fazia o segundo score aparecer com o nome
+     * do primeiro.
+     *
+     * O agrupamento é feito em Java, e não no SQL, de propósito: a coluna guarda
+     * a URL inteira, então {@code https://www.site.com/login} e
+     * {@code https://site.com/login/} são strings diferentes para a mesma página.
+     * Agrupar por {@code r.url} criaria caminho duplicado; o que identifica a
+     * página é o par host + caminho normalizado.
+     */
+    public List<PathSummaryDto> findLatestPerPath(Account account, int maxScans) {
+        if (account == null) return List.of();
+
+        // Já vem do mais novo para o mais antigo: o primeiro de cada chave é o último scan.
+        List<ScanSummary> recentes = repository.findSummariesByAccount(
+                account, PageRequest.of(0, maxScans));
+
+        Map<String, PathSummaryDto> ultimoPorCaminho = new LinkedHashMap<>();
+        for (ScanSummary s : recentes) {
+            String caminho = caminhoDe(s.getUrl());
+            ultimoPorCaminho.putIfAbsent(s.getHost() + caminho, PathSummaryDto.from(s, caminho));
+        }
+        return new ArrayList<>(ultimoPorCaminho.values());
+    }
+
+    /**
+     * Caminho normalizado de uma URL: sempre começa com barra, nunca termina com
+     * uma (exceto a raiz), e query string não entra — {@code /busca?q=a} e
+     * {@code /busca?q=b} são a mesma página para efeito de histórico.
+     *
+     * URL torta não derruba a listagem: cai na raiz, que é onde ela apareceria
+     * antes desta separação existir.
+     */
+    public static String caminhoDe(String url) {
+        if (url == null || url.isBlank()) return "/";
+        try {
+            return normalizarCaminho(URI.create(url.trim()).getPath());
+        } catch (Exception e) {
+            return "/";
+        }
+    }
+
+
+    /**
+     * Normaliza um caminho já isolado: sempre com barra na frente, nunca com
+     * barra no fim (exceto a raiz). Vazio vira raiz.
+     */
+    public static String normalizarCaminho(String path) {
+        if (path == null || path.isBlank() || "/".equals(path.trim())) return "/";
+        String p = path.trim();
+        if (!p.startsWith("/")) p = "/" + p;
+        return p.endsWith("/") ? p.substring(0, p.length() - 1) : p;
     }
 
     /** Scans de um host da conta em um intervalo de datas (para gráfico intraday). */

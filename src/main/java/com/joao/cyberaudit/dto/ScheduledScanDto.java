@@ -19,6 +19,9 @@ public class ScheduledScanDto {
     private boolean       notifyEmail;
     private LocalDateTime createdAt;
 
+    /** Caminho dentro do dominio; vazio nos agendamentos antigos (raiz). */
+    private String        path;
+
     /** Fuso em que preferredHour deve ser lido; vazio nos agendamentos antigos (UTC). */
     private String        timezone;
 
@@ -34,6 +37,7 @@ public class ScheduledScanDto {
         dto.enabled       = s.isEnabled();
         dto.notifyEmail   = s.isNotifyEmail();
         dto.createdAt     = s.getCreatedAt();
+        dto.path          = s.getPath();
         dto.timezone      = s.getTimezone();
         return dto;
     }
