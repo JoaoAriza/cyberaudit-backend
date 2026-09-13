@@ -109,11 +109,28 @@ public class SensitiveFileService {
      * <!DOCTYPE html> para qualquer path — incluindo /actuator/env, /phpinfo.php, etc.
      * Precisamos distinguir o conteúdo real do HTML genérico de fallback.
      */
-    private boolean isRealContent(String path, String body, String contentType) {
+    boolean isRealContent(String path, String body, String contentType) {
         if (body.isBlank()) return false;
 
         String lower     = body.toLowerCase(Locale.ROOT);
         String lowerPath = path.toLowerCase(Locale.ROOT);
+
+        // ── Gate de conteúdo binário ──────────────────────────────────────────
+        // Um arquivo de config/credenciais (.env, wp-config, .sql, .php...) é
+        // SEMPRE texto legível. Corpo binário aqui significa outra coisa: o
+        // servidor devolveu a mesma resposta comprimida/opaca para qualquer path
+        // (catch-all), e os bytes por acaso casaram com uma regra frouxa abaixo.
+        //
+        // Foi o falso positivo real: revestacabamentos.com.br reportou .env,
+        // .env.local, .env.production, .env.backup e wp-config.php.bak com preview
+        // IDÊNTICO e ilegível. Um .env de verdade (frrodas.com.br) chega como texto
+        // legível e passa por aqui sem problema.
+        //
+        // Arquivos compactados são a exceção — .zip É binário por natureza e tem
+        // a própria checagem de magic bytes mais abaixo.
+        boolean compactado = lowerPath.endsWith(".zip") || lowerPath.endsWith(".tar.gz")
+                || lowerPath.endsWith(".tgz");
+        if (!compactado && !looksLikeText(body)) return false;
 
         boolean isHtml = lower.contains("<!doctype html") || lower.contains("<html");
 
@@ -245,6 +262,34 @@ public class SensitiveFileService {
         // Nenhum check específico correspondeu — não reportar.
         // Preferimos falso negativo a falso positivo para arquivos sem padrão conhecido.
         return false;
+    }
+
+
+    /**
+     * Corpo é texto legível, e não binário?
+     *
+     * O que separa o .env real do falso positivo: o real é ASCII/UTF-8 imprimível
+     * (letras, {@code #}, {@code =}, acentos); o binário vem cheio de bytes que não
+     * decodificam como UTF-8 (viram {@code U+FFFD}) e de caracteres de controle.
+     *
+     * Acento e {@code —} NÃO contam como suspeitos — o .env do frrodas tem
+     * "Variáveis de Ambiente" com til e travessão, e é texto legítimo. Só contam o
+     * caractere-substituto e os controles C0 fora de tab/newline/CR.
+     *
+     * Texto de config real fica perto de 0% de suspeitos; binário estoura fácil os
+     * 30%. O corte em 10% deixa margem enorme para os dois lados — a intenção é não
+     * derrubar um arquivo real com um byte estranho isolado.
+     */
+    boolean looksLikeText(String body) {
+        if (body.isEmpty()) return false;
+        int amostra   = Math.min(body.length(), 2000);
+        int suspeitos = 0;
+        for (int i = 0; i < amostra; i++) {
+            char c = body.charAt(i);
+            boolean controle = c < 0x20 && c != '\t' && c != '\n' && c != '\r';
+            if (c == '�' || controle) suspeitos++;
+        }
+        return (double) suspeitos / amostra < 0.10;
     }
 
     private String extractBase(String url) {
