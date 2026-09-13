@@ -11,6 +11,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class SensitiveFileService {
@@ -47,6 +50,35 @@ public class SensitiveFileService {
             new FileTarget("/crossdomain.xml",         "MEDIUM"),
             new FileTarget("/clientaccesspolicy.xml",  "MEDIUM")
     );
+
+    /**
+     * Domínios onde QUALQUER pessoa consegue um subdomínio.
+     *
+     * Confiar em "*.cloudfront.net" é confiar em quem criar a próxima
+     * distribuição — inclusive o atacante. Já "d26lpennugtm8s.cloudfront.net"
+     * é uma distribuição só, nominal, e é uso correto.
+     */
+    private static final Set<String> HOSPEDAGEM_COMPARTILHADA = Set.of(
+            "cloudfront.net", "amazonaws.com", "s3.amazonaws.com",
+            "herokuapp.com", "azurewebsites.net", "blob.core.windows.net",
+            "appspot.com", "web.app", "firebaseapp.com",
+            "github.io", "netlify.app", "vercel.app", "pages.dev");
+
+    /** Flash: {@code <allow-access-from domain="..."/>}. Aceita aspas simples ou duplas. */
+    private static final Pattern ATRIBUTO_DOMINIO = Pattern.compile(
+            "domain\\s*=\\s*[\"']([^\"']*)[\"']", Pattern.CASE_INSENSITIVE);
+
+    /** Silverlight: {@code <domain uri="..."/>}. */
+    private static final Pattern ATRIBUTO_URI = Pattern.compile(
+            "uri\\s*=\\s*[\"']([^\"']*)[\"']", Pattern.CASE_INSENSITIVE);
+
+    /** {@code <allow-http-request-headers-from ... headers="*"/>} — libera qualquer header. */
+    private static final Pattern HEADERS_CURINGA = Pattern.compile(
+            "headers\\s*=\\s*[\"']\\*[\"']", Pattern.CASE_INSENSITIVE);
+
+    /** {@code secure="false"} — permite a política valer sobre HTTP puro. */
+    private static final Pattern SECURE_FALSE = Pattern.compile(
+            "secure\\s*=\\s*[\"']false[\"']", Pattern.CASE_INSENSITIVE);
 
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -206,10 +238,21 @@ public class SensitiveFileService {
         }
 
         // ── crossdomain.xml / clientaccesspolicy.xml ─────────────────────────
+        // Ser o arquivo de verdade NAO basta aqui: politica de dominio e PUBLICA
+        // por natureza, como o robots.txt. Achar uma restrita a dominios nomeados
+        // nao e exposicao — e a configuracao correta, e reportar isso como
+        // "arquivo sensivel exposto" e erro de categoria.
+        //
+        // Caso real: brunoacabamentos.com.br (loja Nuvemshop) servia uma politica
+        // liberando so *.tiendanube.com, *.nuvemshop.com.br e uma distribuicao
+        // CloudFront nominal — arquivo colocado pela plataforma, sem nada a corrigir.
+        //
+        // So vira finding quando a politica de fato libera demais.
         if (lowerPath.endsWith(".xml")) {
-            return lower.contains("cross-domain-policy") ||
+            boolean ehPolitica = lower.contains("cross-domain-policy") ||
                     lower.contains("cross-domain-access") ||
                     lower.contains("clientaccesspolicy");
+            return ehPolitica && politicaPermissiva(body);
         }
 
         // ── .htpasswd ─────────────────────────────────────────────────────────
@@ -280,6 +323,35 @@ public class SensitiveFileService {
      * 30%. O corte em 10% deixa margem enorme para os dois lados — a intenção é não
      * derrubar um arquivo real com um byte estranho isolado.
      */
+    /**
+     * A política de domínio libera além do que deveria?
+     *
+     * O que torna um crossdomain.xml perigoso não é existir, é o escopo: com
+     * {@code domain="*"} qualquer site podia, via Flash, fazer requisição
+     * autenticada em nome do visitante e ler a resposta. Política restrita a
+     * domínios nomeados não tem esse problema.
+     */
+    boolean politicaPermissiva(String body) {
+        Matcher dominios = ATRIBUTO_DOMINIO.matcher(body);
+        while (dominios.find()) {
+            if (escopoAmplo(dominios.group(1))) return true;
+        }
+        Matcher uris = ATRIBUTO_URI.matcher(body);
+        while (uris.find()) {
+            String uri = uris.group(1).trim();
+            if (uri.equals("*") || uri.equals("http://*") || uri.equals("https://*")) return true;
+        }
+        return HEADERS_CURINGA.matcher(body).find() || SECURE_FALSE.matcher(body).find();
+    }
+
+    /** Domínio confiado abrange gente demais? */
+    private boolean escopoAmplo(String dominio) {
+        String d = dominio.trim().toLowerCase(Locale.ROOT);
+        if (d.equals("*")) return true;
+        if (!d.startsWith("*.")) return false;
+        return HOSPEDAGEM_COMPARTILHADA.contains(d.substring(2));
+    }
+
     boolean looksLikeText(String body) {
         if (body.isEmpty()) return false;
         int amostra   = Math.min(body.length(), 2000);
