@@ -181,6 +181,17 @@ public class TechFingerprintService {
                 cms = "Webflow"; evidence.add(catalog.evidence("TECH_HTML_WEBFLOW"));
             }
 
+            // Plataforma de loja. Fora da cadeia de CMS acima de propósito: o
+            // WooCommerce roda DENTRO do WordPress, e a cadeia para no primeiro que
+            // casa. Quando já há CMS, a loja entra como biblioteca — o CMS continua
+            // sendo WordPress, que é por onde a busca de CVE casa a versão.
+            String loja = plataformaDeLoja(lower, rawSetCookies, allHeaders);
+            if (loja != null) {
+                evidence.add(catalog.evidence("TECH_COMMERCE_PLATFORM", loja));
+                if (cms == null)                   cms = loja;
+                else if (!cms.equalsIgnoreCase(loja)) libraries.add(loja);
+            }
+
             // Meta generator (contem versao do CMS frequentemente)
             int genIdx = lower.indexOf("<meta name=\"generator\"");
             if (genIdx >= 0) {
@@ -286,6 +297,51 @@ public class TechFingerprintService {
                 .evidence(evidence)
                 .detectedVersions(detectedVersions)
                 .build();
+    }
+
+    // ── Plataforma de loja ────────────────────────────────────────────────────
+
+    /**
+     * Plataforma de loja a partir de marcadores que só ela emite: domínio de asset,
+     * cookie ou header próprio.
+     *
+     * Nunca o nome solto no texto — uma agência que escreve "fazemos lojas VTEX" no
+     * rodapé não é uma loja VTEX. Mesmo cuidado do jQuery e do Bootstrap abaixo.
+     *
+     * Shopify não entra: já é reconhecido pela cadeia de CMS. Estático e sem rede
+     * para ser testável com HTML sintético.
+     */
+    static String plataformaDeLoja(String htmlLower, List<String> setCookies,
+                                   Map<String, List<String>> headers) {
+        String h = htmlLower == null ? "" : htmlLower;
+        if (h.contains("vteximg.com.br") || h.contains("vtexassets.com")
+                || temHeaderComPrefixo(headers, "x-vtex-"))
+            return "VTEX";
+        if (h.contains("mitiendanube.com") || h.contains("d26lpennugtm8s.cloudfront.net"))
+            return "Nuvemshop";
+        if (h.contains("cdn.awsli.com.br"))
+            return "Loja Integrada";
+        if (h.contains("/wp-content/plugins/woocommerce/") || h.contains("woocommerce-no-js")
+                || temCookieComPrefixo(setCookies, "woocommerce_", "wp_woocommerce_session_"))
+            return "WooCommerce";
+        if (h.contains("text/x-magento-init") || h.contains("mage/cookies")
+                || temCookieComPrefixo(setCookies, "mage-cache-storage", "mage-messages")
+                || temHeaderComPrefixo(headers, "x-magento-"))
+            return "Magento";
+        return null;
+    }
+
+    private static boolean temHeaderComPrefixo(Map<String, List<String>> headers, String prefixo) {
+        return headers != null && headers.keySet().stream()
+                .anyMatch(k -> k != null && k.toLowerCase(Locale.ROOT).startsWith(prefixo));
+    }
+
+    private static boolean temCookieComPrefixo(List<String> cookies, String... prefixos) {
+        if (cookies == null) return false;
+        return cookies.stream()
+                .filter(Objects::nonNull)
+                .map(c -> c.trim().toLowerCase(Locale.ROOT))
+                .anyMatch(c -> Arrays.stream(prefixos).anyMatch(c::startsWith));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -40,7 +40,8 @@ class TechFingerprintI18nTest {
             "evidence.TECH_HTML_SVELTE", "evidence.TECH_HTML_BOOTSTRAP",
             "evidence.TECH_HTML_TAILWIND", "evidence.TECH_HTML_JQUERY",
             "evidence.TECH_HTML_VIEWSTATE", "evidence.TECH_HTML_THYMELEAF",
-            "evidence.TECH_HTML_LARAVEL", "evidence.TECH_HTML_INERTIA");
+            "evidence.TECH_HTML_LARAVEL", "evidence.TECH_HTML_INERTIA",
+            "evidence.TECH_COMMERCE_PLATFORM");
 
     private final MessageCatalog catalog = catalogo();
 
