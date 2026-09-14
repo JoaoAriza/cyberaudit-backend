@@ -293,11 +293,46 @@ public class PdfReportService {
             fill(bx, cy - 59, bw, 14, bgc);
             txt(risk, bx + 7, cy - 51, bold, 8, rc);
         }
+        impactInSummary(r.getImpact());
         cy -= boxH + 12;
 
         // Severity distribution bar
         if (hasIssues(r)) severityDist(r.getScore().getIssues());
         cy -= 10;
+    }
+
+    /**
+     * Rotulo de impacto na coluna direita da caixa, na mesma linha do score: um diz
+     * quao fragil esta a configuracao, o outro o que esta em jogo — lado a lado.
+     *
+     * Escala quente propria (cinza, ambar, laranja, vermelho), a mesma da tela.
+     * Frase a esquerda da pilula, na mesma linha de base, para nao crescer a caixa.
+     * Laudo sem impacto (scan anterior ao rotulo) nao desenha nada: afirmar
+     * SHOWCASE ali seria inventar.
+     */
+    private void impactInSummary(ImpactLevel impact) throws IOException {
+        if (impact == null) return;
+        String phrase = switch (impact) {
+            case SHOWCASE -> "Fragile, no data at risk";
+            case CONTACT  -> "Collects personal data without protection";
+            case ACCOUNT  -> "Customer accounts exposed";
+            case PAYMENT  -> "Payment data at risk";
+        };
+        float[] color = switch (impact) {
+            case SHOWCASE -> INFO_C;
+            case CONTACT  -> MED;
+            case ACCOUNT  -> HIGH;
+            case PAYMENT  -> CRIT;
+        };
+        float[] bg = impact == ImpactLevel.SHOWCASE ? BORDER
+                : riskBg(impact == ImpactLevel.CONTACT ? "MEDIUM" : impact == ImpactLevel.ACCOUNT ? "HIGH" : "CRITICAL");
+
+        String level = impact.name();
+        txtR("IMPACT", RX, cy - 38, bold, 7, MUTED);
+        float bw = sw(level, bold, 8) + 14;
+        fill(RX - bw, cy - 59, bw, 14, bg);
+        txt(level, RX - bw + 7, cy - 51, bold, 8, color);
+        txtR(phrase, RX - bw - 8, cy - 51, normal, 8, TEXT);
     }
 
     private void severityDist(List<SecurityIssue> issues) throws IOException {

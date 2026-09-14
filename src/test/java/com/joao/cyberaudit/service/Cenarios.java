@@ -92,6 +92,8 @@ class Cenarios {
         return ScanResult.builder()
                 .url("http://sgsistemas.com.br").finalUrl("http://sgsistemas.com.br")
                 .httpStatus(200).activeMode(true)
+                // CONTACT tem a frase mais longa: e o pior caso para a caixa de resumo.
+                .impact(ImpactLevel.CONTACT)
                 .score(score).cveFindings(cves).openPorts(List.of(ftp))
                 .cookieIssues(List.of(cookie)).changes(List.of(mudanca))
                 .subdomainTakeover(List.of(takeover)).dangerousHttpMethods(List.of(metodo))
