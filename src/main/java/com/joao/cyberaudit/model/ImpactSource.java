@@ -10,7 +10,11 @@ package com.joao.cyberaudit.model;
 public enum ImpactSource {
     /** O HTML da página: formulário, campo de senha, de dado pessoal ou de cartão. */
     FORM,
-    /** O caminho da URL: /checkout, /minha-conta. */
+    /**
+     * O caminho da URL. NÃO é mais produzido: a palavra "checkout" no endereço de
+     * uma tela de login bloqueada virava PAGAMENTO. Fica para os laudos gravados
+     * enquanto valia, que ainda precisam desserializar.
+     */
     PATH,
     /** Cookie de sessão autenticada. */
     COOKIES,

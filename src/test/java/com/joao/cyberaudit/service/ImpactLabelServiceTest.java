@@ -3,6 +3,8 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.model.CookieFinding;
 import com.joao.cyberaudit.model.FormSurfaceResult;
 import com.joao.cyberaudit.model.ImpactLevel;
+import com.joao.cyberaudit.model.ImpactSignal;
+import com.joao.cyberaudit.model.ImpactUndetermined;
 import com.joao.cyberaudit.model.JwtSecurityFinding;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.model.TechFingerprintResult;
@@ -16,25 +18,27 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O rotulo responde "o que ha para perder aqui", nao "quao fragil esta".
+ * O rotulo responde "o que ha para perder NESTA pagina", nao "quao fragil esta".
  *
- * O caso que motivou: a home e o /checkout da mesma loja saem com a mesma cor no
- * laudo, e um achado sem consequencia real se apresenta com o mesmo peso de um
- * vazamento de dado de cliente. O nivel mais alto que casar vence.
+ * O nivel vem so dos campos da pagina. Os casos de producao que fixaram isso estao
+ * no bloco "Casos reais": um /checkout/login bloqueado que saia PAGAMENTO pelo
+ * endereco e uma home de imobiliaria que saia CONTA por um cookie anonimo.
  */
 class ImpactLabelServiceTest {
 
     private final ImpactLabelService service = new ImpactLabelService();
 
-    private ScanResult.ScanResultBuilder base(String url) {
-        return ScanResult.builder().url(url).formSurface(FormSurfaceResult.vazio());
-    }
-
-    private FormSurfaceResult form(boolean temForm, boolean senha, boolean pii, boolean cartao) {
-        return FormSurfaceResult.builder()
+    /** Pagina lida (HTML analisado) com os campos pedidos. */
+    private FormSurfaceResult pagina(boolean temForm, boolean senha, boolean pii, boolean cartao) {
+        return FormSurfaceResult.builder().analyzed(true)
                 .hasForm(temForm).hasPasswordField(senha)
                 .collectsPii(pii).hasPaymentField(cartao)
                 .evidence(List.of()).build();
+    }
+
+    /** HTTP 200, pagina lida, nenhum campo. */
+    private ScanResult.ScanResultBuilder base(String url) {
+        return ScanResult.builder().url(url).httpStatus(200).formSurface(pagina(false, false, false, false));
     }
 
     private CookieFinding cookie(String nome) {
@@ -43,147 +47,192 @@ class ImpactLabelServiceTest {
         return c;
     }
 
-    // ── SHOWCASE ─────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("vitrine do Maps: nada coletado, nada em risco")
-    void vitrine() {
-        assertEquals(ImpactLevel.SHOWCASE,
-                service.derive(base("https://acabamentos-silva.com.br/").build()));
-    }
-
-    @Test
-    @DisplayName("analytics com 'session'/'user' no nome nao transforma vitrine em conta")
-    void cookieDeInfraNaoConta() {
-        // Estes DOIS e que exercitam a exclusao: "_hjsession_..." contem "sess" e
-        // "ajs_user_id" contem "user" — os mesmos fragmentos que marcam sessao.
-        // Hotjar e Segment estao em boa parte dos sites institucionais, entao sem a
-        // exclusao por prefixo a vitrine sairia como ACCOUNT.
-        ScanResult r = base("https://acabamentos-silva.com.br/")
-                .cookieIssues(List.of(
-                        cookie("__cf_bm"),
-                        cookie("_hjSession_1873402"),
-                        cookie("ajs_user_id"),
-                        cookie("_ga_9XKQ2R")))
-                .build();
-        assertEquals(ImpactLevel.SHOWCASE, service.derive(r),
-                "cookie de analytics nao e cookie de sessao autenticada");
-    }
-
-    @Test
-    @DisplayName("caminho parecido nao casa: /carta-de-servicos nao e /cart")
-    void caminhoParecidoNaoCasa() {
-        assertEquals(ImpactLevel.SHOWCASE,
-                service.derive(base("https://loja.com.br/carta-de-servicos").build()));
-    }
-
-    // ── CONTACT ──────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("formulario de contato coleta dado pessoal")
-    void contato() {
-        ScanResult r = base("https://loja.com.br/contato")
-                .formSurface(form(true, false, true, false)).build();
-        assertEquals(ImpactLevel.CONTACT, service.derive(r));
-    }
-
-    // ── ACCOUNT ──────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("campo de senha indica area autenticada")
-    void senhaEhConta() {
-        ScanResult r = base("https://loja.com.br/entrar")
-                .formSurface(form(true, true, true, false)).build();
-        assertEquals(ImpactLevel.ACCOUNT, service.derive(r));
-    }
-
-    @Test
-    @DisplayName("cookie de sessao real indica conta")
-    void cookieDeSessao() {
-        ScanResult r = base("https://loja.com.br/")
-                .cookieIssues(List.of(cookie("__cf_bm"), cookie("session"))).build();
-        assertEquals(ImpactLevel.ACCOUNT, service.derive(r));
-    }
-
-    @Test
-    @DisplayName("JWT encontrado indica conta")
-    void jwtEhConta() {
-        ScanResult r = base("https://loja.com.br/")
-                .jwtSecurity(List.of(JwtSecurityFinding.builder().source("access_token").build()))
-                .build();
-        assertEquals(ImpactLevel.ACCOUNT, service.derive(r));
-    }
-
-    @Test
-    @DisplayName("caminho de login indica conta")
-    void caminhoDeLogin() {
-        assertEquals(ImpactLevel.ACCOUNT,
-                service.derive(base("https://loja.com.br/minha-conta/pedidos").build()));
-    }
-
-    // ── PAYMENT ──────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("caminho de checkout indica pagamento")
-    void caminhoDeCheckout() {
-        assertEquals(ImpactLevel.PAYMENT,
-                service.derive(base("https://loja.com.br/checkout/v3/start/abc").build()));
-    }
-
-    @Test
-    @DisplayName("campo de cartao indica pagamento mesmo sem caminho obvio")
-    void campoDeCartao() {
-        ScanResult r = base("https://loja.com.br/finalizar")
-                .formSurface(form(true, false, true, true)).build();
-        assertEquals(ImpactLevel.PAYMENT, service.derive(r));
-    }
-
-    @Test
-    @DisplayName("o nivel mais alto vence: checkout com senha e PAYMENT, nao ACCOUNT")
-    void maisAltoVence() {
-        ScanResult r = base("https://loja.com.br/checkout")
-                .formSurface(form(true, true, true, false))
-                .cookieIssues(List.of(cookie("session"))).build();
-        assertEquals(ImpactLevel.PAYMENT, service.derive(r));
-    }
-
-    // ── O caso real ──────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("arrazzestore: a home e a tela de pagamento saem em niveis diferentes")
-    void casoArrazzestore() {
-        ScanResult home = base("https://www.arrazzestore.com.br/")
-                .finalUrl("https://www.arrazzestore.com.br/")
-                .cookieIssues(List.of(cookie("__cf_bm"))).build();
-
-        ScanResult checkout = base("https://www.arrazzestore.com.br/checkout/v3/start/206-d85/from-store")
-                .finalUrl("https://www.arrazzestore.com.br/checkout/v3/start/206-d85/from-store")
-                .cookieIssues(List.of(cookie("__cf_bm"), cookie("session"))).build();
-
-        assertEquals(ImpactLevel.SHOWCASE, service.derive(home));
-        assertEquals(ImpactLevel.PAYMENT, service.derive(checkout));
-    }
-
-    @Test
-    @DisplayName("resultado nulo nao quebra a derivacao")
-    void nuloNaoQuebra() {
-        assertEquals(ImpactLevel.SHOWCASE, service.derive(null));
-    }
-
-    // ── Plataforma de loja: aviso, nao nivel ─────────────────────────────────
-
     private TechFingerprintResult tech(String cms, String... bibliotecas) {
         return TechFingerprintResult.builder().cms(cms).libraries(List.of(bibliotecas)).build();
     }
 
+    private List<String> texto(List<ImpactSignal> sinais) {
+        return sinais.stream().map(s -> s.getSource() + ":" + s.getDetail()).toList();
+    }
+
+    // ── Nivel pelos campos ───────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("vitrine do Maps: pagina lida, nenhum campo, nada em risco")
+    void vitrine() {
+        ImpactLabelService.Avaliacao a = service.assess(base("https://acabamentos-silva.com.br/").build());
+        assertEquals(ImpactLevel.SHOWCASE, a.level());
+        assertTrue(a.signals().isEmpty());
+        assertNull(a.undetermined());
+    }
+
+    @Test
+    @DisplayName("formulario de busca sozinho nao e coleta de dado")
+    void buscaNaoEhContato() {
+        // A primeira versao contava QUALQUER <form> como CONTATO — e toda imobiliaria
+        // e toda loja tem formulario de busca.
+        ScanResult r = base("https://imobiliaria.com.br/").formSurface(pagina(true, false, false, false)).build();
+        assertEquals(ImpactLevel.SHOWCASE, service.derive(r));
+    }
+
+    @Test
+    @DisplayName("campo de dado pessoal: CONTATO")
+    void contato() {
+        ScanResult r = base("https://loja.com.br/").formSurface(pagina(false, false, true, false)).build();
+        ImpactLabelService.Avaliacao a = service.assess(r);
+        assertEquals(ImpactLevel.CONTACT, a.level());
+        assertEquals(List.of("FORM:pii-field"), texto(a.signals()));
+    }
+
+    @Test
+    @DisplayName("campo de senha: CONTA")
+    void senhaEhConta() {
+        ScanResult r = base("https://loja.com.br/entrar").formSurface(pagina(true, true, true, false)).build();
+        assertEquals(ImpactLevel.ACCOUNT, service.derive(r));
+    }
+
+    @Test
+    @DisplayName("campo de cartao: PAGAMENTO, e o nivel mais alto vence")
+    void cartaoEhPagamento() {
+        ScanResult r = base("https://loja.com.br/finalizar").formSurface(pagina(true, true, true, true)).build();
+        ImpactLabelService.Avaliacao a = service.assess(r);
+        assertEquals(ImpactLevel.PAYMENT, a.level());
+        assertEquals(List.of("FORM:payment-field"), texto(a.signals()));
+    }
+
+    // ── O endereco nao decide ────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("/checkout/login lido e com senha e CONTA, nao PAGAMENTO")
+    void checkoutLidoSemCartao() {
+        ScanResult r = base("https://www.petz.com.br/checkout/login/indexLogado_Loja")
+                .formSurface(pagina(true, true, true, false)).build();
+        assertEquals(ImpactLevel.ACCOUNT, service.derive(r));
+    }
+
+    @Test
+    @DisplayName("/minha-conta sem campo nenhum e VITRINE: o endereco nao e evidencia")
+    void caminhoDeContaSemCampo() {
+        assertEquals(ImpactLevel.SHOWCASE, service.derive(base("https://loja.com.br/minha-conta/pedidos").build()));
+    }
+
+    // ── Indicios do dominio ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("cookie de sessao nao sobe o nivel: vira indicio")
+    void cookieDeSessaoEhIndicio() {
+        ScanResult r = base("https://loja.com.br/").cookieIssues(List.of(cookie("PHPSESSID"))).build();
+        ImpactLabelService.Avaliacao a = service.assess(r);
+        assertEquals(ImpactLevel.SHOWCASE, a.level());
+        assertEquals(List.of("COOKIES:PHPSESSID"), texto(a.indicators()));
+    }
+
+    @Test
+    @DisplayName("cookie de analytics com 'session'/'user' no nome nem vira indicio")
+    void cookieDeInfraNaoEhIndicio() {
+        ScanResult r = base("https://acabamentos-silva.com.br/")
+                .cookieIssues(List.of(cookie("__cf_bm"), cookie("_hjSession_1873402"),
+                        cookie("ajs_user_id"), cookie("_ga_9XKQ2R")))
+                .build();
+        assertTrue(service.assess(r).indicators().isEmpty());
+    }
+
+    @Test
+    @DisplayName("JWT nao sobe o nivel: vira indicio com a origem do token")
+    void jwtEhIndicio() {
+        ScanResult r = base("https://loja.com.br/")
+                .jwtSecurity(List.of(JwtSecurityFinding.builder().source("access_token").build()))
+                .build();
+        ImpactLabelService.Avaliacao a = service.assess(r);
+        assertEquals(ImpactLevel.SHOWCASE, a.level());
+        assertEquals(List.of("JWT:access_token"), texto(a.indicators()));
+    }
+
+    // ── Pagina que nao foi lida ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("resposta 2xx sem HTML: nao determinado, e nao vitrine")
+    void paginaSemHtml() {
+        ScanResult r = base("https://loja.com.br/").formSurface(FormSurfaceResult.vazio()).build();
+        ImpactLabelService.Avaliacao a = service.assess(r);
+        assertNull(a.level());
+        assertEquals(ImpactUndetermined.EMPTY, a.undetermined());
+    }
+
+    @Test
+    @DisplayName("aplicacao JavaScript: os campos nao estao no HTML, entao nao determinado")
+    void aplicacaoJavascript() {
+        FormSurfaceResult casca = FormSurfaceResult.builder().analyzed(true).jsRendered(true).evidence(List.of()).build();
+        ImpactLabelService.Avaliacao a = service.assess(base("https://app.com.br/").formSurface(casca).build());
+        assertNull(a.level());
+        assertEquals(ImpactUndetermined.JS_RENDERED, a.undetermined());
+    }
+
+    @Test
+    @DisplayName("status fora de 2xx manda, mesmo que algum campo tenha sido lido")
+    void statusVemPrimeiro() {
+        // Um desafio de bot com captcha tem campo — e nao e a pagina.
+        ScanResult r = base("https://loja.com.br/").httpStatus(403)
+                .formSurface(pagina(true, false, true, false)).build();
+        assertEquals(ImpactUndetermined.HTTP_STATUS, service.assess(r).undetermined());
+        assertNull(service.derive(r));
+    }
+
+    @Test
+    @DisplayName("resultado nulo nao quebra: nao determinado")
+    void nuloNaoQuebra() {
+        assertNull(service.derive(null));
+        assertEquals(ImpactUndetermined.EMPTY, service.assess(null).undetermined());
+    }
+
+    // ── Casos reais ──────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("petz: /checkout/login bloqueado (403, corpo vazio) nao vira PAGAMENTO pelo endereco")
+    void casoPetz() {
+        ScanResult r = ScanResult.builder()
+                .url("https://www.petz.com.br/checkout/login/indexLogado_Loja")
+                .httpStatus(403)
+                .formSurface(FormSurfaceResult.vazio())
+                .build();
+
+        ImpactLabelService.Avaliacao a = service.assess(r);
+
+        assertNull(a.level(), "o scanner nunca viu a pagina — nao pode afirmar nivel");
+        assertEquals(ImpactUndetermined.HTTP_STATUS, a.undetermined());
+        assertTrue(a.signals().isEmpty());
+    }
+
+    @Test
+    @DisplayName("sebimoveis: home com busca e cookie de sessao anonimo e VITRINE com indicio, nao CONTA")
+    void casoSebimoveis() {
+        ScanResult r = base("https://sebimoveis.com.br/")
+                .formSurface(pagina(true, false, false, false))
+                .cookieIssues(List.of(cookie("sub100_sites_session")))
+                .build();
+
+        ImpactLabelService.Avaliacao a = service.assess(r);
+
+        assertEquals(ImpactLevel.SHOWCASE, a.level());
+        assertEquals(List.of("COOKIES:sub100_sites_session"), texto(a.indicators()));
+    }
+
+    @Test
+    @DisplayName("indicios aparecem mesmo quando a pagina nao foi lida")
+    void indiciosSemLeitura() {
+        ScanResult r = base("https://loja.com.br/").httpStatus(403)
+                .formSurface(FormSurfaceResult.vazio())
+                .cookieIssues(List.of(cookie("session"))).build();
+        assertEquals(List.of("COOKIES:session"), texto(service.assess(r).indicators()));
+    }
+
+    // ── Plataforma de loja: aviso, nao nivel ─────────────────────────────────
+
     @Test
     @DisplayName("home de loja Shopify sem formulario continua VITRINE, com aviso da plataforma")
     void plataformaNaoEleva() {
-        // Antes: detectar a plataforma marcava PAYMENT em qualquer pagina da loja.
-        // A home nao coleta nada; o checkout e da plataforma, nao do lojista.
-        ScanResult.ScanResultBuilder home = base("https://loja.com.br/").techFingerprint(tech("Shopify"));
-
-        ImpactLabelService.Avaliacao a = service.assess(home.build());
+        ImpactLabelService.Avaliacao a = service.assess(
+                base("https://loja.com.br/").techFingerprint(tech("Shopify")).build());
 
         assertEquals(ImpactLevel.SHOWCASE, a.level());
         assertEquals("Shopify", a.managedPlatform());
@@ -203,58 +252,33 @@ class ImpactLabelServiceTest {
         assertNull(service.assess(r).managedPlatform());
     }
 
-    // ── Sinais: o porque do nivel ────────────────────────────────────────────
-
-    private List<String> sinais(ImpactLabelService.Avaliacao a) {
-        return a.signals().stream().map(s -> s.getSource() + ":" + s.getDetail()).toList();
-    }
+    // ── Gravacao ─────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("checkout com cartao traz os dois motivos: o campo e o caminho")
-    void sinaisDoCheckout() {
-        ScanResult r = base("https://loja.com.br/checkout")
-                .formSurface(form(true, false, true, true)).build();
-
-        assertEquals(List.of("FORM:payment-field", "PATH:/checkout"), sinais(service.assess(r)));
-    }
-
-    @Test
-    @DisplayName("so os sinais do nivel vencedor: a senha do checkout nao entra no porque")
-    void soSinaisDoNivelVencedor() {
-        ScanResult r = base("https://loja.com.br/checkout")
-                .formSurface(form(true, true, true, false))
-                .cookieIssues(List.of(cookie("session"))).build();
-
-        assertEquals(List.of("PATH:/checkout"), sinais(service.assess(r)));
-    }
-
-    @Test
-    @DisplayName("conta: o cookie de sessao e nomeado, o de analytics nao")
-    void sinaisDeConta() {
-        ScanResult r = base("https://loja.com.br/")
-                .cookieIssues(List.of(cookie("_hjSession_1873402"), cookie("PHPSESSID"))).build();
-
-        assertEquals(List.of("COOKIES:PHPSESSID"), sinais(service.assess(r)));
-    }
-
-    @Test
-    @DisplayName("vitrine nao tem motivo para listar")
-    void vitrineSemSinais() {
-        assertTrue(service.assess(base("https://acabamentos-silva.com.br/").build()).signals().isEmpty());
-    }
-
-    @Test
-    @DisplayName("rotular grava nivel, sinais e plataforma no resultado")
+    @DisplayName("rotular grava nivel, sinal, indicios e plataforma no resultado")
     void rotularGravaTudo() {
         ScanResult r = base("https://loja.com.br/contato")
-                .formSurface(form(true, false, true, false))
+                .formSurface(pagina(true, false, true, false))
+                .jwtSecurity(List.of(JwtSecurityFinding.builder().source("access_token").build()))
                 .techFingerprint(tech("VTEX")).build();
 
         service.rotular(r);
 
         assertEquals(ImpactLevel.CONTACT, r.getImpact());
-        assertEquals(List.of("FORM:pii-field", "FORM:form"),
-                r.getImpactSignals().stream().map(s -> s.getSource() + ":" + s.getDetail()).toList());
+        assertEquals(List.of("FORM:pii-field"), texto(r.getImpactSignals()));
+        assertEquals(List.of("JWT:access_token"), texto(r.getImpactIndicators()));
         assertEquals("VTEX", r.getManagedPlatform());
+        assertNull(r.getImpactUndetermined());
+    }
+
+    @Test
+    @DisplayName("rotular pagina bloqueada grava o motivo e nenhum nivel")
+    void rotularIndeterminado() {
+        ScanResult r = base("https://loja.com.br/").httpStatus(403).formSurface(FormSurfaceResult.vazio()).build();
+
+        service.rotular(r);
+
+        assertNull(r.getImpact());
+        assertEquals(ImpactUndetermined.HTTP_STATUS, r.getImpactUndetermined());
     }
 }

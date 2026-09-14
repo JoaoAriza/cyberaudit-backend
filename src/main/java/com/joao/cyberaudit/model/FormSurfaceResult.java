@@ -24,7 +24,16 @@ import java.util.List;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class FormSurfaceResult {
 
-    /** Existe ao menos um {@code <form>} na página. */
+    /**
+     * A página foi de fato lida: resposta 2xx com HTML.
+     *
+     * Falso quando o site bloqueou o scanner (403 de WAF), respondeu erro ou veio
+     * sem corpo. Aí os campos abaixo em false NÃO querem dizer "não tem" — querem
+     * dizer "não vi".
+     */
+    private boolean analyzed;
+
+    /** Existe ao menos um {@code <form>}. Informativo: formulário de busca também é form. */
     private boolean hasForm;
 
     /** Existe campo de senha — indica área autenticada, não só contato. */
@@ -35,6 +44,13 @@ public class FormSurfaceResult {
 
     /** Campo de cartão (CVV, número, {@code autocomplete="cc-*"}). */
     private boolean hasPaymentField;
+
+    /**
+     * Casca de aplicação JavaScript: nenhum campo no HTML e a raiz vazia esperando o
+     * script montar a tela. Os campos existem só depois de executar JS, e o scanner
+     * não executa — então "sem campo" aqui também é "não vi".
+     */
+    private boolean jsRendered;
 
     /** Marcadores que casaram, para o laudo poder mostrar o porquê. */
     private List<String> evidence;

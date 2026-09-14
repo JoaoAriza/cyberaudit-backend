@@ -113,7 +113,8 @@ public class HttpFetchService {
         return ScannerHttp.sendFollowingSafely(clientFollow, req, ScannerHttp.limitedString());
     }
 
-    private HttpFetchResult buildResult(HttpResponse<String> resp) {
+    /** Visível no pacote para o teste montar a resposta sem rede. */
+    HttpFetchResult buildResult(HttpResponse<String> resp) {
         int status = resp.statusCode();
         String finalUrl = resp.uri().toString();
 
@@ -140,8 +141,14 @@ public class HttpFetchService {
         List<String> rawSetCookies = resp.headers().allValues("set-cookie");
         if (rawSetCookies == null) rawSetCookies = Collections.emptyList();
 
-        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null,
-                formSurfaceService.analyze(body));
+        // Só resposta 2xx é a página. O corpo de um 403 de WAF, de um erro ou de um
+        // desafio de bot é o do BLOQUEIO — às vezes um captcha com campo —, e ler os
+        // campos dele diria o que o bloqueio coleta, não o que a página coleta.
+        FormSurfaceResult superficie = (status >= 200 && status < 300)
+                ? formSurfaceService.analyze(body)
+                : FormSurfaceResult.vazio();
+
+        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null, superficie);
     }
 
     /** Extrai a CSP de uma tag &lt;meta http-equiv="Content-Security-Policy"&gt; no HTML. */

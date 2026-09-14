@@ -49,10 +49,25 @@ public class ScanResult {
     private ImpactLevel       impact;
 
     /**
-     * O que sustenta o {@link #impact}. Guest/FREE recebem só a ORIGEM de cada sinal
-     * (o módulo), sem o detalhe — ver {@code ScanEntitlementService}.
+     * O que sustenta o {@link #impact}: o campo da página que decidiu o nível.
+     * Guest/FREE recebem só a ORIGEM de cada sinal, sem o detalhe — ver
+     * {@code ScanEntitlementService}.
      */
     private List<ImpactSignal> impactSignals;
+
+    /**
+     * Sinais do DOMÍNIO que não dizem o que esta página coleta: cookie de sessão,
+     * JWT, documentação de API, GraphQL. Aparecem ao lado do rótulo e não mexem no
+     * nível. Guest/FREE recebem só a origem, como nos {@link #impactSignals}.
+     */
+    private List<ImpactSignal> impactIndicators;
+
+    /**
+     * Por que não há {@link #impact}: a página não foi lida (bloqueio, erro, sem
+     * HTML) ou é montada por JavaScript. Nulo quando o rótulo foi determinado — e
+     * em laudo anterior a este campo.
+     */
+    private ImpactUndetermined impactUndetermined;
 
     /**
      * Loja em plataforma hospedada (Shopify, VTEX, Nuvemshop): o checkout é dela,

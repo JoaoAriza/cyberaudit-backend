@@ -82,11 +82,12 @@ public class ScanEntitlementService {
         return result.toBuilder()
                 .score(strippedScore)
                 .detailsLocked(true)
-                // Rótulo de impacto: o nível e a ORIGEM de cada sinal ficam — é o que
-                // mostra ao FREE que a página é sensível e em qual módulo. O detalhe
-                // (qual cookie, qual campo) é o porquê, e sai. O formSurface sai
+                // Rótulo de impacto: o nível e a ORIGEM de cada sinal e indício ficam —
+                // é o que mostra ao FREE que a página é sensível e em qual módulo. O
+                // detalhe (qual cookie, qual campo) é o porquê, e sai. O formSurface sai
                 // inteiro: os booleanos dele são o mesmo porquê por outro caminho.
                 .impactSignals(semDetalhe(result.getImpactSignals()))
+                .impactIndicators(semDetalhe(result.getImpactIndicators()))
                 .formSurface(null)
                 .headers(null)
                 .openPorts(null)

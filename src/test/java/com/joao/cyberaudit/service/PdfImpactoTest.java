@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.ImpactLevel;
+import com.joao.cyberaudit.model.ImpactUndetermined;
 import com.joao.cyberaudit.model.ScanResult;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -25,6 +26,16 @@ class PdfImpactoTest {
         assertTrue(pagina.contains("IMPACT"), pagina);
         assertTrue(pagina.contains("PAYMENT"), pagina);
         assertTrue(pagina.contains("Payment data at risk"), pagina);
+    }
+
+    @Test
+    @DisplayName("pagina que nao foi lida sai como NOT DETERMINED, com o status")
+    void indeterminadoNoResumo() throws Exception {
+        String pagina = primeiraPagina(Cenarios.completo().toBuilder()
+                .impact(null).impactUndetermined(ImpactUndetermined.HTTP_STATUS).httpStatus(403).build());
+
+        assertTrue(pagina.contains("NOT DETERMINED"), pagina);
+        assertTrue(pagina.contains("HTTP 403"), pagina);
     }
 
     @Test

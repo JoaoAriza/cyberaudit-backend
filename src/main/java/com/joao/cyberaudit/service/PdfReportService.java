@@ -293,7 +293,7 @@ public class PdfReportService {
             fill(bx, cy - 59, bw, 14, bgc);
             txt(risk, bx + 7, cy - 51, bold, 8, rc);
         }
-        impactInSummary(r.getImpact());
+        impactInSummary(r);
         cy -= boxH + 12;
 
         // Severity distribution bar
@@ -307,27 +307,43 @@ public class PdfReportService {
      *
      * Escala quente propria (cinza, ambar, laranja, vermelho), a mesma da tela.
      * Frase a esquerda da pilula, na mesma linha de base, para nao crescer a caixa.
-     * Laudo sem impacto (scan anterior ao rotulo) nao desenha nada: afirmar
+     * Pagina que nao foi lida (bloqueio, sem HTML, montada por JS) sai como NOT
+     * DETERMINED com o motivo. Laudo anterior ao rotulo nao desenha nada: afirmar
      * SHOWCASE ali seria inventar.
      */
-    private void impactInSummary(ImpactLevel impact) throws IOException {
-        if (impact == null) return;
-        String phrase = switch (impact) {
-            case SHOWCASE -> "Fragile, no data at risk";
-            case CONTACT  -> "Collects personal data without protection";
-            case ACCOUNT  -> "Customer accounts exposed";
-            case PAYMENT  -> "Payment data at risk";
-        };
-        float[] color = switch (impact) {
-            case SHOWCASE -> INFO_C;
-            case CONTACT  -> MED;
-            case ACCOUNT  -> HIGH;
-            case PAYMENT  -> CRIT;
-        };
-        float[] bg = impact == ImpactLevel.SHOWCASE ? BORDER
-                : riskBg(impact == ImpactLevel.CONTACT ? "MEDIUM" : impact == ImpactLevel.ACCOUNT ? "HIGH" : "CRITICAL");
+    private void impactInSummary(ScanResult r) throws IOException {
+        ImpactLevel impact = r.getImpact();
+        String level, phrase;
+        float[] color, bg;
+        if (impact != null) {
+            level = impact.name();
+            phrase = switch (impact) {
+                case SHOWCASE -> "Fragile, no data at risk";
+                case CONTACT  -> "Collects personal data without protection";
+                case ACCOUNT  -> "Customer accounts exposed";
+                case PAYMENT  -> "Payment data at risk";
+            };
+            color = switch (impact) {
+                case SHOWCASE -> INFO_C;
+                case CONTACT  -> MED;
+                case ACCOUNT  -> HIGH;
+                case PAYMENT  -> CRIT;
+            };
+            bg = impact == ImpactLevel.SHOWCASE ? BORDER
+                    : riskBg(impact == ImpactLevel.CONTACT ? "MEDIUM" : impact == ImpactLevel.ACCOUNT ? "HIGH" : "CRITICAL");
+        } else if (r.getImpactUndetermined() != null) {
+            level = "NOT DETERMINED";
+            phrase = switch (r.getImpactUndetermined()) {
+                case HTTP_STATUS -> "Page could not be read (HTTP " + r.getHttpStatus() + ")";
+                case EMPTY       -> "Page returned no HTML to read";
+                case JS_RENDERED -> "Page rendered by JavaScript";
+            };
+            color = INFO_C;
+            bg = BORDER;
+        } else {
+            return;
+        }
 
-        String level = impact.name();
         txtR("IMPACT", RX, cy - 38, bold, 7, MUTED);
         float bw = sw(level, bold, 8) + 14;
         fill(RX - bw, cy - 59, bw, 14, bg);

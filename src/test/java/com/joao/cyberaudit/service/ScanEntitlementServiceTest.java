@@ -144,6 +144,7 @@ class ScanEntitlementServiceTest {
                 .impactSignals(List.of(
                         new ImpactSignal(ImpactSource.FORM, "payment-field"),
                         new ImpactSignal(ImpactSource.COOKIES, "PHPSESSID")))
+                .impactIndicators(List.of(new ImpactSignal(ImpactSource.JWT, "access_token")))
                 .formSurface(FormSurfaceResult.builder()
                         .hasForm(true).hasPaymentField(true)
                         .evidence(List.of("form", "payment-field")).build())
@@ -166,12 +167,23 @@ class ScanEntitlementServiceTest {
     }
 
     @Test
+    @DisplayName("indícios do domínio chegam ao FREE só com a origem, igual aos sinais")
+    void freeVeIndicioSemDetalhe() {
+        ScanResult r = service().applyEntitlement(resultadoComImpacto(), usuario(Plan.FREE));
+
+        assertEquals(List.of(ImpactSource.JWT),
+                r.getImpactIndicators().stream().map(ImpactSignal::getSource).toList());
+        assertNull(r.getImpactIndicators().get(0).getDetail(), "qual token é o porquê");
+    }
+
+    @Test
     @DisplayName("tirar o detalhe do FREE não apaga o detalhe do cache compartilhado")
     void detalheDoCacheIntacto() {
         ScanResult original = resultadoComImpacto();
         service().applyEntitlement(original, usuario(Plan.FREE));
 
         assertEquals("payment-field", original.getImpactSignals().get(0).getDetail());
+        assertEquals("access_token", original.getImpactIndicators().get(0).getDetail());
         assertNotNull(original.getFormSurface());
     }
 
