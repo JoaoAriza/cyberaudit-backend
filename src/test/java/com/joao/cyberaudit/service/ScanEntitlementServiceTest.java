@@ -8,6 +8,7 @@ import com.joao.cyberaudit.model.ImpactLevel;
 import com.joao.cyberaudit.model.ImpactSignal;
 import com.joao.cyberaudit.model.ImpactSource;
 import com.joao.cyberaudit.model.Plan;
+import com.joao.cyberaudit.model.SuggestedPath;
 import com.joao.cyberaudit.model.RiskLevel;
 import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.model.ScanResult;
@@ -164,6 +165,18 @@ class ScanEntitlementServiceTest {
                 "o detalhe do sinal é o porquê — não pode chegar ao FREE");
         assertNull(r.getFormSurface(), "os booleanos do formulário entregam o mesmo porquê");
         assertEquals("Nuvemshop", r.getManagedPlatform());
+    }
+
+    @Test
+    @DisplayName("caminhos sugeridos chegam inteiros ao FREE — são links públicos da página")
+    void freeVeCaminhosSugeridos() {
+        ScanResult comSugestao = resultadoComImpacto().toBuilder()
+                .suggestedPaths(List.of(new SuggestedPath(ImpactLevel.ACCOUNT, "/login", "https://example.com/login")))
+                .build();
+
+        ScanResult r = service().applyEntitlement(comSugestao, usuario(Plan.FREE));
+
+        assertEquals("https://example.com/login", r.getSuggestedPaths().get(0).getUrl());
     }
 
     @Test

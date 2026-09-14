@@ -13,6 +13,7 @@ import java.net.http.HttpResponse;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +51,13 @@ class HttpFetchSuperficieTest {
         FormSurfaceResult f = service.buildResult(resposta(200, CAPTCHA)).getFormSurface();
         assertTrue(f.isAnalyzed());
         assertTrue(f.isHasPasswordField());
+    }
+
+    @Test
+    @DisplayName("links sugeridos sao resolvidos pela URL final da resposta")
+    void linksPelaUrlFinal() {
+        FormSurfaceResult f = service.buildResult(resposta(200, "<a href=\"/minha-conta\">Conta</a>")).getFormSurface();
+        assertEquals("https://loja.test/minha-conta", f.getLinkedAreas().get(0).getUrl());
     }
 
     @Test

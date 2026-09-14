@@ -70,6 +70,13 @@ public class ScanResult {
     private ImpactUndetermined impactUndetermined;
 
     /**
+     * Caminhos de conta e checkout que esta página linka, para escanear em seguida.
+     * Visível a todo plano: são links públicos da página, e escanear é o que o plano
+     * gratuito já faz.
+     */
+    private List<SuggestedPath> suggestedPaths;
+
+    /**
      * Loja em plataforma hospedada (Shopify, VTEX, Nuvemshop): o checkout é dela,
      * não do lojista. Não mexe no nível; é aviso. Nulo quando não há.
      */

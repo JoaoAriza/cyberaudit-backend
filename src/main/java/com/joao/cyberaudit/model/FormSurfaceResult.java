@@ -55,6 +55,12 @@ public class FormSurfaceResult {
     /** Marcadores que casaram, para o laudo poder mostrar o porquê. */
     private List<String> evidence;
 
+    /**
+     * Links desta página para áreas de conta ou pagamento do mesmo domínio. Não
+     * mexem no nível desta página: são o próximo caminho a escanear.
+     */
+    private List<SuggestedPath> linkedAreas;
+
     /** Página sem corpo analisável — não é o mesmo que página sem formulário. */
     public static FormSurfaceResult vazio() {
         return FormSurfaceResult.builder().evidence(List.of()).build();

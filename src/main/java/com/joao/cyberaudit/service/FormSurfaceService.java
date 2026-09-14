@@ -1,9 +1,13 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.FormSurfaceResult;
+import com.joao.cyberaudit.model.ImpactLevel;
+import com.joao.cyberaudit.model.SuggestedPath;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -65,6 +69,24 @@ public class FormSurfaceService {
             "<div\\b[^>]*(?<=\\s)id\\s*=\\s*[\"'](root|app)[\"'][^>]*>\\s*</div>"
             + "|<app-root\\b[^>]*>\\s*</app-root>", FLAGS);
 
+    /** Abertura de um link, da {@code <a} ao {@code >}. */
+    private static final Pattern LINK = Pattern.compile("<a\\b[^>]*>", FLAGS);
+
+    /** Segmentos de caminho de fluxo de pagamento. */
+    private static final Set<String> CAMINHOS_PAGAMENTO = Set.of(
+            "checkout", "carrinho", "cart", "pagamento", "payment", "finalizar-compra");
+
+    /**
+     * Segmentos de área de cliente. Painel e admin ficam de fora: são a área do
+     * dono do site, não a do cliente dele.
+     */
+    private static final Set<String> CAMINHOS_CONTA = Set.of(
+            "conta", "minha-conta", "login", "entrar", "signin", "sign-in", "account",
+            "cadastro", "register", "area-do-cliente", "meus-pedidos");
+
+    /** Teto de sugestões: o suficiente para apontar login e checkout, sem virar mapa do site. */
+    static final int MAX_AREAS = 4;
+
     /**
      * Atributos lidos de cada campo. O nome tem de vir depois de espaço ou aspas,
      * para {@code data-type} não ser lido como {@code type}.
@@ -74,7 +96,8 @@ public class FormSurfaceService {
             "name",         atributo("name"),
             "id",           atributo("id"),
             "placeholder",  atributo("placeholder"),
-            "autocomplete", atributo("autocomplete"));
+            "autocomplete", atributo("autocomplete"),
+            "href",         atributo("href"));
 
     private static Pattern atributo(String nome) {
         return Pattern.compile(
@@ -82,6 +105,11 @@ public class FormSurfaceService {
     }
 
     public FormSurfaceResult analyze(String html) {
+        return analyze(html, null);
+    }
+
+    /** Com a URL da página, também aponta os links para áreas de conta e checkout. */
+    public FormSurfaceResult analyze(String html, String pageUrl) {
         if (html == null || html.isBlank()) return FormSurfaceResult.vazio();
 
         boolean form = FORM.matcher(html).find();
@@ -125,7 +153,74 @@ public class FormSurfaceService {
                 .hasPaymentField(pagamento)
                 .jsRendered(jsRendered)
                 .evidence(List.copyOf(evidence))
+                .linkedAreas(areasLinkadas(html, pageUrl))
                 .build();
+    }
+
+    /**
+     * Links do mesmo domínio para login, cadastro, minha-conta ou checkout.
+     *
+     * Link externo, {@code mailto:}, âncora e a própria página ficam de fora; www e
+     * sem www são o mesmo domínio. Só o caminho entra — a query de um link de
+     * carrinho não é outra página.
+     */
+    private List<SuggestedPath> areasLinkadas(String html, String pageUrl) {
+        if (pageUrl == null || pageUrl.isBlank()) return List.of();
+        URI base;
+        try {
+            base = URI.create(pageUrl.trim());
+        } catch (Exception e) {
+            return List.of();
+        }
+        if (base.getHost() == null) return List.of();
+        String hostBase     = semWww(base.getHost());
+        String caminhoAtual = ScanHistoryService.normalizarCaminho(base.getPath());
+
+        Map<String, SuggestedPath> porCaminho = new LinkedHashMap<>();
+        Matcher m = LINK.matcher(html);
+        while (m.find() && porCaminho.size() < MAX_AREAS) {
+            String href = valor(m.group(), "href").orElse("").trim();
+            if (href.isEmpty() || href.startsWith("#")) continue;
+
+            URI alvo;
+            try {
+                alvo = base.resolve(href);
+            } catch (Exception e) {
+                continue;   // href torto (espaço, caractere ilegal) não derruba a análise
+            }
+            String esquema = alvo.getScheme();
+            if (esquema == null || !(esquema.equalsIgnoreCase("http") || esquema.equalsIgnoreCase("https"))) continue;
+            if (alvo.getHost() == null || !semWww(alvo.getHost()).equalsIgnoreCase(hostBase)) continue;
+
+            String caminho = ScanHistoryService.normalizarCaminho(alvo.getPath());
+            if (caminho.equals(caminhoAtual) || porCaminho.containsKey(caminho)) continue;
+
+            ImpactLevel nivel = nivelDoCaminho(caminho);
+            if (nivel == null) continue;
+
+            String porta = alvo.getPort() > 0 ? ":" + alvo.getPort() : "";
+            porCaminho.put(caminho, new SuggestedPath(nivel, caminho,
+                    esquema.toLowerCase(Locale.ROOT) + "://" + alvo.getHost() + porta + caminho));
+        }
+        return List.copyOf(porCaminho.values());
+    }
+
+    /**
+     * Por SEGMENTO, e não por "contém": senão "/carta-de-servicos" casaria com
+     * "cart" e "/contas-a-pagar" com "conta".
+     */
+    private static ImpactLevel nivelDoCaminho(String caminho) {
+        boolean conta = false;
+        for (String segmento : caminho.toLowerCase(Locale.ROOT).split("/")) {
+            if (CAMINHOS_PAGAMENTO.contains(segmento)) return ImpactLevel.PAYMENT;
+            if (CAMINHOS_CONTA.contains(segmento)) conta = true;
+        }
+        return conta ? ImpactLevel.ACCOUNT : null;
+    }
+
+    private static String semWww(String host) {
+        String h = host.toLowerCase(Locale.ROOT);
+        return h.startsWith("www.") ? h.substring(4) : h;
     }
 
     private static Optional<String> valor(String tag, String atributo) {

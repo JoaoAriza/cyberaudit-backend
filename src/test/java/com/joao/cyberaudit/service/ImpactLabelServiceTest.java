@@ -7,6 +7,7 @@ import com.joao.cyberaudit.model.ImpactSignal;
 import com.joao.cyberaudit.model.ImpactUndetermined;
 import com.joao.cyberaudit.model.JwtSecurityFinding;
 import com.joao.cyberaudit.model.ScanResult;
+import com.joao.cyberaudit.model.SuggestedPath;
 import com.joao.cyberaudit.model.TechFingerprintResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -252,13 +253,40 @@ class ImpactLabelServiceTest {
         assertNull(service.assess(r).managedPlatform());
     }
 
+    // ── Caminhos sugeridos ───────────────────────────────────────────────────
+
+    private final SuggestedPath login = new SuggestedPath(ImpactLevel.ACCOUNT, "/login", "https://loja.com.br/login");
+
+    @Test
+    @DisplayName("os links de conta da pagina viram sugestao e nao mexem no nivel dela")
+    void sugestoesNaoMexemNoNivel() {
+        FormSurfaceResult home = FormSurfaceResult.builder().analyzed(true)
+                .evidence(List.of()).linkedAreas(List.of(login)).build();
+
+        ImpactLabelService.Avaliacao a = service.assess(base("https://loja.com.br/").formSurface(home).build());
+
+        assertEquals(ImpactLevel.SHOWCASE, a.level());
+        assertEquals(List.of("/login"), a.suggestedPaths().stream().map(SuggestedPath::getPath).toList());
+    }
+
+    @Test
+    @DisplayName("pagina que nao foi lida nao sugere nada, mesmo que algum link tenha chegado")
+    void semLeituraSemSugestao() {
+        FormSurfaceResult naoLida = FormSurfaceResult.builder().analyzed(false)
+                .evidence(List.of()).linkedAreas(List.of(login)).build();
+        ScanResult r = base("https://loja.com.br/").httpStatus(403).formSurface(naoLida).build();
+        assertTrue(service.assess(r).suggestedPaths().isEmpty());
+    }
+
     // ── Gravacao ─────────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("rotular grava nivel, sinal, indicios e plataforma no resultado")
     void rotularGravaTudo() {
+        FormSurfaceResult contato = FormSurfaceResult.builder().analyzed(true).hasForm(true).collectsPii(true)
+                .evidence(List.of()).linkedAreas(List.of(login)).build();
         ScanResult r = base("https://loja.com.br/contato")
-                .formSurface(pagina(true, false, true, false))
+                .formSurface(contato)
                 .jwtSecurity(List.of(JwtSecurityFinding.builder().source("access_token").build()))
                 .techFingerprint(tech("VTEX")).build();
 
@@ -269,6 +297,7 @@ class ImpactLabelServiceTest {
         assertEquals(List.of("JWT:access_token"), texto(r.getImpactIndicators()));
         assertEquals("VTEX", r.getManagedPlatform());
         assertNull(r.getImpactUndetermined());
+        assertEquals(1, r.getSuggestedPaths().size());
     }
 
     @Test

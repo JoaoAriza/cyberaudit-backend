@@ -7,6 +7,7 @@ import com.joao.cyberaudit.model.ImpactSignal;
 import com.joao.cyberaudit.model.ImpactSource;
 import com.joao.cyberaudit.model.ImpactUndetermined;
 import com.joao.cyberaudit.model.ScanResult;
+import com.joao.cyberaudit.model.SuggestedPath;
 import com.joao.cyberaudit.model.TechFingerprintResult;
 import org.springframework.stereotype.Service;
 
@@ -46,7 +47,8 @@ public class ImpactLabelService {
      * plataforma que responde pelo checkout e — quando não há nível — o motivo.
      */
     public record Avaliacao(ImpactLevel level, List<ImpactSignal> signals, List<ImpactSignal> indicators,
-                            String managedPlatform, ImpactUndetermined undetermined) {}
+                            String managedPlatform, ImpactUndetermined undetermined,
+                            List<SuggestedPath> suggestedPaths) {}
 
     /**
      * Plataformas de loja HOSPEDADA (prefixo do nome detectado → nome exibido): o
@@ -100,27 +102,30 @@ public class ImpactLabelService {
         r.setImpactIndicators(a.indicators());
         r.setManagedPlatform(a.managedPlatform());
         r.setImpactUndetermined(a.undetermined());
+        r.setSuggestedPaths(a.suggestedPaths());
     }
 
     public Avaliacao assess(ScanResult r) {
-        if (r == null) return new Avaliacao(null, List.of(), List.of(), null, ImpactUndetermined.EMPTY);
+        if (r == null) return new Avaliacao(null, List.of(), List.of(), null, ImpactUndetermined.EMPTY, List.of());
 
         FormSurfaceResult form = r.getFormSurface();
         String plataforma = plataformaGerida(r.getTechFingerprint());
         List<ImpactSignal> indicios = indicios(r);
+        List<SuggestedPath> caminhos = form != null && form.isAnalyzed() && form.getLinkedAreas() != null
+                ? form.getLinkedAreas() : List.of();
 
         ImpactUndetermined motivo = motivoIndeterminado(r.getHttpStatus(), form);
-        if (motivo != null) return new Avaliacao(null, List.of(), indicios, plataforma, motivo);
+        if (motivo != null) return new Avaliacao(null, List.of(), indicios, plataforma, motivo, caminhos);
 
         ImpactLevel nivel;
         String marcador;
         if (form.isHasPaymentField())       { nivel = ImpactLevel.PAYMENT; marcador = "payment-field"; }
         else if (form.isHasPasswordField()) { nivel = ImpactLevel.ACCOUNT; marcador = "password-field"; }
         else if (form.isCollectsPii())      { nivel = ImpactLevel.CONTACT; marcador = "pii-field"; }
-        else return new Avaliacao(ImpactLevel.SHOWCASE, List.of(), indicios, plataforma, null);
+        else return new Avaliacao(ImpactLevel.SHOWCASE, List.of(), indicios, plataforma, null, caminhos);
 
         return new Avaliacao(nivel, List.of(new ImpactSignal(ImpactSource.FORM, marcador)),
-                indicios, plataforma, null);
+                indicios, plataforma, null, caminhos);
     }
 
     /**

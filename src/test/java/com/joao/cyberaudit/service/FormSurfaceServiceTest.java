@@ -4,6 +4,9 @@ import com.joao.cyberaudit.model.FormSurfaceResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -182,6 +185,63 @@ class FormSurfaceServiceTest {
         assertFalse(service.analyze(null).isAnalyzed());
         assertFalse(service.analyze("").isAnalyzed());
         assertTrue(service.analyze(null).getEvidence().isEmpty());
+    }
+
+    // ── Caminhos sugeridos ───────────────────────────────────────────────────
+
+    private List<String> areas(FormSurfaceResult r) {
+        return r.getLinkedAreas().stream().map(a -> a.getLevel() + " " + a.getUrl()).toList();
+    }
+
+    @Test
+    @DisplayName("links do mesmo dominio para conta e checkout viram sugestao, com URL absoluta")
+    void linksDeContaECheckout() {
+        FormSurfaceResult r = service.analyze("""
+                <a href="/minha-conta">Minha conta</a>
+                <a class="x" href="https://loja.com.br/checkout/?step=1">Finalizar</a>
+                <a href="https://outra-loja.com.br/login">Parceiro</a>
+                <a href="mailto:contato@loja.com.br">E-mail</a>
+                <a href="#login">Abrir modal</a>
+                <a data-href="/entrar" href="/produtos">Produtos</a>
+                <a href="/minha-conta/">Minha conta de novo</a>
+                """, "https://www.loja.com.br/");
+
+        assertEquals(List.of(
+                "ACCOUNT https://www.loja.com.br/minha-conta",
+                "PAYMENT https://loja.com.br/checkout"), areas(r));
+    }
+
+    @Test
+    @DisplayName("link para a propria pagina nao e sugestao")
+    void propriaPaginaNaoEntra() {
+        FormSurfaceResult r = service.analyze("<a href=\"/login\">Entrar</a>", "https://loja.com.br/login/");
+        assertTrue(r.getLinkedAreas().isEmpty());
+    }
+
+    @Test
+    @DisplayName("segmento parecido nao casa: /carta-de-servicos nao e /cart, /contas-a-pagar nao e /conta")
+    void segmentoParecidoNaoCasa() {
+        FormSurfaceResult r = service.analyze(
+                "<a href=\"/carta-de-servicos\">Carta</a><a href=\"/contas-a-pagar\">Boletos</a>",
+                "https://prefeitura.com.br/");
+        assertTrue(r.getLinkedAreas().isEmpty());
+    }
+
+    @Test
+    @DisplayName("no maximo quatro sugestoes, na ordem da pagina")
+    void tetoDeSugestoes() {
+        FormSurfaceResult r = service.analyze("""
+                <a href="/login">1</a><a href="/cadastro">2</a><a href="/account">3</a>
+                <a href="/cart">4</a><a href="/checkout">5</a><a href="/meus-pedidos">6</a>
+                """, "https://loja.com.br/");
+        assertEquals(FormSurfaceService.MAX_AREAS, r.getLinkedAreas().size());
+        assertEquals("/login", r.getLinkedAreas().get(0).getPath());
+    }
+
+    @Test
+    @DisplayName("sem a URL da pagina nao ha como resolver link: nenhuma sugestao")
+    void semUrlNaoSugere() {
+        assertTrue(service.analyze("<a href=\"/login\">Entrar</a>").getLinkedAreas().isEmpty());
     }
 
     @Test

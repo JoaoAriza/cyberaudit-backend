@@ -145,7 +145,7 @@ public class HttpFetchService {
         // desafio de bot é o do BLOQUEIO — às vezes um captcha com campo —, e ler os
         // campos dele diria o que o bloqueio coleta, não o que a página coleta.
         FormSurfaceResult superficie = (status >= 200 && status < 300)
-                ? formSurfaceService.analyze(body)
+                ? formSurfaceService.analyze(body, finalUrl)
                 : FormSurfaceResult.vazio();
 
         return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null, superficie);
