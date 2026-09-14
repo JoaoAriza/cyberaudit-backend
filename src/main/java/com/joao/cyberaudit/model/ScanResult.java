@@ -47,6 +47,18 @@ public class ScanResult {
      * frágil está a configuração, este rótulo diz o que está em jogo.
      */
     private ImpactLevel       impact;
+
+    /**
+     * O que sustenta o {@link #impact}. Guest/FREE recebem só a ORIGEM de cada sinal
+     * (o módulo), sem o detalhe — ver {@code ScanEntitlementService}.
+     */
+    private List<ImpactSignal> impactSignals;
+
+    /**
+     * Loja em plataforma hospedada (Shopify, VTEX, Nuvemshop): o checkout é dela,
+     * não do lojista. Não mexe no nível; é aviso. Nulo quando não há.
+     */
+    private String            managedPlatform;
     private boolean           dbErrorLeakageSuspected;
     private boolean           xssProbePerformed;
     private boolean           reflectedXssSuspected;

@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.ImpactSignal;
 import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.model.ScoreResult;
@@ -81,6 +82,12 @@ public class ScanEntitlementService {
         return result.toBuilder()
                 .score(strippedScore)
                 .detailsLocked(true)
+                // Rótulo de impacto: o nível e a ORIGEM de cada sinal ficam — é o que
+                // mostra ao FREE que a página é sensível e em qual módulo. O detalhe
+                // (qual cookie, qual campo) é o porquê, e sai. O formSurface sai
+                // inteiro: os booleanos dele são o mesmo porquê por outro caminho.
+                .impactSignals(semDetalhe(result.getImpactSignals()))
+                .formSurface(null)
                 .headers(null)
                 .openPorts(null)
                 .wafDetectionResult(null)
@@ -106,5 +113,13 @@ public class ScanEntitlementService {
                 .relatedHostHeaders(null)
                 .compliance(null)
                 .build();
+    }
+
+    /** Cópia nova de cada sinal: o original mora no cache compartilhado. */
+    private static List<ImpactSignal> semDetalhe(List<ImpactSignal> sinais) {
+        if (sinais == null) return null;
+        return sinais.stream()
+                .map(s -> new ImpactSignal(s.getSource(), null))
+                .toList();
     }
 }

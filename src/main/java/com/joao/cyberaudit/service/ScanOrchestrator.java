@@ -439,7 +439,7 @@ public class ScanOrchestrator {
                     .build();
 
             // Compliance gerado após montagem do passiveResult (necessita do objeto completo)
-            passiveResult.setImpact(impactLabelService.derive(passiveResult));
+            impactLabelService.rotular(passiveResult);
             passiveResult.setCompliance(complianceMappingService.generate(passiveResult));
 
             // ── Fase 3: ownership check ────────────────────────────────────────
@@ -620,7 +620,7 @@ public class ScanOrchestrator {
 
             // Depois do build: a derivação lê o resultado montado (caminho, cookies,
             // formulário, JWT). Não entra no score — é eixo paralelo.
-            result.setImpact(impactLabelService.derive(result));
+            impactLabelService.rotular(result);
             result.setCompliance(complianceMappingService.generate(result));
 
             scanCacheService.put(cacheKey, result);

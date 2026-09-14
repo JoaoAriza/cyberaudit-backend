@@ -5,12 +5,15 @@ import com.joao.cyberaudit.model.FormSurfaceResult;
 import com.joao.cyberaudit.model.ImpactLevel;
 import com.joao.cyberaudit.model.JwtSecurityFinding;
 import com.joao.cyberaudit.model.ScanResult;
+import com.joao.cyberaudit.model.TechFingerprintResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * O rotulo responde "o que ha para perder aqui", nao "quao fragil esta".
@@ -165,5 +168,93 @@ class ImpactLabelServiceTest {
     @DisplayName("resultado nulo nao quebra a derivacao")
     void nuloNaoQuebra() {
         assertEquals(ImpactLevel.SHOWCASE, service.derive(null));
+    }
+
+    // ── Plataforma de loja: aviso, nao nivel ─────────────────────────────────
+
+    private TechFingerprintResult tech(String cms, String... bibliotecas) {
+        return TechFingerprintResult.builder().cms(cms).libraries(List.of(bibliotecas)).build();
+    }
+
+    @Test
+    @DisplayName("home de loja Shopify sem formulario continua VITRINE, com aviso da plataforma")
+    void plataformaNaoEleva() {
+        // Antes: detectar a plataforma marcava PAYMENT em qualquer pagina da loja.
+        // A home nao coleta nada; o checkout e da plataforma, nao do lojista.
+        ScanResult.ScanResultBuilder home = base("https://loja.com.br/").techFingerprint(tech("Shopify"));
+
+        ImpactLabelService.Avaliacao a = service.assess(home.build());
+
+        assertEquals(ImpactLevel.SHOWCASE, a.level());
+        assertEquals("Shopify", a.managedPlatform());
+    }
+
+    @Test
+    @DisplayName("Tiendanube aparece com o nome brasileiro, Nuvemshop")
+    void tiendanubeViraNuvemshop() {
+        assertEquals("Nuvemshop", service.assess(
+                base("https://loja.com.br/").techFingerprint(tech("Tiendanube")).build()).managedPlatform());
+    }
+
+    @Test
+    @DisplayName("WooCommerce e instalado pelo lojista: sem aviso de plataforma")
+    void wooCommerceNaoEhGerida() {
+        ScanResult r = base("https://loja.com.br/").techFingerprint(tech("WordPress", "WooCommerce", "jQuery 3.6.0")).build();
+        assertNull(service.assess(r).managedPlatform());
+    }
+
+    // ── Sinais: o porque do nivel ────────────────────────────────────────────
+
+    private List<String> sinais(ImpactLabelService.Avaliacao a) {
+        return a.signals().stream().map(s -> s.getSource() + ":" + s.getDetail()).toList();
+    }
+
+    @Test
+    @DisplayName("checkout com cartao traz os dois motivos: o campo e o caminho")
+    void sinaisDoCheckout() {
+        ScanResult r = base("https://loja.com.br/checkout")
+                .formSurface(form(true, false, true, true)).build();
+
+        assertEquals(List.of("FORM:payment-field", "PATH:/checkout"), sinais(service.assess(r)));
+    }
+
+    @Test
+    @DisplayName("so os sinais do nivel vencedor: a senha do checkout nao entra no porque")
+    void soSinaisDoNivelVencedor() {
+        ScanResult r = base("https://loja.com.br/checkout")
+                .formSurface(form(true, true, true, false))
+                .cookieIssues(List.of(cookie("session"))).build();
+
+        assertEquals(List.of("PATH:/checkout"), sinais(service.assess(r)));
+    }
+
+    @Test
+    @DisplayName("conta: o cookie de sessao e nomeado, o de analytics nao")
+    void sinaisDeConta() {
+        ScanResult r = base("https://loja.com.br/")
+                .cookieIssues(List.of(cookie("_hjSession_1873402"), cookie("PHPSESSID"))).build();
+
+        assertEquals(List.of("COOKIES:PHPSESSID"), sinais(service.assess(r)));
+    }
+
+    @Test
+    @DisplayName("vitrine nao tem motivo para listar")
+    void vitrineSemSinais() {
+        assertTrue(service.assess(base("https://acabamentos-silva.com.br/").build()).signals().isEmpty());
+    }
+
+    @Test
+    @DisplayName("rotular grava nivel, sinais e plataforma no resultado")
+    void rotularGravaTudo() {
+        ScanResult r = base("https://loja.com.br/contato")
+                .formSurface(form(true, false, true, false))
+                .techFingerprint(tech("VTEX")).build();
+
+        service.rotular(r);
+
+        assertEquals(ImpactLevel.CONTACT, r.getImpact());
+        assertEquals(List.of("FORM:pii-field", "FORM:form"),
+                r.getImpactSignals().stream().map(s -> s.getSource() + ":" + s.getDetail()).toList());
+        assertEquals("VTEX", r.getManagedPlatform());
     }
 }

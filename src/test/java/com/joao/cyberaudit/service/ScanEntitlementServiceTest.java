@@ -3,6 +3,10 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
+import com.joao.cyberaudit.model.FormSurfaceResult;
+import com.joao.cyberaudit.model.ImpactLevel;
+import com.joao.cyberaudit.model.ImpactSignal;
+import com.joao.cyberaudit.model.ImpactSource;
 import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.model.RiskLevel;
 import com.joao.cyberaudit.model.Role;
@@ -130,6 +134,45 @@ class ScanEntitlementServiceTest {
 
         assertEquals("Risco de email spoofing", issue(original, "A").getTitle());
         assertNotNull(original.getScore().getNotes());
+    }
+
+    // ── Rótulo de impacto ────────────────────────────────────────────────────
+
+    private ScanResult resultadoComImpacto() {
+        return resultado().toBuilder()
+                .impact(ImpactLevel.PAYMENT)
+                .impactSignals(List.of(
+                        new ImpactSignal(ImpactSource.FORM, "payment-field"),
+                        new ImpactSignal(ImpactSource.COOKIES, "PHPSESSID")))
+                .formSurface(FormSurfaceResult.builder()
+                        .hasForm(true).hasPaymentField(true)
+                        .evidence(List.of("form", "payment-field")).build())
+                .managedPlatform("Nuvemshop")
+                .build();
+    }
+
+    @Test
+    @DisplayName("FREE vê o nível e EM QUAL módulo a página é sensível, mas não o porquê")
+    void freeVeOrigemSemDetalhe() {
+        ScanResult r = service().applyEntitlement(resultadoComImpacto(), usuario(Plan.FREE));
+
+        assertEquals(ImpactLevel.PAYMENT, r.getImpact());
+        assertEquals(List.of(ImpactSource.FORM, ImpactSource.COOKIES),
+                r.getImpactSignals().stream().map(ImpactSignal::getSource).toList());
+        assertTrue(r.getImpactSignals().stream().allMatch(s -> s.getDetail() == null),
+                "o detalhe do sinal é o porquê — não pode chegar ao FREE");
+        assertNull(r.getFormSurface(), "os booleanos do formulário entregam o mesmo porquê");
+        assertEquals("Nuvemshop", r.getManagedPlatform());
+    }
+
+    @Test
+    @DisplayName("tirar o detalhe do FREE não apaga o detalhe do cache compartilhado")
+    void detalheDoCacheIntacto() {
+        ScanResult original = resultadoComImpacto();
+        service().applyEntitlement(original, usuario(Plan.FREE));
+
+        assertEquals("payment-field", original.getImpactSignals().get(0).getDetail());
+        assertNotNull(original.getFormSurface());
     }
 
     // ── PRO ──────────────────────────────────────────────────────────────────
