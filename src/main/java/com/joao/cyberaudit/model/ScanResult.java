@@ -32,7 +32,21 @@ public class ScanResult {
     private boolean             serverVersionExposed;
 
     private boolean           activeMode;
+    /**
+     * Superfície de QUERY: a URL tem "?". É o que gateia os probes de XSS, SQLi e
+     * path traversal, que precisam de parâmetro para funcionar. Não confundir com
+     * "a página coleta dado" — para isso existe o {@link #formSurface}.
+     */
     private boolean           inputSurfaceDetected;
+
+    /** O que a página coleta do visitante, lido do HTML (formulário, senha, cartão). */
+    private FormSurfaceResult formSurface;
+
+    /**
+     * O que há para perder nesta página. Eixo separado do score: a nota diz quão
+     * frágil está a configuração, este rótulo diz o que está em jogo.
+     */
+    private ImpactLevel       impact;
     private boolean           dbErrorLeakageSuspected;
     private boolean           xssProbePerformed;
     private boolean           reflectedXssSuspected;

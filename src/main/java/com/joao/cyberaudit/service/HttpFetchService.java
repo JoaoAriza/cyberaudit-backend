@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.model.FormSurfaceResult;
 import com.joao.cyberaudit.model.HttpFetchResult;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +43,12 @@ public class HttpFetchService {
             "<meta[^>]+content\\s*=\\s*([\"'])(.*?)\\1[^>]*http-equiv\\s*=\\s*[\"']content-security-policy[\"']",
             Pattern.CASE_INSENSITIVE);
 
+    private final FormSurfaceService formSurfaceService;
+
+    public HttpFetchService(FormSurfaceService formSurfaceService) {
+        this.formSurfaceService = formSurfaceService;
+    }
+
     public HttpFetchResult fetchHeaders(String url) {
         try {
             URI uri = URI.create(url);
@@ -51,7 +58,7 @@ public class HttpFetchService {
 
         } catch (Exception e) {
             return new HttpFetchResult(0, url, Map.of(), List.of(),
-                    "Erro ao conectar: " + e.getMessage());
+                    "Erro ao conectar: " + e.getMessage(), FormSurfaceResult.vazio());
         }
     }
 
@@ -110,6 +117,11 @@ public class HttpFetchService {
         int status = resp.statusCode();
         String finalUrl = resp.uri().toString();
 
+        // Corpo lido UMA vez e reaproveitado: serve para a CSP via <meta> e para a
+        // superfície de formulário. Antes era usado só para a CSP e descartado —
+        // por isso o sinal de "a página coleta dado" sai sem requisição extra.
+        String body = resp.body();
+
         Map<String, String> normalized = new LinkedHashMap<>();
         resp.headers().map().forEach((k, v) -> {
             if (k == null || v == null || v.isEmpty()) return;
@@ -119,7 +131,7 @@ public class HttpFetchService {
         // CSP via <meta http-equiv>: se não veio como header, extrai do HTML (equivalente
         // funcional do header para a maioria das diretivas; SPAs entregam a CSP assim).
         if (!normalized.containsKey("content-security-policy")) {
-            String metaCsp = extractMetaCsp(resp.body());
+            String metaCsp = extractMetaCsp(body);
             if (metaCsp != null && !metaCsp.isBlank()) {
                 normalized.put("content-security-policy", metaCsp.trim());
             }
@@ -128,7 +140,8 @@ public class HttpFetchService {
         List<String> rawSetCookies = resp.headers().allValues("set-cookie");
         if (rawSetCookies == null) rawSetCookies = Collections.emptyList();
 
-        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null);
+        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null,
+                formSurfaceService.analyze(body));
     }
 
     /** Extrai a CSP de uma tag &lt;meta http-equiv="Content-Security-Policy"&gt; no HTML. */

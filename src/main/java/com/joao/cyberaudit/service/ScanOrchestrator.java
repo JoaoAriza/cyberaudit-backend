@@ -50,6 +50,7 @@ public class ScanOrchestrator {
     private final PathTraversalService           pathTraversalService;
     private final GraphQlIntrospectionService    graphQlIntrospectionService;
     private final JwtSecurityService             jwtSecurityService;
+    private final ImpactLabelService             impactLabelService;
     private final SsrfService                    ssrfService;
     private final HostHeaderService              hostHeaderService;
     private final SourceMapService               sourceMapService;
@@ -85,6 +86,7 @@ public class ScanOrchestrator {
             PathTraversalService pathTraversalService,
             GraphQlIntrospectionService graphQlIntrospectionService,
             JwtSecurityService jwtSecurityService,
+            ImpactLabelService impactLabelService,
             SsrfService ssrfService,
             HostHeaderService hostHeaderService,
             SourceMapService sourceMapService,
@@ -128,6 +130,7 @@ public class ScanOrchestrator {
         this.pathTraversalService      = pathTraversalService;
         this.graphQlIntrospectionService = graphQlIntrospectionService;
         this.jwtSecurityService          = jwtSecurityService;
+        this.impactLabelService          = impactLabelService;
         this.ssrfService                 = ssrfService;
         this.hostHeaderService           = hostHeaderService;
         this.sourceMapService            = sourceMapService;
@@ -403,6 +406,7 @@ public class ScanOrchestrator {
                     .sslInfo(sslInfo).tlsDetails(tlsDetails)
                     .headers(analyzedHeaders).serverVersionExposed(serverVersionExposed)
                     .activeMode(false).inputSurfaceDetected(inputSurfaceDetected)
+                    .formSurface(fetch.getFormSurface())
                     .dbErrorLeakageSuspected(false).xssProbePerformed(false)
                     .reflectedXssSuspected(false).openPorts(List.of())
                     .corsResult(null).cookieIssues(cookieIssues)
@@ -435,6 +439,7 @@ public class ScanOrchestrator {
                     .build();
 
             // Compliance gerado após montagem do passiveResult (necessita do objeto completo)
+            passiveResult.setImpact(impactLabelService.derive(passiveResult));
             passiveResult.setCompliance(complianceMappingService.generate(passiveResult));
 
             // ── Fase 3: ownership check ────────────────────────────────────────
@@ -579,6 +584,7 @@ public class ScanOrchestrator {
                     .sslInfo(sslInfo).tlsDetails(tlsDetails)
                     .headers(analyzedHeaders).serverVersionExposed(serverVersionExposed)
                     .activeMode(true).inputSurfaceDetected(inputSurfaceDetected)
+                    .formSurface(fetch.getFormSurface())
                     .dbErrorLeakageSuspected(dbErrorLeakage)
                     .xssProbePerformed(xssProbePerformed)
                     .reflectedXssSuspected(reflectedXssSuspected)
@@ -612,6 +618,9 @@ public class ScanOrchestrator {
                     .score(score)
                     .build();
 
+            // Depois do build: a derivação lê o resultado montado (caminho, cookies,
+            // formulário, JWT). Não entra no score — é eixo paralelo.
+            result.setImpact(impactLabelService.derive(result));
             result.setCompliance(complianceMappingService.generate(result));
 
             scanCacheService.put(cacheKey, result);
