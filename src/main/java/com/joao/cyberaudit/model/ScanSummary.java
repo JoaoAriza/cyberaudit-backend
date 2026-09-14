@@ -26,13 +26,20 @@ public class ScanSummary {
     private ScanOrigin origin;
 
     /**
+     * Nulo em scan anterior à coluna. Sem default, ao contrário do {@code origin}:
+     * "não medido" e "vitrine" são respostas diferentes.
+     */
+    private ImpactLevel impact;
+
+    /**
      * Construtor explícito, e não {@code @AllArgsConstructor}, por causa do
      * {@code origin}: registros gravados antes daquela coluna existir vêm com null.
      * O default mora aqui porque agora são dois caminhos de entrada, e a projeção
      * JPQL não tem onde aplicar o coalesce.
      */
     public ScanSummary(UUID id, String url, String host, LocalDateTime scannedAt,
-                       boolean activeMode, int score, RiskLevel riskLevel, ScanOrigin origin) {
+                       boolean activeMode, int score, RiskLevel riskLevel, ScanOrigin origin,
+                       ImpactLevel impact) {
         this.id         = id;
         this.url        = url;
         this.host       = host;
@@ -41,6 +48,7 @@ public class ScanSummary {
         this.score      = score;
         this.riskLevel  = riskLevel;
         this.origin     = origin != null ? origin : ScanOrigin.MANUAL;
+        this.impact     = impact;
     }
 
     public static ScanSummary from(ScanRecord record) {
@@ -52,7 +60,8 @@ public class ScanSummary {
                 record.isActiveMode(),
                 record.getScore(),
                 record.getRiskLevel(),
-                record.getOrigin()
+                record.getOrigin(),
+                record.getImpact()
         );
     }
 }

@@ -58,6 +58,7 @@ public class ScanHistoryService {
                     .activeMode(result.isActiveMode())
                     .score(result.getScore().getScore())
                     .riskLevel(result.getScore().getRiskLevel())
+                    .impact(result.getImpact())
                     .resultJson(json)
                     .account(account)
                     .origin(origin)

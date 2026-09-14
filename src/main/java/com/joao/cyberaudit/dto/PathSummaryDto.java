@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.dto;
 
+import com.joao.cyberaudit.model.ImpactLevel;
 import com.joao.cyberaudit.model.RiskLevel;
 import com.joao.cyberaudit.model.ScanOrigin;
 import com.joao.cyberaudit.model.ScanSummary;
@@ -27,10 +28,13 @@ public record PathSummaryDto(
         boolean activeMode,
         int score,
         RiskLevel riskLevel,
-        ScanOrigin origin
+        ScanOrigin origin,
+        /** O que há para perder NESTA página — a home e o /checkout divergem aqui. */
+        ImpactLevel impact
 ) {
     public static PathSummaryDto from(ScanSummary s, String path) {
         return new PathSummaryDto(s.getId(), s.getHost(), path, s.getUrl(),
-                s.getScannedAt(), s.isActiveMode(), s.getScore(), s.getRiskLevel(), s.getOrigin());
+                s.getScannedAt(), s.isActiveMode(), s.getScore(), s.getRiskLevel(), s.getOrigin(),
+                s.getImpact());
     }
 }

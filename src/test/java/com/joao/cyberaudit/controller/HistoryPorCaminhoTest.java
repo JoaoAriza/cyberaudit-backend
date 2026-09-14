@@ -39,7 +39,7 @@ class HistoryPorCaminhoTest {
 
     private ScanSummary scan(String url, int score) {
         return new ScanSummary(UUID.randomUUID(), url, "sgsistemas.com.br",
-                LocalDateTime.now(), true, score, RiskLevel.CRITICAL, ScanOrigin.MANUAL);
+                LocalDateTime.now(), true, score, RiskLevel.CRITICAL, ScanOrigin.MANUAL, null);
     }
 
     private final List<ScanSummary> misturados = List.of(

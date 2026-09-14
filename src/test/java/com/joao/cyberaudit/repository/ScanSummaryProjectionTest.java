@@ -2,6 +2,7 @@ package com.joao.cyberaudit.repository;
 
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
+import com.joao.cyberaudit.model.ImpactLevel;
 import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.model.RiskLevel;
 import com.joao.cyberaudit.model.ScanOrigin;
@@ -21,6 +22,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -157,6 +159,30 @@ class ScanSummaryProjectionTest {
         assertEquals(ScanOrigin.MANUAL, s.getOrigin());
     }
 
+    // ── Rótulo de impacto ────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("o impacto gravado chega na projeção — Caminhos e Visão Geral dependem dele")
+    void impactoChegaNaProjecao() {
+        persiste("loja.test", conta, 30, ScanOrigin.MANUAL, false, horasAtras(1), ImpactLevel.PAYMENT);
+        em.flush();
+        em.clear();
+
+        assertEquals(ImpactLevel.PAYMENT, repository.findSummariesByAccountAndHost(
+                conta, "loja.test", PAGINA).get(0).getImpact());
+        assertTrue(repository.findLatestSummaryPerHostByAccount(conta, PAGINA).stream()
+                .anyMatch(s -> s.getHost().equals("loja.test") && s.getImpact() == ImpactLevel.PAYMENT));
+    }
+
+    @Test
+    @DisplayName("scan anterior à coluna fica sem impacto, e não vira VITRINE")
+    void impactoLegadoFicaNulo() {
+        // Default aqui seria mentira: laudo antigo não mediu formulário, então
+        // afirmar SHOWCASE rebaixaria um checkout só por ter sido escaneado cedo.
+        assertNull(repository.findSummariesByAccountAndHost(
+                conta, "outro.test", PAGINA).get(0).getImpact());
+    }
+
     // ── Semeadura ────────────────────────────────────────────────────────────
 
     private LocalDateTime horasAtras(int horas) {
@@ -175,6 +201,11 @@ class ScanSummaryProjectionTest {
 
     private void persiste(String host, Account account, int score, ScanOrigin origin,
                           boolean activeMode, LocalDateTime quando) {
+        persiste(host, account, score, origin, activeMode, quando, null);
+    }
+
+    private void persiste(String host, Account account, int score, ScanOrigin origin,
+                          boolean activeMode, LocalDateTime quando, ImpactLevel impact) {
         em.persist(ScanRecord.builder()
                 .url("https://" + host)
                 .host(host)
@@ -182,6 +213,7 @@ class ScanSummaryProjectionTest {
                 .activeMode(activeMode)
                 .score(score)
                 .riskLevel(RiskLevel.MEDIUM)
+                .impact(impact)
                 // O blob que a projeção existe para não carregar.
                 .resultJson("{\"url\":\"https://" + host + "\",\"filler\":\""
                         + "x".repeat(2000) + "\"}")

@@ -38,6 +38,20 @@ public class ScanRecord {
     @Enumerated(EnumType.STRING)
     private RiskLevel riskLevel;
 
+    /**
+     * Rótulo de impacto da página, copiado do laudo para a listagem não precisar
+     * abrir o {@code result_json}.
+     *
+     * Nulo nos scans gravados antes da coluna — e continua nulo: a tela mostra "sem
+     * rótulo" em vez de afirmar VITRINE sobre um laudo que não mediu formulário.
+     *
+     * {@code columnDefinition} explícito para o Hibernate não gerar CHECK com a
+     * lista do enum, que o {@code ddl-auto} nunca atualiza (ver audit_logs.action).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "VARCHAR(20)")
+    private ImpactLevel impact;
+
     @Column(columnDefinition = "TEXT", nullable = false)
     private String resultJson;
 

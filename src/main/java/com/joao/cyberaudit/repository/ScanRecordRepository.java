@@ -34,7 +34,7 @@ public interface ScanRecordRepository extends JpaRepository<ScanRecord, UUID> {
     String SUMMARY = """
             SELECT new com.joao.cyberaudit.model.ScanSummary(
                        r.id, r.url, r.host, r.scannedAt,
-                       r.activeMode, r.score, r.riskLevel, r.origin)
+                       r.activeMode, r.score, r.riskLevel, r.origin, r.impact)
             FROM ScanRecord r
             """;
 
