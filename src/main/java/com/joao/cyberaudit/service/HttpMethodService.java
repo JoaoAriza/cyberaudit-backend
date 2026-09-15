@@ -32,6 +32,24 @@ public class HttpMethodService {
             "CONNECT", new MethodRisk("MEDIUM",   "METHOD_CONNECT")
     );
 
+    /**
+     * Método de controle: um token de método que servidor nenhum implementa.
+     *
+     * É o coração da defesa contra falso positivo. Se o servidor "aceita" ESTE
+     * método — que não existe —, ele responde igual a QUALQUER método: é um
+     * front-controller catch-all (típico de PHP, que serve o index para tudo) ou um
+     * edge/WAF que engole a requisição. Num servidor desses, PUT ou DELETE
+     * "aceitos" não provam nada, porque um método inventado é aceito do mesmo jeito.
+     *
+     * Caso real que motivou (svninvestimentos.com.br): o método inventado respondia
+     * 200/202 exatamente como PUT e DELETE, e o laudo reportava upload e remoção
+     * arbitrários que não existiam.
+     *
+     * Uppercase e sem colidir com método real. Não pode ser CONNECT: o HttpClient
+     * do JDK recusa CONNECT em {@code method()} e a sonda cairia no catch.
+     */
+    static final String CONTROL_METHOD = "XCYBERAUDIT";
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -44,71 +62,101 @@ public class HttpMethodService {
     }
 
     /**
-     * Testa cada método perigoso contra a URL alvo.
-     * Retorna apenas os que foram aceitos (2xx ou 4xx que não seja 405/501).
+     * Testa cada método perigoso contra a URL alvo, mas só depois de confirmar que o
+     * servidor DISCRIMINA por método — ver {@link #CONTROL_METHOD}.
      *
-     * 405 = Method Not Allowed = servidor rejeita corretamente
-     * 501 = Not Implemented    = servidor rejeita corretamente
-     * Qualquer outro status = método pode estar habilitado
+     * Se a sonda de controle é aceita, o servidor responde uniforme a tudo e nenhum
+     * achado de método é confiável: devolve lista vazia. Se a sonda de controle
+     * falha na rede (null), segue no melhor esforço: só suprime quando há PROVA de
+     * catch-all, nunca por um erro transitório que esconderia achado real.
      */
     public List<HttpMethodFinding> scan(String url) {
-        List<HttpMethodFinding> findings = new ArrayList<>();
-
-        for (Map.Entry<String, MethodRisk> entry : METHOD_RISKS.entrySet()) {
-            String     method = entry.getKey();
-            MethodRisk risk   = entry.getValue();
-
-            HttpMethodFinding finding = probe(url, method, risk);
-            if (finding != null) findings.add(finding);
+        Probe control = send(url, CONTROL_METHOD);
+        if (control != null && ehCatchAll(control)) {
+            return List.of();
         }
 
+        List<HttpMethodFinding> findings = new ArrayList<>();
+        for (Map.Entry<String, MethodRisk> entry : METHOD_RISKS.entrySet()) {
+            HttpMethodFinding finding = classify(url, entry.getKey(), entry.getValue());
+            if (finding != null) findings.add(finding);
+        }
         return findings;
     }
 
-    private HttpMethodFinding probe(String url, String method, MethodRisk risk) {
+    /**
+     * O servidor aceitou um método que não existe — logo aceita qualquer um.
+     *
+     * "Aceitou" é o MESMO critério que marcaria um método perigoso como habilitado:
+     * nem rejeição clara nem exigência de autenticação. Se o método inventado leva
+     * 401/403, o servidor discrimina (ou bloqueia tudo, e aí PUT/DELETE já caem no
+     * mesmo 401/403 e não são reportados) — não é o catch-all silencioso que engana.
+     */
+    private boolean ehCatchAll(Probe control) {
+        return !rejeitado(control) && !requerAuth(control.status());
+    }
+
+    private HttpMethodFinding classify(String url, String method, MethodRisk risk) {
+        Probe p = send(url, method);
+        if (p == null) return null;
+
+        // Método explicitamente rejeitado, rota inexistente, redirect ou erro: não
+        // confirma nada.
+        if (rejeitado(p)) return null;
+
+        boolean requiresAuth = requerAuth(p.status());
+
+        // PUT/DELETE atrás de autenticação = API REST bem-comportada. Só interessa
+        // se acessível sem auth, ou se for TRACE (o XST vale mesmo com auth).
+        if (requiresAuth && !"TRACE".equals(method)) return null;
+
+        String severity = requiresAuth ? "LOW" : risk.severity();
+        return new HttpMethodFinding(method, p.status(), true, severity,
+                describeRisk(risk.descriptionKey(), requiresAuth));
+    }
+
+    /**
+     * true quando o status indica que o servidor NÃO habilita o método — rejeição
+     * clara ou resposta inconclusiva.
+     *
+     * 405/501: rejeição explícita. 404/410: rota não existe. 400: requisição
+     * recusada. 3xx: redirect. 5xx: erro. 200 + HTML: o servidor devolveu a própria
+     * página padrão, não processou o método.
+     */
+    private boolean rejeitado(Probe p) {
+        int status = p.status();
+        if (status == 405 || status == 501) return true;
+        if (status == 404 || status == 410) return true;
+        if (status == 400) return true;
+        if (status >= 300 && status < 400) return true;
+        if (status >= 500) return true;
+        return status == 200 && p.contentType().contains("text/html");
+    }
+
+    private boolean requerAuth(int status) {
+        return status == 401 || status == 403;
+    }
+
+    /** Uma resposta de sonda, reduzida ao que a decisão usa. */
+    record Probe(int status, String contentType) {}
+
+    /**
+     * Manda um método contra a URL e devolve status + content-type. Null em falha de
+     * rede ou método recusado pelo próprio HttpClient.
+     *
+     * Visível ao teste: é o único ponto de rede do serviço, e sobrescrevê-lo permite
+     * exercitar toda a lógica de catch-all e classificação sem servidor real.
+     */
+    Probe send(String url, String method) {
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .method(method, HttpRequest.BodyPublishers.noBody())
                     .timeout(Duration.ofSeconds(6))
-                    .header("User-Agent", ScannerHttp.USER_AGENT);
-
-            HttpResponse<Void> resp = client.send(
-                    builder.build(), HttpResponse.BodyHandlers.discarding());
-            int status = resp.statusCode();
-
-            // Método explicitamente rejeitado — OK
-            if (status == 405 || status == 501) return null;
-
-            // Rota não encontrada — não confirma método habilitado
-            if (status == 404 || status == 410) return null;
-
-            // Bad Request — servidor rejeitou, não confirma método habilitado
-            if (status == 400) return null;
-
-            // Redirect — não conclusivo
-            if (status >= 300 && status < 400) return null;
-
-            // Erro de servidor — não conclusivo
-            if (status >= 500) return null;
-
-            if (status == 200) {
-                String contentType = resp.headers()
-                        .firstValue("content-type").orElse("").toLowerCase();
-                // 200 + HTML = site retornou sua página padrão, não processou o método
-                if (contentType.contains("text/html")) return null;
-            }
-
-            boolean requiresAuth = (status == 401 || status == 403);
-
-            // PUT/DELETE com autenticação = comportamento correto de API REST.
-            // Só é relevante se acessível sem auth (200/204) ou com auth mas TRACE (sempre perigoso).
-            if (requiresAuth && !"TRACE".equals(method)) return null;
-
-            String severity = requiresAuth ? "LOW" : risk.severity();
-
-            return new HttpMethodFinding(method, status, true, severity,
-                    describeRisk(risk.descriptionKey(), requiresAuth));
-
+                    .header("User-Agent", ScannerHttp.USER_AGENT)
+                    .build();
+            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
+            String contentType = resp.headers().firstValue("content-type").orElse("").toLowerCase();
+            return new Probe(resp.statusCode(), contentType);
         } catch (Exception e) {
             return null;
         }
