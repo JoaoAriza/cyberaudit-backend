@@ -14,8 +14,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Cliente REST da API de Assinaturas (preapproval) do Mercado Pago.
@@ -125,8 +127,35 @@ public class MercadoPagoService {
         JsonNode json = send("POST", "/preapproval", body);
         return new PreapprovalResult(
                 text(json, "id"),
-                text(json, "init_point"),
+                checkoutUtilizavel(text(json, "init_point")),
                 text(json, "status"));
+    }
+
+    /**
+     * Remove o parâmetro {@code activation} do init_point de CRIAÇÃO.
+     *
+     * A resposta de POST /preapproval devolve um init_point com {@code &activation=true}
+     * — e essa URL responde "esta página não existe". A MESMA URL sem o parâmetro (que
+     * é o que GET /preapproval/{id} devolve) abre o checkout normalmente, tanto para
+     * visitante quanto para quem está logado no Mercado Pago. É inconsistência do MP
+     * entre criar e consultar; aqui só descartamos o parâmetro que quebra, preservando
+     * o domínio e o caminho que o próprio MP montou.
+     */
+    static String checkoutUtilizavel(String initPoint) {
+        if (initPoint == null) return null;
+        int q = initPoint.indexOf('?');
+        if (q < 0) return initPoint;
+
+        String base = initPoint.substring(0, q);
+        String novaQuery = Arrays.stream(initPoint.substring(q + 1).split("&"))
+                .filter(p -> !p.regionMatches(true, 0, "activation=", 0, "activation=".length()))
+                .collect(Collectors.joining("&"));
+
+        if (novaQuery.length() != initPoint.length() - q - 1) {
+            System.out.println("[MercadoPago] init_point de criação trazia 'activation'; "
+                    + "removido para o checkout abrir.");
+        }
+        return novaQuery.isEmpty() ? base : base + "?" + novaQuery;
     }
 
     public PreapprovalInfo getPreapproval(String id) {
