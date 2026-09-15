@@ -157,10 +157,24 @@ class HttpMethodControlProbeTest {
     @DisplayName("servidor bem configurado (405 em tudo) nao reporta nada")
     void servidorLimpo() {
         var respostas = new HashMap<String, int[]>();
-        for (String m : List.of(HttpMethodService.CONTROL_METHOD, "PUT", "DELETE", "TRACE", "CONNECT")) {
+        for (String m : List.of(HttpMethodService.CONTROL_METHOD, "PUT", "DELETE", "TRACE")) {
             respostas.put(m, new int[]{405});
         }
 
         assertTrue(com(respostas).scan("https://seguro.exemplo.com/").isEmpty());
+    }
+
+    @Test
+    @DisplayName("CONNECT nao é testado, ainda que o servidor o 'aceitasse'")
+    void connectNaoEhTestado() {
+        // O JDK recusa CONNECT em method(); e CONNECT contra um servidor de origem
+        // não prova proxy aberto. Saiu do conjunto testado — esta trava impede que
+        // volte por descuido. `send` é de mentira aqui, então o teste afere a
+        // POLÍTICA (não está no mapa), não a recusa do JDK.
+        var r = com(Map.of(
+                HttpMethodService.CONTROL_METHOD, new int[]{405},  // servidor discrimina
+                "CONNECT", new int[]{200}));                        // mesmo "aceitando"
+
+        assertTrue(acha(r.scan("https://alvo.exemplo.com/"), "CONNECT").isEmpty());
     }
 }

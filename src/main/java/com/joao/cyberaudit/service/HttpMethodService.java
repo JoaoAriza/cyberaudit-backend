@@ -21,6 +21,16 @@ public class HttpMethodService {
      * GET, POST, HEAD são normais — não testados. OPTIONS é coberto pelo CORS probe.
      * PATCH não é testado: é método REST padrão (RFC 5789), não vulnerabilidade.
      *
+     * CONNECT também não é testado, por dois motivos que se somam:
+     *   1. o {@link HttpClient} do JDK recusa CONNECT em {@code method()} com
+     *      {@code IllegalArgumentException}, então a sonda sempre caía no catch e o
+     *      método nunca era de fato testado — reportar risco dele era buraco
+     *      silencioso no laudo;
+     *   2. mesmo se desse para enviar, CONNECT contra um servidor de ORIGEM
+     *      (nginx/Apache/PHP) só retorna 405/501. O risco de CONNECT é o proxy
+     *      aberto, e isso se testa contra um PROXY, tentando abrir um túnel — não
+     *      contra o site. É sonda separada, se um dia fizer sentido.
+     *
      * O mapa guarda a CHAVE do texto, não o texto. Como é {@code static}, resolver
      * aqui congelaria o idioma no carregamento da classe — o primeiro scan decidiria
      * o idioma de todos os outros.
@@ -28,8 +38,7 @@ public class HttpMethodService {
     private static final Map<String, MethodRisk> METHOD_RISKS = Map.of(
             "TRACE",   new MethodRisk("CRITICAL", "METHOD_TRACE"),
             "PUT",     new MethodRisk("HIGH",     "METHOD_PUT"),
-            "DELETE",  new MethodRisk("HIGH",     "METHOD_DELETE"),
-            "CONNECT", new MethodRisk("MEDIUM",   "METHOD_CONNECT")
+            "DELETE",  new MethodRisk("HIGH",     "METHOD_DELETE")
     );
 
     /**
@@ -45,8 +54,9 @@ public class HttpMethodService {
      * 200/202 exatamente como PUT e DELETE, e o laudo reportava upload e remoção
      * arbitrários que não existiam.
      *
-     * Uppercase e sem colidir com método real. Não pode ser CONNECT: o HttpClient
-     * do JDK recusa CONNECT em {@code method()} e a sonda cairia no catch.
+     * Uppercase e sem colidir com método real. Não pode ser CONNECT — o
+     * {@link HttpClient} do JDK o recusa em {@code method()}, a mesma razão pela qual
+     * CONNECT saiu do conjunto testado (ver {@link #METHOD_RISKS}).
      */
     static final String CONTROL_METHOD = "XCYBERAUDIT";
 
