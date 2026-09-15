@@ -649,11 +649,32 @@ public class PdfReportService {
         secHead(r.getAnalyzedHost() != null && !r.getAnalyzedHost().isBlank()
                 ? "SECURITY HEADERS  —  " + r.getAnalyzedHost()
                 : "SECURITY HEADERS");
+        platformHeaderNote(r);
         kv("Server version exposed", o(r.isServerVersionExposed()), r.isServerVersionExposed() ? CRIT : OK);
         for (Map.Entry<String, String> e : r.getHeaders().entrySet()) {
             kv(e.getKey(), e.getValue());
         }
         cy -= 6;
+    }
+
+    /**
+     * Nota, no laudo do cliente, de que parte dos cabeçalhos é servida pela
+     * plataforma de loja (VTEX, Shopify, Nuvemshop…) e pode estar fora do controle
+     * do lojista. Só aparece quando há cabeçalho pendente — sem pendência não há de
+     * quem "dividir a responsabilidade". Custo de layout zero no cenário de teste,
+     * que não seta managedPlatform.
+     */
+    private void platformHeaderNote(ScanResult r) throws IOException {
+        String plat = r.getManagedPlatform();
+        if (plat == null || plat.isBlank()) return;
+        boolean anyPending = r.getHeaders() != null && r.getHeaders().values().stream()
+                .anyMatch(v -> v != null && !v.startsWith("OK"));
+        if (!anyPending) return;
+
+        String note = "Served on the " + plat + " platform - some of these headers are the "
+                + "platform's responsibility and may be outside the store owner's control.";
+        need(2 * LH);
+        cy = wrapTxt(note, LX, cy, normal, 8, MUTED, CIW) - 6;
     }
 
     private void relatedHostsSection(ScanResult r) throws IOException {

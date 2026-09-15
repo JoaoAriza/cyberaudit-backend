@@ -47,6 +47,25 @@ class PdfImpactoTest {
         assertFalse(pagina.contains("no data at risk"), pagina);
     }
 
+    // ── Responsabilidade da plataforma nos cabecalhos ────────────────────────
+
+    @Test
+    @DisplayName("loja em plataforma anota que os cabecalhos sao responsabilidade dela")
+    void notaDePlataformaNosHeaders() throws Exception {
+        String texto = todasAsPaginas(Cenarios.completo().toBuilder().managedPlatform("VTEX").build());
+
+        assertTrue(texto.contains("VTEX"), texto);
+        assertTrue(texto.contains("responsibility"), texto);
+    }
+
+    @Test
+    @DisplayName("sem plataforma detectada, nenhuma nota de responsabilidade")
+    void semPlataformaSemNota() throws Exception {
+        String texto = todasAsPaginas(Cenarios.completo().toBuilder().managedPlatform(null).build());
+
+        assertFalse(texto.contains("responsibility"), texto);
+    }
+
     private String primeiraPagina(ScanResult r) throws Exception {
         byte[] pdf = new PdfReportService().generatePdf(r, "");
         try (PDDocument doc = PDDocument.load(pdf)) {
@@ -54,6 +73,13 @@ class PdfImpactoTest {
             st.setStartPage(1);
             st.setEndPage(1);
             return st.getText(doc);
+        }
+    }
+
+    private String todasAsPaginas(ScanResult r) throws Exception {
+        byte[] pdf = new PdfReportService().generatePdf(r, "");
+        try (PDDocument doc = PDDocument.load(pdf)) {
+            return new PDFTextStripper().getText(doc);
         }
     }
 }
