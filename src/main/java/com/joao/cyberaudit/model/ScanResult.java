@@ -85,6 +85,15 @@ public class ScanResult {
     private boolean           xssProbePerformed;
     private boolean           reflectedXssSuspected;
     private List<PortFinding> openPorts;
+
+    /**
+     * As portas abertas têm cara de hospedagem compartilhada (cPanel): FTP, e-mail e
+     * DNS são do servidor da hospedagem, fora do controle do dono do site. O laudo
+     * anota isso, e o score não pune o pacote padrão da hospedagem — só o que é risco
+     * real mesmo assim (FTP em texto plano, TELNET, banco exposto).
+     */
+    private boolean sharedHostingPorts;
+
     private WafDetectionResult wafDetectionResult;
 
     private CorsResult          corsResult;

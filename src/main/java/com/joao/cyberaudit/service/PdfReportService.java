@@ -894,6 +894,12 @@ public class PdfReportService {
 
     private void portsSection(ScanResult r) throws IOException {
         secHead("NETWORK EXPOSURE  —  " + r.getOpenPorts().size() + " open port(s)");
+        if (r.isSharedHostingPorts()) {
+            String note = "Ports typical of shared hosting (cPanel) - FTP, mail and DNS are the "
+                    + "hosting server's services, usually outside the site owner's control. Focus "
+                    + "on the real risks, such as plaintext FTP.";
+            cy = wrapTxt(note, LX, cy, normal, 8, MUTED, CIW) - 6;
+        }
         for (PortFinding p : r.getOpenPorts()) {
             float[] sc = sevColor(p.getSeverity());
             final float bw = 58f;

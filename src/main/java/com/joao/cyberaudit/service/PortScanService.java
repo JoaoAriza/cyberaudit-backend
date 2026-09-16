@@ -56,6 +56,31 @@ public class PortScanService {
             1433, 1521, 3306, 5432, 6379, 9200, 21, 23, 25, 110, 143, 465, 587
     );
 
+    /**
+     * Portas de e-mail de consumidor. Duas ou mais abertas juntas é a assinatura de
+     * hospedagem compartilhada / cPanel — nenhum servidor de aplicação dedicado sobe
+     * POP3/IMAP. Ver {@link #pareceHospedagemCompartilhada}.
+     */
+    private static final Set<Integer> PORTAS_EMAIL_CONSUMIDOR = Set.of(110, 143, 993, 995);
+
+    /**
+     * O conjunto de portas tem cara de hospedagem compartilhada (cPanel): FTP,
+     * e-mail e DNS servidos pela hospedagem, não pelo site.
+     *
+     * Sinal: duas ou mais portas de e-mail de consumidor abertas. É o mais limpo —
+     * uma loja de carro não roda servidor de e-mail próprio; quem roda é o painel de
+     * hospedagem que empacota tudo. Serve para o laudo dizer que essas portas são do
+     * servidor da hospedagem — fora do controle do dono do site — e para o score não
+     * punir o dono por serviço que ele não administra.
+     */
+    public static boolean pareceHospedagemCompartilhada(List<PortFinding> openPorts) {
+        if (openPorts == null) return false;
+        long mail = openPorts.stream()
+                .filter(p -> p != null && PORTAS_EMAIL_CONSUMIDOR.contains(p.getPort()))
+                .count();
+        return mail >= 2;
+    }
+
     public List<PortFinding> scanCommonPorts(String host) {
         // Alvo hospedado na infraestrutura compartilhada do nosso provedor: as
         // portas abertas seriam da borda dele, não do cliente. Sondá-las é

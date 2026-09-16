@@ -66,6 +66,22 @@ class PdfImpactoTest {
         assertFalse(texto.contains("responsibility"), texto);
     }
 
+    // ── Hospedagem compartilhada nas portas ──────────────────────────────────
+
+    @Test
+    @DisplayName("hospedagem compartilhada anota que as portas sao do servidor da hospedagem")
+    void notaDeHospedagemNasPortas() throws Exception {
+        String texto = todasAsPaginas(Cenarios.completo().toBuilder().sharedHostingPorts(true).build());
+        assertTrue(texto.contains("cPanel"), texto);
+    }
+
+    @Test
+    @DisplayName("sem hospedagem compartilhada, nenhuma nota nas portas")
+    void semHospedagemSemNota() throws Exception {
+        String texto = todasAsPaginas(Cenarios.completo().toBuilder().sharedHostingPorts(false).build());
+        assertFalse(texto.contains("cPanel"), texto);
+    }
+
     private String primeiraPagina(ScanResult r) throws Exception {
         byte[] pdf = new PdfReportService().generatePdf(r, "");
         try (PDDocument doc = PDDocument.load(pdf)) {

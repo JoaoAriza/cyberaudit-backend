@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,6 +31,49 @@ public class ScoreService {
     private SecurityIssue achado(String chave, String severidade, Object... argsTitulo) {
         return new SecurityIssue(chave, catalog.title(chave, argsTitulo), severidade,
                 catalog.impact(chave), catalog.recommendation(chave));
+    }
+
+    /**
+     * Pacote padrão de um servidor de hospedagem gerenciada (cPanel): SSH, DNS e a
+     * pilha de e-mail. Em hospedagem compartilhada, essas portas são serviço normal
+     * do provedor, não risco que o dono do site escolheu — então não descontam.
+     * FTP em texto plano (21), TELNET (23) e bancos ficam de fora deste conjunto de
+     * propósito: são risco real mesmo na hospedagem e continuam penalizando.
+     */
+    private static final Set<Integer> PORTAS_GERIDAS_HOSPEDAGEM =
+            Set.of(22, 25, 53, 110, 143, 465, 587, 993, 995);
+
+    /** Penalidade das portas e quantas contaram — para o desconto e a nota. */
+    record PortScore(int penalty, int riskyCount) {}
+
+    /**
+     * Desconto por portas abertas.
+     *
+     * 80/443 nunca contam — servir HTTP/HTTPS é o esperado. Em hospedagem
+     * compartilhada detectada, o pacote gerenciado ({@link #PORTAS_GERIDAS_HOSPEDAGEM})
+     * também não conta: são serviços do servidor da hospedagem, fora do controle do
+     * dono. O que sobra — FTP em texto plano, TELNET, banco exposto — penaliza igual,
+     * porque é risco real mesmo assim. Teto de 30.
+     *
+     * Visível ao teste: {@code calculate} tem argumentos demais para exercitar só as
+     * portas; aqui a regra fica isolada e verificável.
+     */
+    static PortScore penalidadePortas(List<PortFinding> openPorts) {
+        boolean hospedagem = PortScanService.pareceHospedagemCompartilhada(openPorts);
+        int penalty = 0, risky = 0;
+        for (PortFinding p : openPorts) {
+            int porta = p.getPort();
+            if (porta == 80 || porta == 443) continue;
+            if (hospedagem && PORTAS_GERIDAS_HOSPEDAGEM.contains(porta)) continue;
+            penalty += switch (p.getSeverity()) {
+                case "CRITICAL" -> 15;
+                case "HIGH"     -> 10;
+                case "MEDIUM"   -> 5;
+                default         -> 2;
+            };
+            risky++;
+        }
+        return new PortScore(Math.min(penalty, 30), risky);
     }
 
     public ScoreResult calculate(
@@ -213,24 +257,10 @@ public class ScoreService {
         // 8. Port scan (ativo)
         // ═══════════════════════════════════════════
         if (openPorts != null && !openPorts.isEmpty() && activeMode) {
-            int portPenalty = 0;
-            int riskyCount  = 0;
-            for (PortFinding p : openPorts) {
-                // 80/443 abertos são esperados (servir HTTP/HTTPS) — não penalizar.
-                if (p.getPort() == 80 || p.getPort() == 443) continue;
-                int penalty = switch (p.getSeverity()) {
-                    case "CRITICAL" -> 15;
-                    case "HIGH" -> 10;
-                    case "MEDIUM" -> 5;
-                    default -> 2;
-                };
-                portPenalty += penalty;
-                riskyCount++;
-            }
-            if (portPenalty > 0) {
-                portPenalty = Math.min(portPenalty, 30);
-                score -= portPenalty;
-                notes.add(catalog.note("RISKY_PORTS", riskyCount, portPenalty));
+            PortScore ps = penalidadePortas(openPorts);
+            if (ps.penalty() > 0) {
+                score -= ps.penalty();
+                notes.add(catalog.note("RISKY_PORTS", ps.riskyCount(), ps.penalty()));
                 score = Math.max(0, score);
             }
         }
