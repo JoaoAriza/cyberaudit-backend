@@ -10,6 +10,12 @@ import java.util.Locale;
 @Service
 public class CookieSecurityService {
 
+    private final MessageCatalog catalog;
+
+    public CookieSecurityService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     public List<CookieFinding> analyze(List<String> rawSetCookies) {
         List<CookieFinding> findings = new ArrayList<>();
         if (rawSetCookies == null || rawSetCookies.isEmpty()) return findings;
@@ -36,19 +42,21 @@ public class CookieSecurityService {
         List<String> problems = new ArrayList<>();
         String risk = "LOW";
 
+        // Os problemas vêm do catálogo: esta lista é o que aparece dentro do card do
+        // cookie na tela e no campo "Issues" do laudo.
         if (!secure) {
-            problems.add("sem Secure: trafega em HTTP plain-text");
+            problems.add(catalog.evidence("COOKIE_SEM_SECURE"));
             risk = escalate(risk, isSessionCookie(name) ? "HIGH" : "MEDIUM");
         }
         if (!httpOnly) {
-            problems.add("sem HttpOnly: acessível via document.cookie (amplifica XSS)");
+            problems.add(catalog.evidence("COOKIE_SEM_HTTPONLY"));
             risk = escalate(risk, isSessionCookie(name) ? "HIGH" : "MEDIUM");
         }
         if ("MISSING".equals(sameSite)) {
-            problems.add("sem SameSite: vulnerável a CSRF em browsers antigos");
+            problems.add(catalog.evidence("COOKIE_SEM_SAMESITE"));
             risk = escalate(risk, "MEDIUM");
         } else if ("None".equalsIgnoreCase(sameSite) && !secure) {
-            problems.add("SameSite=None sem Secure: rejeitado por Chrome/Firefox");
+            problems.add(catalog.evidence("COOKIE_SAMESITE_NONE_SEM_SECURE"));
             risk = escalate(risk, "HIGH");
         }
 

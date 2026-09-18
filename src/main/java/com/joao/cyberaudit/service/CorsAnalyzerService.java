@@ -11,9 +11,11 @@ public class CorsAnalyzerService {
     private static final String PROBE_ORIGIN = "https://evil-probe.cyberaudit.io";
 
     private final HttpFetchService httpFetchService;
+    private final MessageCatalog   catalog;
 
-    public CorsAnalyzerService(HttpFetchService httpFetchService) {
+    public CorsAnalyzerService(HttpFetchService httpFetchService, MessageCatalog catalog) {
         this.httpFetchService = httpFetchService;
+        this.catalog          = catalog;
     }
 
     public CorsResult analyze(String url) {
@@ -40,22 +42,28 @@ public class CorsAnalyzerService {
 
         } catch (Exception e) {
             return new CorsResult(false, "NOT_TESTED", false, false, false, false,
-                    "Probe CORS falhou: " + e.getMessage());
+                    catalog.desc("CORS_PROBE_FALHOU", e.getMessage()));
         }
     }
 
+    /**
+     * O veredito do CORS, no idioma do laudo.
+     *
+     * Este texto aparece no card do módulo (e como "Assessment" no PDF, que é
+     * monolíngue em inglês) — enquanto era literal, saía em português nos dois.
+     */
     private String buildMessage(boolean wildcard, boolean reflects, boolean credentials,
                                 boolean nullAccepted, String acao) {
         if (reflects && credentials)
-            return "CORS reflection + credentials: qualquer site faz requests autenticadas cross-origin";
+            return catalog.desc("CORS_REFLECTION_CREDENTIALS");
         if (reflects)
-            return "CORS reflete a Origin do request — qualquer site acessa seus recursos";
+            return catalog.desc("CORS_REFLECTION");
         if (wildcard && credentials)
-            return "ACAO: * com ACAC: true — config inválida e insegura";
+            return catalog.desc("CORS_WILDCARD_CREDENTIALS");
         if (nullAccepted)
-            return "Aceita null origin — acesso via iframe sandboxado ou file://";
+            return catalog.desc("CORS_NULL_ORIGIN");
         if (acao.isBlank() || "NOT_SET".equals(acao))
-            return "Sem CORS headers — padrão seguro (same-origin apenas)";
-        return "CORS configurado para origem específica: " + acao;
+            return catalog.desc("CORS_AUSENTE");
+        return catalog.desc("CORS_ORIGEM_ESPECIFICA", acao);
     }
 }

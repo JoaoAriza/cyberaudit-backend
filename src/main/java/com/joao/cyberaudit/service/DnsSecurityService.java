@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.DnsSecurityResult;
+import com.joao.cyberaudit.util.IdiomaThreads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -198,9 +199,11 @@ public class DnsSecurityService {
     private static final Logger log = LoggerFactory.getLogger(DnsSecurityService.class);
 
     private final PublicSuffixService publicSuffixService;
+    private final MessageCatalog      catalog;
 
-    public DnsSecurityService(PublicSuffixService publicSuffixService) {
+    public DnsSecurityService(PublicSuffixService publicSuffixService, MessageCatalog catalog) {
         this.publicSuffixService = publicSuffixService;
+        this.catalog             = catalog;
     }
 
     /**
@@ -274,7 +277,8 @@ public class DnsSecurityService {
         PistasDeProvedor pistas = new PistasDeProvedor();
 
         // ── Fase 1: o que decide o risco ──────────────────────────────────
-        ExecutorService pool = Executors.newFixedThreadPool(4);
+        // O texto do registro duplicado nasce dentro destas threads — ver IdiomaThreads.
+        ExecutorService pool = Executors.newFixedThreadPool(4, IdiomaThreads.fabrica("dns"));
         try {
             var spfFuture   = CompletableFuture.runAsync(() -> analyzeSpf(host, falhou, b, pistas), pool);
             var dmarcFuture = CompletableFuture.runAsync(() -> analyzeDmarc(host, falhou, b), pool);
@@ -342,7 +346,8 @@ public class DnsSecurityService {
                 // Reportar o primeiro como válido esconderia uma configuração
                 // quebrada justamente de quem contratou a auditoria para achá-la.
                 b.spfPresent(true)
-                 .spfRecord(spfs.size() + " registros SPF (inválido): " + String.join(" | ", spfs))
+                 .spfRecord(catalog.evidence("DNS_SPF_DUPLICADO",
+                         spfs.size(), String.join(" | ", spfs)))
                  .spfPolicy("INVALID");
                 return true;
             }
@@ -422,7 +427,8 @@ public class DnsSecurityService {
                 // RFC 7489 §6.6.3: com mais de um registro, o receptor age como
                 // se não houvesse nenhum. Mesma lógica do SPF duplicado.
                 b.dmarcPresent(true)
-                 .dmarcRecord(dmarcs.size() + " registros DMARC (inválido): " + String.join(" | ", dmarcs))
+                 .dmarcRecord(catalog.evidence("DNS_DMARC_DUPLICADO",
+                         dmarcs.size(), String.join(" | ", dmarcs)))
                  .dmarcPolicy("INVALID");
                 return true;
             }
@@ -579,7 +585,7 @@ public class DnsSecurityService {
                 probes.add(new String[]{ selector, domain });
 
         int poolSize = Math.min(Math.max(probes.size(), 1), 4);
-        ExecutorService pool = Executors.newFixedThreadPool(poolSize);
+        ExecutorService pool = Executors.newFixedThreadPool(poolSize, IdiomaThreads.fabrica("dkim"));
         List<CompletableFuture<String>> futures = probes.stream()
                 .map(p -> CompletableFuture.supplyAsync(() -> {
                     try {
@@ -725,16 +731,23 @@ public class DnsSecurityService {
         return "MEDIUM";
     }
 
+    /**
+     * O parágrafo que explica o risco de spoofing, no idioma do laudo.
+     *
+     * É também o impacto do achado {@code DNS_EMAIL_SPOOFING} — o
+     * messages.properties diz, na seção de DNS, que o impacto vem daqui e não do
+     * catálogo de issues. Enquanto este texto era literal, aquele achado saía com
+     * título em inglês e impacto em português.
+     */
     private String buildSummary(DnsSecurityResult r) {
         return switch (r.getEmailSpoofingRisk()) {
-            case "CRITICAL" -> "Domínio sem SPF e sem DMARC — qualquer pessoa pode enviar emails falsos usando este domínio (spoofing).";
-            case "HIGH"     -> "Configuração incompleta — risco de spoofing. Configure " +
-                    (!r.isSpfPresent() ? "SPF" : "DMARC") + " para mitigar.";
-            case "MEDIUM"   -> "Proteção parcial contra spoofing. Reforce SPF com -all e DMARC com p=reject para máxima proteção.";
-            case "LOW"      -> "Boa configuração de segurança de email. SPF e DMARC configurados corretamente.";
-            case "UNKNOWN"  -> "Não foi possível consultar o DNS deste domínio — os registros podem existir. "
-                    + "Este resultado é inconclusivo, não um achado.";
-            default         -> "Não foi possível determinar o risco.";
+            case "CRITICAL" -> catalog.desc("DNS_SPOOFING_CRITICAL");
+            // O que falta entra como parâmetro: a frase é uma, o registro varia.
+            case "HIGH"     -> catalog.desc("DNS_SPOOFING_HIGH", !r.isSpfPresent() ? "SPF" : "DMARC");
+            case "MEDIUM"   -> catalog.desc("DNS_SPOOFING_MEDIUM");
+            case "LOW"      -> catalog.desc("DNS_SPOOFING_LOW");
+            case "UNKNOWN"  -> catalog.desc("DNS_SPOOFING_UNKNOWN");
+            default         -> catalog.desc("DNS_SPOOFING_INDEFINIDO");
         };
     }
 }

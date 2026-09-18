@@ -4,6 +4,7 @@ import com.joao.cyberaudit.model.*;
 import java.util.Collections;
 import com.joao.cyberaudit.exception.DomainBlockedException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
+import com.joao.cyberaudit.util.IdiomaThreads;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -244,7 +245,11 @@ public class ScanOrchestrator {
                 fetch.getRawSetCookies(), fetch.getHeaders());
 
         // ── Fase 1b: fingerprint + CVE (paralelo) ─────────────────────────────
-        ExecutorService fingerprintPool = Executors.newFixedThreadPool(2);
+        // Fábrica com idioma, e não Executors.newFixedThreadPool(n) puro: o texto
+        // dos módulos é montado DENTRO destas threads, e o LocaleContextHolder é
+        // ThreadLocal. Ver IdiomaThreads.
+        ExecutorService fingerprintPool =
+                Executors.newFixedThreadPool(2, IdiomaThreads.fabrica("scan-fingerprint"));
 
         var fingerprintFuture = CompletableFuture.supplyAsync(
                 progresso.acompanha(ScanCheck.TECH_FINGERPRINT,
@@ -267,7 +272,8 @@ public class ScanOrchestrator {
                 : null;
 
         // ── Fase 2: checks passivos — PARALELOS ───────────────────────────────
-        ExecutorService passivePool = Executors.newFixedThreadPool(8);
+        ExecutorService passivePool =
+                Executors.newFixedThreadPool(8, IdiomaThreads.fabrica("scan-passivo"));
         // Status por módulo — distingue "verificado" de "não concluído" (ver moduleState).
         Map<String, String> moduleStatus = new LinkedHashMap<>();
         // Fetch principal já rodou na fase 1: erro aqui = headers não verificados (vide ScoreService).
@@ -476,7 +482,8 @@ public class ScanOrchestrator {
             }
 
             // ── Fase 4: checks ativos — PARALELOS ─────────────────────────────
-            ExecutorService activePool = Executors.newFixedThreadPool(6);
+            ExecutorService activePool =
+                    Executors.newFixedThreadPool(6, IdiomaThreads.fabrica("scan-ativo"));
 
             var corsFuture     = CompletableFuture.supplyAsync(
                     progresso.acompanha(ScanCheck.CORS,
@@ -658,6 +665,10 @@ public class ScanOrchestrator {
             WafDetectionResult waf, TechFingerprintResult tech,
             List<SensitiveFileFinding> files) {
         return ScanResult.builder()
+                // O idioma entra mesmo num resultado que só serve para o diff: o
+                // detector compara o valor cru do cabeçalho apenas entre scans do
+                // MESMO idioma, e sem o carimbo aqui ele nunca reconheceria o par.
+                .lang(idiomaDaRequisicao())
                 .score(score).sslInfo(sslInfo).headers(headers)
                 .serverVersionExposed(serverVersionExposed)
                 .dangerousHttpMethods(methods).openPorts(ports)

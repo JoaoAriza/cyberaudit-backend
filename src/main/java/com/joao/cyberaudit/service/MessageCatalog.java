@@ -106,6 +106,23 @@ public class MessageCatalog {
     }
 
     /**
+     * Módulo de conformidade — artigos da LGPD e controles da ISO 27001:2022.
+     *
+     * Família própria porque o texto não descreve um achado: descreve o REQUISITO
+     * (o que a norma exige), e as não-conformidades embaixo dele são a leitura do
+     * scan contra esse requisito. Um item existe mesmo quando passa — aparece com
+     * lista de achados vazia, que é o oposto de um achado.
+     *
+     * Chaves: {@code compliance.<REF>.title|.requirement|.recommendation} para o
+     * item, {@code compliance.finding.<NOME>} para cada não-conformidade. A REF é
+     * normalizada (Art. 46 → LGPD_46, A.8.7 → ISO_8_7) porque ponto é separador de
+     * chave em arquivo de propriedades.
+     */
+    public String compliance(String chave, Object... args) {
+        return prefixado("compliance.", chave, args);
+    }
+
+    /**
      * Valor de antes/depois no card de mudança — "válido", "aberta", "exposto".
      *
      * Família própria porque são rótulos de estado, reaproveitados entre categorias:

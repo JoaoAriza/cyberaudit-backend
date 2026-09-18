@@ -1,8 +1,12 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.config.LocaleConfig;
 import com.joao.cyberaudit.model.DnsSecurityResult;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.context.support.ResourceBundleMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,7 +24,20 @@ import static org.mockito.Mockito.mock;
 class DnsSecurityRiskTest {
 
     private final DnsSecurityService service =
-            new DnsSecurityService(mock(PublicSuffixService.class));
+            new DnsSecurityService(mock(PublicSuffixService.class), catalogoReal());
+
+    private static MessageCatalog catalogoReal() {
+        var fonte = new ResourceBundleMessageSource();
+        fonte.setBasename("messages");
+        fonte.setDefaultEncoding("UTF-8");
+        fonte.setFallbackToSystemLocale(false);
+        return new MessageCatalog(fonte);
+    }
+
+    @AfterEach
+    void limpaIdioma() {
+        LocaleContextHolder.resetLocaleContext();
+    }
 
     private String risco(DnsSecurityResult r) {
         return (String) ReflectionTestUtils.invokeMethod(service, "calculateRisk", r);
@@ -50,9 +67,17 @@ class DnsSecurityRiskTest {
         DnsSecurityResult r = DnsSecurityResult.builder().lookupFailed(true).build();
         r.setEmailSpoofingRisk(risco(r));
 
+        // Idioma fixado: o resumo vem do catálogo, e sem isto o teste passaria a
+        // depender do locale da máquina que roda a suíte.
+        LocaleContextHolder.setLocale(LocaleConfig.PADRAO);
         String texto = resumo(r);
         assertTrue(texto.toLowerCase().contains("inconclusivo"),
                 "o texto precisa deixar claro que não é um achado: " + texto);
+
+        LocaleContextHolder.setLocale(java.util.Locale.ENGLISH);
+        String english = resumo(r);
+        assertTrue(english.toLowerCase().contains("inconclusive"),
+                "e o mesmo em inglês, que é o idioma que o cliente de fora lê: " + english);
     }
 
     @Test

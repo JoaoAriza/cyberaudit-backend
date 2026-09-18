@@ -163,13 +163,27 @@ public class ScanChangeDetector {
         allKeys.addAll(curH.keySet());
         allKeys.addAll(prevH.keySet());
 
+        // Comparar o valor inteiro do cabeçalho só vale entre scans montados no
+        // MESMO idioma. Parte do que vem entre parênteses é prosa traduzida (ver
+        // HeaderService): "WEAK (sem max-age)" contra "WEAK (no max-age)" é troca de
+        // idioma, não mudança no site — e o cliente veria a tabela de mudanças
+        // inteira acender por ter clicado no seletor de idioma. Scan antigo, gravado
+        // antes de o cabeçalho passar pelo catálogo, vem com lang nulo e cai aqui
+        // também, que é o que se quer.
+        boolean mesmoIdioma = Objects.equals(prev.getLang(), cur.getLang());
+
         for (String header : allKeys) {
             if ("error".equals(header)) continue;
 
             String curVal  = curH.get(header);
             String prevVal = prevH.get(header);
 
-            if (Objects.equals(curVal, prevVal)) continue;
+            // Entre idiomas diferentes compara só o veredito, que é o pedaço estável.
+            // Custa perder a mudança de um valor cru (max-age de 60 para 120) no scan
+            // seguinte a uma troca de idioma; inventar mudança é pior que perder uma.
+            String curCmp  = mesmoIdioma ? curVal  : veredito(curVal);
+            String prevCmp = mesmoIdioma ? prevVal : veredito(prevVal);
+            if (Objects.equals(curCmp, prevCmp)) continue;
 
             boolean wasOk    = prevVal != null && prevVal.startsWith("OK");
             boolean nowOk    = curVal  != null && curVal.startsWith("OK");
@@ -188,12 +202,10 @@ public class ScanChangeDetector {
                 changeType  = "DEGRADED";
                 severity    = criticalHeader(header) ? "HIGH" : "MEDIUM";
                 description = catalog.change("HEADER_REMOVED", header);
-            } else if (!Objects.equals(curVal, prevVal)) {
+            } else {
                 changeType  = "CHANGED";
                 severity    = "LOW";
                 description = catalog.change("HEADER_CHANGED", header);
-            } else {
-                continue;
             }
 
             out.add(ScanChange.builder()
@@ -425,6 +437,20 @@ public class ScanChangeDetector {
 
     private boolean criticalHeader(String header) {
         return header.contains("Strict-Transport") || header.contains("Content-Security");
+    }
+
+    /**
+     * O pedaço do valor de um cabeçalho que não depende de idioma.
+     *
+     * O {@code HeaderService} devolve {@code VEREDITO (detalhe)} — e o veredito
+     * ({@code OK}, {@code MISSING}, {@code WEAK}, {@code UNKNOWN}) fica em inglês
+     * nos dois idiomas justamente porque é lido por máquina: pelo Frontend, para
+     * escolher ícone e cor, e por aqui.
+     */
+    private static String veredito(String valorDoHeader) {
+        if (valorDoHeader == null) return null;
+        int parentese = valorDoHeader.indexOf(" (");
+        return parentese < 0 ? valorDoHeader : valorDoHeader.substring(0, parentese);
     }
 
     private boolean isStrongerDmarc(String cur, String prev) {

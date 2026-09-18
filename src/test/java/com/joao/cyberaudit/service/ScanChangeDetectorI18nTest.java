@@ -66,6 +66,14 @@ class ScanChangeDetectorI18nTest {
                 .build();
     }
 
+    private ScanResult comHeaders(String lang, Map<String, String> headers) {
+        return ScanResult.builder()
+                .lang(lang)
+                .score(new ScoreResult(70, RiskLevel.MEDIUM, List.of(), List.of()))
+                .headers(headers)
+                .build();
+    }
+
     private String descricaoDe(List<ScanChange> mudancas, String categoria) {
         return mudancas.stream()
                 .filter(c -> categoria.equals(c.getCategory()))
@@ -122,6 +130,45 @@ class ScanChangeDetectorI18nTest {
                 comHeaders(Map.of("Strict-Transport-Security", "OK: max-age=31536000")));
 
         assertEquals("Strict-Transport-Security removed", descricaoDe(mudancas, "HEADERS"));
+    }
+
+    // ── Troca de idioma não é mudança no site ────────────────────────────────
+
+    @Test
+    @DisplayName("mesmo cabeçalho em dois idiomas não conta como mudança")
+    void trocaDeIdiomaNaoInventaMudanca() {
+        // Parte do parêntese do cabeçalho é prosa traduzida (ver HeaderService). Sem
+        // o carimbo de idioma no diff, o primeiro scan depois de clicar no seletor
+        // acenderia a tabela de mudanças inteira — "Content-Security-Policy alterado"
+        // para um site em que nada mudou.
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+        var mudancas = detector().detect(
+                comHeaders("en", Map.of("Strict-Transport-Security", "WEAK (max-age far too short: 60s)")),
+                comHeaders("pt", Map.of("Strict-Transport-Security", "WEAK (max-age muito curto: 60s)")));
+
+        assertTrue(mudancas.isEmpty(), "troca de idioma virou mudança: " + mudancas);
+    }
+
+    @Test
+    @DisplayName("no MESMO idioma, o valor do cabeçalho mudando ainda é mudança")
+    void mesmoIdiomaSegueComparandoOValor() {
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+        var mudancas = detector().detect(
+                comHeaders("en", Map.of("Strict-Transport-Security", "WEAK (max-age far too short: 120s)")),
+                comHeaders("en", Map.of("Strict-Transport-Security", "WEAK (max-age far too short: 60s)")));
+
+        assertEquals("Strict-Transport-Security changed", descricaoDe(mudancas, "HEADERS"));
+    }
+
+    @Test
+    @DisplayName("degradação real atravessa a troca de idioma — o veredito é estável")
+    void degradacaoAtravessaATrocaDeIdioma() {
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+        var mudancas = detector().detect(
+                comHeaders("en", Map.of("Content-Security-Policy", "MISSING")),
+                comHeaders("pt", Map.of("Content-Security-Policy", "OK")));
+
+        assertEquals("Content-Security-Policy removed", descricaoDe(mudancas, "HEADERS"));
     }
 
     // ── O que NÃO é traduzido ────────────────────────────────────────────────

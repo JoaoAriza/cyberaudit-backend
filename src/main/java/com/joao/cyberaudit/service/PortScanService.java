@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.model.PortFinding;
+import com.joao.cyberaudit.util.IdiomaThreads;
 import org.springframework.stereotype.Service;
 
 import javax.net.ssl.SSLSocket;
@@ -19,9 +20,11 @@ import java.util.stream.Collectors;
 public class PortScanService {
 
     private final HostingProviderPolicy hostingProviderPolicy;
+    private final MessageCatalog        catalog;
 
-    public PortScanService(HostingProviderPolicy hostingProviderPolicy) {
+    public PortScanService(HostingProviderPolicy hostingProviderPolicy, MessageCatalog catalog) {
         this.hostingProviderPolicy = hostingProviderPolicy;
+        this.catalog               = catalog;
     }
 
     private static final List<PortConfig> PORT_CONFIGS = List.of(
@@ -98,7 +101,9 @@ public class PortScanService {
         // rede da própria instância.
         if (SsrfGuard.isForbidden(addr)) return Collections.emptyList();
 
-        ExecutorService pool = Executors.newFixedThreadPool(20);
+        // Impacto e recomendação de cada porta são montados dentro destas threads —
+        // ver IdiomaThreads.
+        ExecutorService pool = Executors.newFixedThreadPool(20, IdiomaThreads.fabrica("portas"));
         Semaphore sem = new Semaphore(10);
         AtomicInteger timeouts = new AtomicInteger(0);
 
@@ -233,15 +238,15 @@ public class PortScanService {
             case 110 -> lower.startsWith("+ok")  ? trim(banner, 120) : null;
             case 143 -> lower.startsWith("* ok") ? trim(banner, 120) : null;
             case 465, 587 -> lower.startsWith("220") ? trim(banner, 120) : null;
-            case 1433 -> banner.length() > 4    ? "MS SQL Server respondeu (banner binário)" : null;
-            case 1521 -> banner.length() > 4    ? "Oracle respondeu (banner binário)" : null;
+            case 1433 -> banner.length() > 4    ? catalog.evidence("PORT_BANNER_MSSQL") : null;
+            case 1521 -> banner.length() > 4    ? catalog.evidence("PORT_BANNER_ORACLE") : null;
             case 3306 -> banner.length() > 4 && !lower.startsWith("http")
-                    ? "MySQL respondeu (handshake detectado)" : null;
-            case 5432 -> banner.length() > 4    ? "PostgreSQL respondeu (banner detectado)" : null;
+                    ? catalog.evidence("PORT_BANNER_MYSQL") : null;
+            case 5432 -> banner.length() > 4    ? catalog.evidence("PORT_BANNER_POSTGRES") : null;
             case 6379 -> lower.contains("+pong") || lower.startsWith("-")
-                    ? "Redis respondeu: " + trim(banner, 80) : null;
+                    ? catalog.evidence("PORT_BANNER_REDIS", trim(banner, 80)) : null;
             case 9200 -> lower.contains("elasticsearch") || lower.contains("{")
-                    ? "Elasticsearch respondeu: " + trim(banner, 100) : null;
+                    ? catalog.evidence("PORT_BANNER_ELASTIC", trim(banner, 100)) : null;
             default -> banner.length() > 2 ? trim(banner, 120) : null;
         };
     }
@@ -295,13 +300,14 @@ public class PortScanService {
                                      String evidence, String method) {
         return new PortFinding(
                 impactFor(cfg.port(), cfg.service()),
-                recommendationFor(cfg.port(), cfg.service()),
+                recommendationFor(cfg.port()),
                 cfg.port(),
                 cfg.service(),
                 "OPEN",
                 cfg.severity(),
                 latency,
-                evidence != null ? evidence : (method != null ? "Conectado via " + method : null)
+                evidence != null ? evidence
+                        : (method != null ? catalog.evidence("PORT_CONNECTED_VIA", method) : null)
         );
     }
 
@@ -311,37 +317,36 @@ public class PortScanService {
         return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
+    /**
+     * Impacto e recomendação saem do catálogo, na chave da porta.
+     *
+     * O texto nasceu chumbado em português aqui, e é o que aparece no card do
+     * módulo e no laudo: cliente lendo a tela em inglês recebia "FTP exposto:
+     * transmite credenciais em texto plano". A chave é o número da porta —
+     * {@code PORT_21}, {@code PORT_3306} — mais {@code PORT_OUTRA} para o caso
+     * padrão, que recebe o nome do serviço como parâmetro.
+     *
+     * Portas que dividem o mesmo texto dividem a mesma chave: 1433/1521/3306/5432
+     * compartilham a recomendação de banco, e é por isso que a chave da
+     * recomendação nem sempre é a da porta.
+     */
     private String impactFor(int port, String service) {
         return switch (port) {
-            case 21   -> "FTP exposto: transmite credenciais em texto plano; permite enumeração e exfiltração de arquivos.";
-            case 22   -> "SSH exposto aumenta superfície de ataque (bruteforce, credenciais fracas, exploits de versão).";
-            case 23   -> "TELNET: protocolo sem criptografia. Credenciais e dados em texto plano na rede.";
-            case 25   -> "SMTP aberto pode ser usado para relay de spam ou enumeração de usuários (VRFY/EXPN).";
-            case 53   -> "DNS exposto permite enumeração de registros e pode ser usado em ataques de amplificação.";
-            case 1433 -> "MS SQL Server exposto: risco de acesso não autorizado, execução de queries e exfiltração.";
-            case 1521 -> "Oracle DB exposto: acesso não autorizado a dados críticos e possível RCE via procedures.";
-            case 3306 -> "MySQL exposto: acesso direto ao banco sem camada de aplicação como proteção.";
-            case 5432 -> "PostgreSQL exposto: acesso não autorizado a dados e possível RCE via extensões.";
-            case 6379 -> "Redis sem auth é crítico: leitura/escrita irrestrita, possível RCE via CONFIG SET.";
-            case 9200 -> "Elasticsearch exposto: leitura/alteração de índices, exfiltração de dados em massa.";
-            case 80, 8080 -> "HTTP exposto; risco depende de autenticação, vulnerabilidades e conteúdo do app.";
-            case 443, 8443 -> "HTTPS exposto é esperado; risco depende de configuração TLS e do app.";
-            default   -> "Serviço " + service + " exposto pode ampliar a superfície de ataque.";
+            case 21, 22, 23, 25, 53, 1433, 1521, 3306, 5432, 6379, 9200
+                          -> catalog.impact("PORT_" + port);
+            case 80, 8080 -> catalog.impact("PORT_80");
+            case 443, 8443 -> catalog.impact("PORT_443");
+            default       -> catalog.impact("PORT_OUTRA", service);
         };
     }
 
-    private String recommendationFor(int port, String service) {
+    private String recommendationFor(int port) {
         return switch (port) {
-            case 21   -> "Desative FTP. Use SFTP (porta 22) ou FTPS. Restrinja por firewall/VPN.";
-            case 22   -> "Use autenticação por chave (desative senha). Restrinja IPs via firewall. Habilite fail2ban.";
-            case 23   -> "Desative TELNET imediatamente. Substitua por SSH. Bloqueie no firewall.";
-            case 25   -> "Restrinja relay. Habilite autenticação. Bloqueie se não for servidor de email.";
-            case 1433, 1521, 3306, 5432 -> "Nunca exponha DB na internet. Restrinja a IPs internos/VPN. Habilite autenticação forte e auditoria.";
-            case 6379 -> "Exija AUTH/ACL. Vincule ao loopback (127.0.0.1). Coloque atrás de VPN. Desative comandos perigosos.";
-            case 9200 -> "Habilite autenticação (X-Pack/Security). Coloque atrás de VPN/rede interna. Nunca exponha publicamente.";
-            case 80, 8080 -> "Redirecione para HTTPS. Aplique WAF. Mantenha app e dependências atualizadas.";
-            case 443, 8443 -> "Configure TLS forte (1.2+), HSTS, certificado válido e atualize dependências.";
-            default   -> "Feche se não necessário. Se necessário, restrinja por IP e use autenticação forte.";
+            case 21, 22, 23, 25, 6379, 9200 -> catalog.recommendation("PORT_" + port);
+            case 1433, 1521, 3306, 5432 -> catalog.recommendation("PORT_BANCO");
+            case 80, 8080  -> catalog.recommendation("PORT_80");
+            case 443, 8443 -> catalog.recommendation("PORT_443");
+            default        -> catalog.recommendation("PORT_OUTRA");
         };
     }
 

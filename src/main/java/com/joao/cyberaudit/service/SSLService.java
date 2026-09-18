@@ -14,14 +14,20 @@ import java.time.temporal.ChronoUnit;
 @Service
 public class SSLService {
 
+    private final MessageCatalog catalog;
+
+    public SSLService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     public SSLInfo checkSSL(String urlString) {
 
         if (urlString == null || urlString.isBlank()) {
-            return new SSLInfo(false, false, null, 0, "URL vazia");
+            return new SSLInfo(false, false, null, 0, catalog.desc("SSL_URL_VAZIA"));
         }
 
         if (!urlString.startsWith("https://")) {
-            return new SSLInfo(false, false, null, 0, "Site não usa HTTPS");
+            return new SSLInfo(false, false, null, 0, catalog.desc("SSL_SEM_HTTPS"));
         }
 
         try {
@@ -52,13 +58,14 @@ public class SSLService {
             long totalValidityDays  = Math.max(0, ChronoUnit.DAYS.between(issued, expiration));
             boolean valid = daysRemaining > 0;
 
-            String message = valid ? "Certificado válido" : "Certificado expirado";
+            String message = valid ? catalog.desc("SSL_CERT_VALIDO") : catalog.desc("SSL_CERT_EXPIRADO");
 
             return new SSLInfo(true, valid, expiration.toString(), daysRemaining, message,
                     totalValidityDays);
 
         } catch (Exception e) {
-            return new SSLInfo(true, false, null, 0, "Erro ao verificar certificado: " + e.getMessage());
+            return new SSLInfo(true, false, null, 0,
+                    catalog.desc("SSL_ERRO_VERIFICACAO", e.getMessage()));
         }
     }
 }

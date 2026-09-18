@@ -14,6 +14,12 @@ public class HeaderService {
     private static final Pattern MAX_AGE_PATTERN =
             Pattern.compile("max-age=(\\d+)", Pattern.CASE_INSENSITIVE);
 
+    private final MessageCatalog catalog;
+
+    public HeaderService(MessageCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     public Map<String, String> analyzeSecurityHeaders(Map<String, String> h) {
         Map<String, String> result = new HashMap<>();
         analyzeXFrame(h, result);
@@ -54,14 +60,21 @@ public class HeaderService {
         String v = h.get("strict-transport-security");
         if (v == null) { out.put("Strict-Transport-Security", "MISSING"); return; }
 
+        // O prefixo OK/MISSING/WEAK fica em inglês nos dois idiomas de propósito: é
+        // ele que o Frontend lê para escolher ícone e cor (val.startsWith("OK")).
+        // Só o que está entre parênteses é prosa, e é essa parte que o catálogo traduz.
         Matcher m = MAX_AGE_PATTERN.matcher(v);
-        if (!m.find()) { out.put("Strict-Transport-Security", "WEAK (sem max-age)"); return; }
+        if (!m.find()) {
+            out.put("Strict-Transport-Security", "WEAK (" + catalog.valor("hstsSemMaxAge") + ")");
+            return;
+        }
 
         long maxAge = Long.parseLong(m.group(1));
         if (maxAge == 0) {
             out.put("Strict-Transport-Security", "WEAK (max-age=0 deletes HSTS)");
         } else if (maxAge < 2_592_000) {
-            out.put("Strict-Transport-Security", "WEAK (max-age muito curto: " + maxAge + "s)");
+            out.put("Strict-Transport-Security",
+                    "WEAK (" + catalog.valor("hstsMaxAgeCurto", maxAge) + ")");
         } else {
             out.put("Strict-Transport-Security", "OK (" + v + ")");
         }
@@ -79,7 +92,7 @@ public class HeaderService {
         boolean unsafeEval            = lower.contains("'unsafe-eval'");
 
         if (unsafeInlineInScripts || unsafeEval)
-            out.put("Content-Security-Policy", "WEAK (unsafe-inline em script-src ou unsafe-eval)");
+            out.put("Content-Security-Policy", "WEAK (" + catalog.valor("cspUnsafe") + ")");
         else if (lower.contains("default-src") || lower.contains("script-src"))
             out.put("Content-Security-Policy", "OK");
         else
