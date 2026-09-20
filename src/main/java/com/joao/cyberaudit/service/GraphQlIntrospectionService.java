@@ -78,6 +78,42 @@ public class GraphQlIntrospectionService {
                 .orElse(null);
     }
 
+    /**
+     * A introspection foi realmente ATENDIDA — schema devolvido — ou só existe um
+     * endpoint que respondeu?
+     *
+     * É a pergunta que separa um achado de uma porta inofensiva. Um {@code /graphql}
+     * com introspection desligada existe e responde — devolve
+     * {@code {"errors":[{"message":"No query string was present"}]}} ou um 400 —, mas
+     * não expõe nada. Reportá-lo seria acusar o alvo BEM configurado.
+     *
+     * Três exigências, todas necessárias:
+     * <ul>
+     *   <li><b>200</b>. Erro, 400, 401 ou 403 não é schema exposto — é o servidor
+     *       recusando, que é o comportamento desejado.</li>
+     *   <li><b>Cara de JSON</b>. HTML é a UI (tratada no {@link #playgroundMarker}),
+     *       não a API respondendo.</li>
+     *   <li><b>As CHAVES {@code "__schema"} e {@code "types"} entre aspas</b>, e não a
+     *       palavra solta. É o que distingue o schema DEVOLVIDO de um erro que só CITA
+     *       a palavra: o Apollo, com introspection desligada, responde
+     *       {@code {"errors":[{"message":"...the query contained __schema or __type..."}]}}
+     *       — menciona {@code __schema} sem aspas de chave, e não pode contar como
+     *       schema exposto.</li>
+     * </ul>
+     *
+     * Visível ao pacote, como o {@link #playgroundMarker}, para o teste exercitar a
+     * decisão sem rede.
+     */
+    boolean introspectionConfirmed(int status, String contentType, String bodyLower) {
+        if (status != 200) return false;
+
+        boolean pareceJson = contentType.contains("application/json")
+                || bodyLower.trim().startsWith("{");
+        if (!pareceJson) return false;
+
+        return bodyLower.contains("\"__schema\"") && bodyLower.contains("\"types\"");
+    }
+
     private static final Pattern TYPE_COUNT_PATTERN =
             Pattern.compile("\"name\"\\s*:", Pattern.CASE_INSENSITIVE);
 
@@ -135,11 +171,8 @@ public class GraphQlIntrospectionService {
             String contentType = resp.headers()
                     .firstValue("content-type").orElse("").toLowerCase(Locale.ROOT);
 
-            // Confirma: HTTP 200, JSON, schema presente na resposta
-            if (resp.statusCode() == 200
-                    && (contentType.contains("application/json") || lower.trim().startsWith("{"))
-                    && lower.contains("\"__schema\"")
-                    && lower.contains("\"types\"")) {
+            // Confirma: schema DEVOLVIDO na resposta, não apenas endpoint presente.
+            if (introspectionConfirmed(resp.statusCode(), contentType, lower)) {
 
                 introspectionEnabled  = true;
                 typeCount             = countTypes(body);

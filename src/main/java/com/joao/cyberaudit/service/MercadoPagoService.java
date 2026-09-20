@@ -38,6 +38,16 @@ public class MercadoPagoService {
     @Value("${mp.access-token:}")
     private String accessToken;
 
+    /**
+     * Só para o log de boot: o secret é USADO pelo {@code BillingController} ao
+     * validar a assinatura do webhook. Aqui ele serve para dizer, junto da
+     * credencial, se o webhook está protegido — sem isso, pagamento aprovado não
+     * sobe de plano e o único sinal era um aviso que só aparecia quando o MP
+     * mandava uma notificação.
+     */
+    @Value("${mp.webhook-secret:}")
+    private String webhookSecret;
+
     public MercadoPagoService(ObjectMapper mapper) {
         this.mapper = mapper;
     }
@@ -88,6 +98,16 @@ public class MercadoPagoService {
         if (t.length() < 60) {
             System.err.println("[MercadoPago] ATENÇÃO: credencial curta demais para um Access Token. "
                     + "Confira se não é a Public Key — ela não autentica chamadas de servidor.");
+        }
+
+        // Estado do secret do webhook, positivo a cada boot: sem "ausência de aviso"
+        // para interpretar. Sem ele, o BillingController recusa toda notificação do
+        // MP e o pagamento aprovado não vira upgrade de plano.
+        if (webhookSecret != null && !webhookSecret.isBlank()) {
+            System.out.println("[MercadoPago] webhook secret: configurado.");
+        } else {
+            System.err.println("[MercadoPago] webhook secret: AUSENTE — o webhook recusa TODAS as "
+                    + "notificações (401) e pagamento aprovado não sobe de plano. Defina MP_WEBHOOK_SECRET.");
         }
     }
 
