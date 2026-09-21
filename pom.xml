@@ -152,6 +152,17 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <!-- Gera META-INF/build-info.properties (versão + data do build).
+                             Aparece em /actuator/info como `build.*`. Não depende do .git,
+                             que o Dockerfile não copia — ver DeployInfoContributor para o
+                             commit em si. -->
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
 
             <plugin>
