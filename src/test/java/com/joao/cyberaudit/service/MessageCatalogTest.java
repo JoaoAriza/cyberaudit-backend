@@ -1,10 +1,14 @@
 package com.joao.cyberaudit.service;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.ResourceBundleMessageSource;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,6 +25,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MessageCatalogTest {
 
     private final MessageCatalog catalog = catalogoReal();
+
+    // O MessageCatalog resolve pelo LocaleContextHolder. Sem fixar, ele cai no locale
+    // DEFAULT da JVM — pt-BR num Windows PT, en_US no CI Linux — e as asserções em
+    // português quebrariam fora daqui. Fixar pt-BR (o LocaleConfig.PADRAO) torna o
+    // teste determinístico em qualquer host, sem depender de configuração do build.
+    @BeforeEach
+    void fixaIdioma() {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+    }
+
+    @AfterEach
+    void limpaIdioma() {
+        LocaleContextHolder.resetLocaleContext();
+    }
 
     private static MessageCatalog catalogoReal() {
         var fonte = new ResourceBundleMessageSource();

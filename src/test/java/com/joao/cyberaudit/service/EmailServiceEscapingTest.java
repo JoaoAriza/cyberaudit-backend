@@ -3,6 +3,8 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.model.RiskLevel;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.model.ScoreResult;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -22,6 +24,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmailServiceEscapingTest {
 
     private final EmailService service = new EmailService(null, catalogoReal());
+
+    // A saudação do e-mail sai do catálogo, que resolve pelo LocaleContextHolder. Sem
+    // fixar, cai no locale default da JVM (pt-BR no Windows PT, en_US no CI). Fixar
+    // pt-BR torna o teste determinístico; o teste que checa inglês sobrescreve no
+    // próprio corpo e o reset abaixo devolve ao estado limpo.
+    @BeforeEach
+    void fixaIdioma() {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
+    }
+
+    @AfterEach
+    void limpaIdioma() {
+        LocaleContextHolder.resetLocaleContext();
+    }
 
     private String escape(String raw) {
         return (String) ReflectionTestUtils.invokeMethod(service, "escHtml", raw);
