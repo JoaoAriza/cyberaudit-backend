@@ -80,6 +80,10 @@ public class CVECorrelationService {
         Map<String, String> versions = fingerprint.getDetectedVersions();
         if (versions == null || versions.isEmpty()) return List.of();
 
+        // O SO do ALVO decide uma vez, no início: é o mesmo para todos os CVEs deste
+        // scan e não muda entre consultas.
+        Plataforma alvo = plataformaDoAlvo(fingerprint);
+
         List<CVEFinding> findings = new ArrayList<>();
         int queryCount = 0;
 
@@ -93,7 +97,7 @@ public class CVECorrelationService {
             // do produto (ruído massivo). Pulamos.
             if (version == null || version.isBlank()) continue;
 
-            List<CVEFinding> cves = queryByCpe(software, version);
+            List<CVEFinding> cves = queryByCpe(software, version, alvo);
             findings.addAll(cves);
             queryCount++;
 
@@ -113,7 +117,7 @@ public class CVECorrelationService {
      * Elimina a principal causa de falsos positivos: keywordSearch retornava CVEs
      * onde versão/software aparecia em qualquer parte do texto da descrição.
      */
-    private List<CVEFinding> queryByCpe(String software, String version) {
+    private List<CVEFinding> queryByCpe(String software, String version, Plataforma alvo) {
         String[] cpe = CPE_MAP.get(software);
         if (cpe == null) {
             // Sem mapeamento CPE confirmado — não arriscamos keyword search
@@ -152,14 +156,14 @@ public class CVECorrelationService {
 
             if (resp.statusCode() != 200) return List.of();
 
-            return parseResponse(resp.body(), software + " " + ver);
+            return parseResponse(resp.body(), software + " " + ver, alvo);
 
         } catch (Exception e) {
             return List.of();
         }
     }
 
-    private List<CVEFinding> parseResponse(String json, String affectedSoftware) {
+    private List<CVEFinding> parseResponse(String json, String affectedSoftware, Plataforma alvo) {
         List<CVEFinding> findings = new ArrayList<>();
         try {
             JsonNode root  = jackson.readTree(json);
@@ -172,6 +176,12 @@ public class CVECorrelationService {
 
                 String id = cve.path("id").asText("");
                 if (id.isBlank()) continue;
+
+                // Filtro de plataforma: um CVE cuja config no NVD exige um SO que o
+                // alvo comprovadamente NÃO é não se aplica. Foi o que gerou o falso
+                // positivo CVE-2024-3566 (CVSS 9.8) — command injection via
+                // CreateProcess do Windows — reportado num Apache/PHP em Linux.
+                if (!cveSeAplica(soExigidoPeloCve(cve), alvo)) continue;
 
                 // Descrição em inglês
                 String description = "";
@@ -224,5 +234,117 @@ public class CVECorrelationService {
             }
         } catch (Exception ignored) {}
         return findings;
+    }
+
+    // ── Filtro de plataforma ────────────────────────────────────────────────────
+
+    /**
+     * Sistema operacional, do lado do ALVO e do lado do CVE.
+     *
+     * {@code DESCONHECIDA} tem sentidos diferentes nos dois lados, de propósito: no
+     * alvo é "não deu para dizer"; no CVE é "sem restrição de SO" — vale em qualquer
+     * um. É o {@link #cveSeAplica} que junta os dois com a assimetria certa.
+     */
+    enum Plataforma { WINDOWS, UNIX, DESCONHECIDA }
+
+    /** Marcadores de Windows na pilha detectada — IIS, ASP.NET, Server com Win32/64. */
+    private static final List<String> MARCADORES_WINDOWS = List.of(
+            "iis", "asp.net", "aspnet", "win32", "win64", "windows");
+
+    /** Marcadores de Unix — quase sempre no parêntese do header Server (ex.: "(Ubuntu)"). */
+    private static final List<String> MARCADORES_UNIX = List.of(
+            "ubuntu", "debian", "centos", "red hat", "redhat", "rhel", "fedora",
+            "linux", "unix", "freebsd", "openbsd", "netbsd", "amzn", "alma",
+            "rocky", "gentoo", "suse", "cloudlinux");
+
+    /**
+     * O SO do alvo, inferido do fingerprint.
+     *
+     * Windows deixa rastro claro (IIS, ASP.NET, "Win64" no Server); Unix costuma
+     * aparecer no parêntese do header Server. Sem nenhum dos dois, {@code DESCONHECIDA}.
+     */
+    Plataforma plataformaDoAlvo(TechFingerprintResult fp) {
+        if (fp == null) return Plataforma.DESCONHECIDA;
+
+        StringBuilder sb = new StringBuilder();
+        for (String s : new String[]{fp.getWebServer(), fp.getBackend(), fp.getFramework(),
+                fp.getCms(), fp.getLanguage(), fp.getCdn()}) {
+            if (s != null) sb.append(s).append(' ');
+        }
+        if (fp.getLibraries() != null) fp.getLibraries().forEach(l -> sb.append(l).append(' '));
+        if (fp.getEvidence()  != null) fp.getEvidence().forEach(e -> sb.append(e).append(' '));
+        String blob = sb.toString().toLowerCase(Locale.ROOT);
+
+        // Windows tem precedência: se há sinal dos dois (raro), o positivo de Windows
+        // é o mais específico e o que evita descartar um CVE Windows por engano.
+        if (MARCADORES_WINDOWS.stream().anyMatch(blob::contains)) return Plataforma.WINDOWS;
+        if (MARCADORES_UNIX.stream().anyMatch(blob::contains))    return Plataforma.UNIX;
+        return Plataforma.DESCONHECIDA;
+    }
+
+    /**
+     * O SO que a config do CVE exige — lido só dos CPEs de SO ({@code part = o}).
+     *
+     * É o vínculo de plataforma confiável do NVD: o CVE-2024-3566 traz
+     * {@code cpe:2.3:o:microsoft:windows} num AND com o runtime, dizendo "só vale
+     * rodando em Windows". Não uso descrição nem {@code target_sw} de propósito —
+     * descrição é texto solto e {@code target_sw} carrega coisas que não são SO
+     * (ex.: {@code wordpress}), e um palpite errado aqui DESCARTA um CVE real.
+     *
+     * {@code WINDOWS} = todos os CPEs de SO são Windows. {@code UNIX} = todos são
+     * não-Windows. Config sem CPE de SO, ou multiplataforma (tem os dois), volta
+     * {@code DESCONHECIDA} — sem restrição, aplica em qualquer alvo.
+     */
+    Plataforma soExigidoPeloCve(JsonNode cve) {
+        List<String> criterios = new ArrayList<>();
+        coletarCriteria(cve, criterios);
+
+        boolean temWindows = false, temNaoWindows = false;
+        for (String c : criterios) {
+            Plataforma fam = familiaDoCpeOs(c);
+            if      (fam == Plataforma.WINDOWS) temWindows = true;
+            else if (fam == Plataforma.UNIX)    temNaoWindows = true;
+        }
+
+        if (temWindows && !temNaoWindows) return Plataforma.WINDOWS;
+        if (temNaoWindows && !temWindows) return Plataforma.UNIX;
+        return Plataforma.DESCONHECIDA;
+    }
+
+    /**
+     * O CVE se aplica a este alvo?
+     *
+     * A assimetria é o ponto: um CVE exclusivo de Windows exige que o alvo SEJA
+     * Windows — e Windows se anuncia, então ausência de sinal já é forte indício de
+     * que não é, e o CVE cai. Um CVE exclusivo de não-Windows, ao contrário, só cai
+     * quando o alvo é comprovadamente Windows: Unix é o caso comum e costuma vir sem
+     * marcador, então "desconhecido" continua valendo o CVE. Descartar é sempre a
+     * exceção — o custo de esconder um CVE real é maior que o de mostrar um duvidoso.
+     */
+    boolean cveSeAplica(Plataforma exigidoPeloCve, Plataforma alvo) {
+        if (exigidoPeloCve == Plataforma.DESCONHECIDA) return true;   // sem restrição de SO
+        if (exigidoPeloCve == Plataforma.WINDOWS)      return alvo == Plataforma.WINDOWS;
+        return alvo != Plataforma.WINDOWS;                            // exige não-Windows
+    }
+
+    /** Família do CPE quando ele é de SISTEMA OPERACIONAL ({@code part = o}); senão null. */
+    private Plataforma familiaDoCpeOs(String criteria) {
+        String[] p = criteria.split(":");
+        // cpe : 2.3 : part : vendor : product : ...
+        if (p.length < 5 || !"o".equals(p[2])) return null;
+        boolean windows = "microsoft".equals(p[3]) && p[4].startsWith("windows");
+        return windows ? Plataforma.WINDOWS : Plataforma.UNIX;
+    }
+
+    /** Junta todo {@code criteria} de qualquer profundidade da árvore do CVE. */
+    private void coletarCriteria(JsonNode node, List<String> out) {
+        if (node == null || node.isMissingNode()) return;
+        if (node.isObject()) {
+            JsonNode crit = node.get("criteria");
+            if (crit != null && crit.isTextual()) out.add(crit.asText());
+            node.forEach(child -> coletarCriteria(child, out));
+        } else if (node.isArray()) {
+            node.forEach(child -> coletarCriteria(child, out));
+        }
     }
 }
