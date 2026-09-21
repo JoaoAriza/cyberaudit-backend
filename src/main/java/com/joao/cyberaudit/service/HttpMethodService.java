@@ -34,11 +34,23 @@ public class HttpMethodService {
      * O mapa guarda a CHAVE do texto, não o texto. Como é {@code static}, resolver
      * aqui congelaria o idioma no carregamento da classe — o primeiro scan decidiria
      * o idioma de todos os outros.
+     *
+     * <h2>Por que TRACE é LOW, e não CRITICAL</h2>
+     *
+     * Era CRITICAL (−20 no score) — o maior peso do módulo — pela ameaça de
+     * Cross-Site Tracing (XST): ler cookie HttpOnly mandando TRACE via script. Só que
+     * o vetor MORREU: todo navegador atual recusa TRACE em XMLHttpRequest/fetch desde
+     * ~2010, e o Flash, que era a outra ponta, não existe mais. TRACE habilitado hoje
+     * é falha de ENDURECIMENTO — vale desabilitar —, não roubo de sessão explorável.
+     *
+     * A calibração estava invertida: TRACE (inofensivo na prática) pesava mais que PUT
+     * e DELETE, que sem autenticação dão upload de webshell (RCE) e remoção de arquivo.
+     * Estes seguem HIGH; TRACE desce para LOW, e o −20 vira −3 no {@code ScoreService}.
      */
     private static final Map<String, MethodRisk> METHOD_RISKS = Map.of(
-            "TRACE",   new MethodRisk("CRITICAL", "METHOD_TRACE"),
-            "PUT",     new MethodRisk("HIGH",     "METHOD_PUT"),
-            "DELETE",  new MethodRisk("HIGH",     "METHOD_DELETE")
+            "TRACE",   new MethodRisk("LOW",  "METHOD_TRACE"),
+            "PUT",     new MethodRisk("HIGH", "METHOD_PUT"),
+            "DELETE",  new MethodRisk("HIGH", "METHOD_DELETE")
     );
 
     /**
@@ -116,8 +128,9 @@ public class HttpMethodService {
 
         boolean requiresAuth = requerAuth(p.status());
 
-        // PUT/DELETE atrás de autenticação = API REST bem-comportada. Só interessa
-        // se acessível sem auth, ou se for TRACE (o XST vale mesmo com auth).
+        // PUT/DELETE atrás de autenticação = API REST bem-comportada, não achado. TRACE
+        // segue reportado mesmo com auth, mas só como item de endurecimento LOW: é o
+        // eco da requisição, e desligá-lo é a boa prática independente de auth.
         if (requiresAuth && !"TRACE".equals(method)) return null;
 
         String severity = requiresAuth ? "LOW" : risk.severity();

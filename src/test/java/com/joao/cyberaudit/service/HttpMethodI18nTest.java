@@ -85,12 +85,12 @@ class HttpMethodI18nTest {
     void ressalvaDeAutenticacao() {
         LocaleContextHolder.setLocale(Locale.ENGLISH);
         String en = servico().describeRisk("METHOD_TRACE", true);
-        assertTrue(en.startsWith("TRACE enabled allows Cross-Site Tracing"), en);
+        assertTrue(en.startsWith("TRACE echoes the request back"), en);
         assertTrue(en.endsWith("(requires authentication)"), en);
 
         LocaleContextHolder.setLocale(Locale.forLanguageTag("pt-BR"));
         String pt = servico().describeRisk("METHOD_TRACE", true);
-        assertTrue(pt.startsWith("TRACE habilitado permite Cross-Site Tracing"), pt);
+        assertTrue(pt.startsWith("TRACE ecoa a requisição de volta"), pt);
         assertTrue(pt.endsWith("(requer autenticação)"), pt);
     }
 }

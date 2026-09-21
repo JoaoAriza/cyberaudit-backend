@@ -105,13 +105,16 @@ class HttpMethodControlProbeTest {
     }
 
     @Test
-    @DisplayName("TRACE aceito num servidor que discrimina continua CRITICAL")
-    void traceAceitoEhCritical() {
+    @DisplayName("TRACE aceito num servidor que discrimina é achado LOW (endurecimento)")
+    void traceAceitoEhLow() {
+        // TRACE habilitado é detectado (200 sem HTML = TRACE respondeu), mas vale LOW:
+        // o XST via script foi morto pelos navegadores. CRITICAL/-20 era exagero — ver
+        // METHOD_RISKS no HttpMethodService.
         var r = com(Map.of(
                 HttpMethodService.CONTROL_METHOD, new int[]{501},
                 "TRACE", new int[]{200}));   // 200 sem HTML = TRACE respondeu
 
-        assertEquals("CRITICAL", acha(r.scan("https://alvo.exemplo.com/"), "TRACE").orElseThrow().getSeverity());
+        assertEquals("LOW", acha(r.scan("https://alvo.exemplo.com/"), "TRACE").orElseThrow().getSeverity());
     }
 
     // ── Autenticação: não é catch-all, e rebaixa ──────────────────────────────
@@ -138,7 +141,7 @@ class HttpMethodControlProbeTest {
         List<HttpMethodFinding> fs = r.scan("https://alvo.exemplo.com/");
         assertTrue(acha(fs, "PUT").isEmpty(), "PUT atrás de auth é API REST correta, não achado");
         assertEquals("LOW", acha(fs, "TRACE").orElseThrow().getSeverity(),
-                "TRACE reflete a requisição mesmo com auth (XST), então é reportado, mas rebaixado");
+                "TRACE segue reportado (é eco da requisição, vale desligar), mas só como LOW de endurecimento");
     }
 
     // ── Robustez ──────────────────────────────────────────────────────────────
