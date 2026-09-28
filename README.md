@@ -179,6 +179,9 @@ ausência de risco. (O score não é penalizado pela falha de coleta, só sinali
 - **Anti-SSRF (`SsrfGuard`)** — toda URL de scan é validada antes de qualquer requisição;
   bloqueia loopback, link-local (inclui metadata cloud `169.254.169.254`), redes privadas
   RFC 1918, CGNAT e ULA IPv6. Evita que o backend seja usado como proxy de SSRF / port-scanner.
+  Os endereços validados são fixados via `SsrfPinningResolverProvider` (SPI de resolução de
+  DNS da JVM, JEP 418) — a conexão real usa o mesmo `InetAddress` já auditado, fechando o
+  TOCTOU de DNS rebinding em vez de só reduzir a janela por cache.
 - **Scan ativo gated** — exige autenticação **e** verificação de propriedade do domínio
   (`DomainProtectionService`, arquivo `/.well-known/cyberaudit.txt`) ou role OWNER/ADMIN.
 - **Rate limiting** — por IP (visitante) e por usuário; limite diário de scans para guests;
@@ -321,8 +324,6 @@ com.joao.cyberaudit
   rodam quando a URL tem superfície de input (`?param=…`). Escanear só a home raramente
   exercita esses módulos — o relatório deixa isso explícito (SKIPPED), mas adicionar um
   crawler leve aumentaria muito a cobertura.
-- **SSRF / DNS-rebinding.** O `SsrfGuard` bloqueia o alvo direto interno, mas não fixa o IP
-  na conexão — fechar o rebinding (TOCTOU) exige pinning do IP resolvido no fetch.
 - **PSL é um snapshot.** `public_suffix_list.dat` tem data de versão; precisa de refresh
   periódico (re-baixar de publicsuffix.org).
 - **Port scan atrás de CDN.** Resolve o IP do edge (Cloudflare/Vercel), não a origem.

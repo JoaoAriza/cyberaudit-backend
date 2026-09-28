@@ -27,7 +27,8 @@ nível de risco, issues e relatórios (texto/PDF).
 
 **Backlog técnico já identificado (não feito):**
 - Sem crawler → probes de injeção (XSS/SQLi/SSRF/LFI/CRLF) só rodam com `?param=`.
-- SSRF: DNS-rebinding não fechado (residual).
+- ~~SSRF: DNS-rebinding não fechado (residual)~~ — fechado 2026-09-27 via bump para
+  Java 21 + `SsrfPinningResolverProvider` (JEP 418). Ver `docs/SECURITY_REVIEW_SCOPE.md`.
 - PSL é snapshot → refresh periódico.
 - `App.tsx` é monolito (~6k linhas) → candidato a refactor por feature.
 - ⭐ **Falta limite global de scans concorrentes** (semáforo no `ScanOrchestrator`) —
