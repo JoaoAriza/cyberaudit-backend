@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.controller;
 
 import com.joao.cyberaudit.exception.DomainBlockedException;
+import com.joao.cyberaudit.exception.DomainOwnershipRequiredException;
 import com.joao.cyberaudit.exception.GuestDailyLimitException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import com.joao.cyberaudit.exception.ScanCapacityException;
@@ -31,6 +32,24 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                 "error",     "OWNERSHIP_REQUIRED",
                 "message",   ex.getMessage(),
+                "timestamp", LocalDateTime.now().toString()
+        ));
+    }
+
+    /**
+     * Distinto de OWNERSHIP_REQUIRED (checagem ao vivo do arquivo, ver
+     * {@link OwnershipNotVerifiedException}): este código diz ao cliente que o
+     * remédio é cadastrar+verificar o domínio na conta (POST /domains, depois
+     * POST /domains/{id}/verify) — reconferir o arquivo sozinho não desbloqueia
+     * o scan, porque quem trava aqui é o cadastro, não o arquivo.
+     */
+    @ExceptionHandler(DomainOwnershipRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleDomainOwnership(
+            DomainOwnershipRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "error",     "ACCOUNT_DOMAIN_NOT_VERIFIED",
+                "message",   ex.getMessage(),
+                "host",      ex.getHost(),
                 "timestamp", LocalDateTime.now().toString()
         ));
     }

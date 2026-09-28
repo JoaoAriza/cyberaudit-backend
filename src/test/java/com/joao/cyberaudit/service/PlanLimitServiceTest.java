@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.exception.DomainOwnershipRequiredException;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
@@ -102,6 +103,116 @@ class PlanLimitServiceTest {
         assertFalse(plano.pdfExportAllowed,     "PDF virou recurso pago");
         assertFalse(plano.emailNotifyAllowed,   "notificação por e-mail virou recurso pago");
         assertEquals(10, plano.dailyScanLimit,  "FREE tem limite diário, não ilimitado");
+    }
+
+    // ── Contador diário de scans ──────────────────────────────────────────────
+
+    /**
+     * O que motivou este teste: em produção o badge da UI (remainingScans/dailyLimit)
+     * não se move depois de um scan — ele só é buscado no login/boot, e nada chama
+     * refreshUser() quando um scan termina. Isso deixou dúvida se o bloqueio em si
+     * funciona, ou se o contador do backend também está travado. Aqui não tem tela:
+     * chama checkAndIncrementDailyScan direto, a mesma chamada que ScanController
+     * faz por trás de cada /scan e /scan/async.
+     */
+    @Test
+    @DisplayName("FREE consome a cota a cada scan e é bloqueado exatamente no 11o do dia")
+    void freeBloqueiaAposODecimoScanDoDia() {
+        var service = service("");
+        var free    = cadastroComum(Plan.FREE);
+
+        for (int i = 1; i <= 10; i++) {
+            final int n = i;
+            assertDoesNotThrow(() -> service.checkAndIncrementDailyScan(free),
+                    "scan " + n + " deveria passar (dentro do limite de 10)");
+            assertEquals(10 - i, service.getRemainingScans(free),
+                    "restantes deveria refletir o uso apos o scan " + n);
+        }
+
+        var erro = assertThrows(ResponseStatusException.class,
+                () -> service.checkAndIncrementDailyScan(free),
+                "o 11o scan do dia deveria ser bloqueado");
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, erro.getStatusCode());
+
+        // A tentativa bloqueada não pode ter consumido cota: senão o contador
+        // vazaria abaixo de zero a cada nova tentativa depois do limite.
+        assertEquals(0, service.getRemainingScans(free));
+    }
+
+    @Test
+    @DisplayName("o contador diário é por conta: duas contas FREE não compartilham cota")
+    void contadorDiarioEPorConta() {
+        var service = service("");
+        var contaA  = cadastroComum(Plan.FREE);
+        var contaB  = usuario("outra@example.com", Role.OWNER, Plan.FREE, AccountType.INDIVIDUAL);
+
+        for (int i = 0; i < 10; i++) service.checkAndIncrementDailyScan(contaA);
+
+        assertEquals(0, service.getRemainingScans(contaA));
+        assertEquals(10, service.getRemainingScans(contaB),
+                "conta B não deveria ter sido afetada pelo consumo da conta A");
+        assertDoesNotThrow(() -> service.checkAndIncrementDailyScan(contaB));
+    }
+
+    // ── Scan ativo em domínio de terceiro ─────────────────────────────────────
+
+    /**
+     * checkActiveScan nunca tinha teste direto — só checkPdfExport/checkEmailNotify,
+     * que passam pela mesma verificação de domínio mas não são o mesmo método. Esta
+     * é a checagem que decide se o botão ACTIVE efetivamente dispara port scan e
+     * probes de injeção contra um host, então merece cobertura própria.
+     */
+    @Test
+    @DisplayName("PRO tenta scan ativo em domínio de terceiro — DomainOwnershipRequiredException, mesmo pagando")
+    void proBloqueiaScanAtivoEmDominioNaoVerificado() {
+        var service = serviceComVerificados("meu-dominio.com");
+        var pro     = cadastroComum(Plan.PRO);
+
+        var erro = assertThrows(DomainOwnershipRequiredException.class,
+                () -> service.checkActiveScan(pro, "site-de-terceiro.com"));
+        assertEquals("site-de-terceiro.com", erro.getHost());
+        assertTrue(erro.getMessage().contains("domínios verificados"),
+                "mensagem deveria orientar a verificar o domínio, não só recusar");
+    }
+
+    @Test
+    @DisplayName("ENTERPRISE também precisa verificar o domínio — plano mais caro não pula a prova de posse")
+    void enterpriseNaoPulaVerificacaoDeDominio() {
+        var service    = serviceComVerificados();   // nenhum domínio verificado
+        var enterprise = usuario(CLIENTE, Role.OWNER, Plan.ENTERPRISE, AccountType.COMPANY);
+
+        assertThrows(DomainOwnershipRequiredException.class,
+                () -> service.checkActiveScan(enterprise, "site-de-terceiro.com"));
+    }
+
+    @Test
+    @DisplayName("PRO com o domínio verificado (exato ou subdomínio) passa no scan ativo")
+    void proLiberaScanAtivoNoProprioDominioEDominioFilho() {
+        var service = serviceComVerificados("meu-dominio.com");
+        var pro     = cadastroComum(Plan.PRO);
+
+        assertDoesNotThrow(() -> service.checkActiveScan(pro, "https://meu-dominio.com/rota"));
+        assertDoesNotThrow(() -> service.checkActiveScan(pro, "api.meu-dominio.com"));
+    }
+
+    @Test
+    @DisplayName("FREE pessoal nem chega a checar domínio — 402 direto por causa do plano")
+    void freeIndividualBloqueiaScanAtivoAntesDoDominio() {
+        var service = serviceComVerificados("qualquer-dominio.com");
+        var free    = cadastroComum(Plan.FREE);
+
+        var erro = assertThrows(ResponseStatusException.class,
+                () -> service.checkActiveScan(free, "qualquer-dominio.com"));
+        assertEquals(HttpStatus.PAYMENT_REQUIRED, erro.getStatusCode(),
+                "FREE individual é barrado pelo plano (402), nem chega no check de domínio (403)");
+    }
+
+    @Test
+    @DisplayName("equipe da plataforma dispensa a prova de posse")
+    void staffDispensaVerificacaoDeDominio() {
+        var staff = usuario(STAFF, Role.OWNER, Plan.FREE, AccountType.INDIVIDUAL);
+
+        assertDoesNotThrow(() -> service(STAFF).checkActiveScan(staff, "qualquer-site.com"));
     }
 
     // ── Entrega de laudo: PDF e e-mail ───────────────────────────────────────

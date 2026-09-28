@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.service;
 
+import com.joao.cyberaudit.exception.DomainOwnershipRequiredException;
 import com.joao.cyberaudit.model.Account;
 import com.joao.cyberaudit.model.AccountType;
 import com.joao.cyberaudit.model.AppUser;
@@ -151,9 +152,12 @@ public class PlanLimitService {
                 || isVerifiedForAccount(account, parentDomain(host));
 
         if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+            // Exceção dedicada (não ResponseStatusException): o frontend precisa
+            // distinguir isto do "arquivo não confere" — o remédio aqui é cadastrar
+            // e verificar o domínio na conta, não só reconferir o .well-known.
+            throw new DomainOwnershipRequiredException(host,
                     "Scan ativo só é permitido em domínios verificados na sua conta. "
-                    + "Acesse Domínios, cadastre e verifique \"" + host + "\" para continuar.");
+                    + "Cadastre e verifique \"" + host + "\" para continuar.");
         }
     }
 

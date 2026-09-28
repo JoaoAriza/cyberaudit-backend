@@ -105,7 +105,8 @@ public class AsyncScanService {
         // idioma de QUEM PERGUNTOU — o feed acompanha quem troca de idioma no meio.
         AsyncScanStatus s = entry.status();
         return new AsyncScanStatus(s.getScanId(), s.getState(), s.getResult(),
-                s.getErrorMessage(), entry.progresso().instantaneo());
+                s.getErrorMessage(), s.getErrorCode(), s.getErrorHost(),
+                entry.progresso().instantaneo());
     }
 
     /**
@@ -149,8 +150,12 @@ public class AsyncScanService {
             // applyEntitlement nunca muta o cache — `visivel` é cópia quando trava.
             put(scanId, new AsyncScanStatus(scanId, State.DONE, visivel, null), ownerKey);
         } catch (Exception e) {
-            put(scanId, new AsyncScanStatus(scanId, State.ERROR, null,
-                    safeErrorMessage(e)), ownerKey);
+            com.joao.cyberaudit.exception.OwnershipNotVerifiedException ownership = findOwnership(e);
+            put(scanId, ownership != null
+                    ? new AsyncScanStatus(scanId, State.ERROR, null, ownership.getMessage(),
+                            "OWNERSHIP_REQUIRED", ownership.getHost())
+                    : new AsyncScanStatus(scanId, State.ERROR, null, safeErrorMessage(e)),
+                    ownerKey);
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }
@@ -182,6 +187,21 @@ public class AsyncScanService {
             }
         }
         return "Erro ao executar o scan. Verifique a URL e tente novamente.";
+    }
+
+    /**
+     * Procura um OwnershipNotVerifiedException na cadeia de causas, para dar ao
+     * cliente o código+host estruturados em vez de só o texto livre de
+     * {@link #safeErrorMessage}. Sem isto o polling não tinha como saber que este
+     * erro específico merece o card de verificação de posse, não um erro genérico.
+     */
+    private com.joao.cyberaudit.exception.OwnershipNotVerifiedException findOwnership(Throwable error) {
+        for (Throwable t = error; t != null && t != t.getCause(); t = t.getCause()) {
+            if (t instanceof com.joao.cyberaudit.exception.OwnershipNotVerifiedException ownership) {
+                return ownership;
+            }
+        }
+        return null;
     }
 
     // ── Interno ──────────────────────────────────────────────────────────────

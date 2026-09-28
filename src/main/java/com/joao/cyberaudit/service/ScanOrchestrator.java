@@ -461,7 +461,7 @@ public class ScanOrchestrator {
                 boolean bypassOwnership = platformStaffService.isStaff(currentUser);
                 if (!bypassOwnership &&
                         !domainProtectionService.isOwnershipVerified(host)) {
-                    throw new OwnershipNotVerifiedException(passiveResult,
+                    throw new OwnershipNotVerifiedException(passiveResult, host,
                             "Scan ativo não autorizado para este domínio. " +
                                     "Apenas o proprietário verificado pode executar scans ativos. " +
                                     "Acesse /scan/verify-token?host=" + host +
