@@ -1,5 +1,5 @@
 # ── build ─────────────────────────────────────────────────────────────────────
-FROM maven:3.9.6-eclipse-temurin-17 AS build
+FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
 
 COPY pom.xml .
@@ -11,7 +11,7 @@ RUN mvn -q -DskipTests package
 # ── runtime ───────────────────────────────────────────────────────────────────
 # Alpine em vez do JRE completo: superfície de CVE bem menor. fontconfig/ttf-dejavu
 # são necessários porque o PDFBox usa AWT ao desenhar o relatório.
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
 RUN apk add --no-cache fontconfig ttf-dejavu curl \

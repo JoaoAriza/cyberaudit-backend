@@ -5,6 +5,7 @@ import com.joao.cyberaudit.exception.DomainBlockedException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -18,9 +19,11 @@ import java.util.Set;
  * Também desembrulha IPv4 embutido em IPv6 (mapped, 6to4, NAT64), usado para
  * mascarar alvos internos atrás de um endereço v6 aparentemente público.
  *
- * DNS rebinding: a janela entre validação e conexão é reduzida pelo cache de DNS
- * positivo da JVM (networkaddress.cache.ttl, ver DnsCacheConfig) — o endereço
- * validado aqui é o mesmo que o HttpClient usa dentro do TTL.
+ * DNS rebinding: os endereços validados aqui são fixados em {@link ScanDnsPinRegistry}
+ * e devolvidos por {@link SsrfPinningResolverProvider} a qualquer resolução seguinte
+ * do mesmo host — inclusive a que o {@code HttpClient} faz internamente ao conectar,
+ * em outra thread. Não há uma segunda consulta DNS cujo resultado poderia divergir:
+ * a conexão usa exatamente o {@link InetAddress} já auditado.
  */
 public final class SsrfGuard {
 
@@ -95,6 +98,11 @@ public final class SsrfGuard {
                                 + addr.getHostAddress() + "). Apenas alvos públicos são permitidos.");
             }
         }
+
+        // Fixa os endereços já auditados: a próxima resolução deste host (a que o
+        // HttpClient faz ao conectar) devolve estes mesmos objetos em vez de
+        // consultar o DNS de novo. Ver SsrfPinningResolverProvider.
+        ScanDnsPinRegistry.pin(normalized, List.of(addresses));
     }
 
     /** true se a URL é aceitável — versão não-lançante, para filtrar candidatos. */

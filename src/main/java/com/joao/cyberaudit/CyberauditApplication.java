@@ -30,12 +30,14 @@ public class CyberauditApplication {
     }
 
     /**
-     * Fixa o TTL do cache de DNS da JVM para reduzir a janela de DNS rebinding.
+     * Fixa o TTL do cache de DNS da JVM.
      *
-     * O SsrfGuard resolve o host para validar e o HttpClient resolve de novo para
-     * conectar. Com TTL 0 (padrão quando não há SecurityManager) um alvo hostil pode
-     * responder um IP público na primeira resolução e 169.254.169.254 na segunda.
-     * Com TTL positivo as duas resoluções vêm da mesma entrada de cache.
+     * Não é mais a defesa contra DNS rebinding — isso agora é responsabilidade do
+     * {@code SsrfPinningResolverProvider} (JEP 418), que fixa o endereço exato
+     * validado pelo {@code SsrfGuard} para qualquer resolução seguinte do mesmo
+     * host, sem depender de cache. Este TTL fica só por higiene de performance:
+     * com TTL 0 (padrão quando não há SecurityManager) cada uma das dezenas de
+     * requisições que um scan faz ao mesmo domínio dispararia uma consulta DNS nova.
      *
      * Precisa rodar antes do primeiro InetAddress.getByName do processo — a política
      * é lida uma única vez na inicialização de InetAddressCachePolicy.
