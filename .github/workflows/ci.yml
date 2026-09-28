@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    name: Test & build (JDK 17)
+    name: Test & build (JDK 21)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: maven
 
       # verify (e não test) de propósito: roda a suíte E o empacotamento do jar,
