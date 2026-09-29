@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
  */
 class BillingServiceTest {
 
-    private static final BigDecimal PRO_PRICE = new BigDecimal("29.90");
+    private static final BigDecimal PRO_PRICE = new BigDecimal("19.99");
 
     private SubscriptionRepository subscriptionRepository;
     private AccountRepository      accountRepository;
@@ -48,7 +48,7 @@ class BillingServiceTest {
 
         billingService = new BillingService(subscriptionRepository, accountRepository, mpService);
         ReflectionTestUtils.setField(billingService, "proAmount", PRO_PRICE);
-        ReflectionTestUtils.setField(billingService, "enterpriseAmount", new BigDecimal("99.90"));
+        ReflectionTestUtils.setField(billingService, "enterpriseAmount", new BigDecimal("59.99"));
         ReflectionTestUtils.setField(billingService, "currency", "BRL");
 
         account = Account.builder()

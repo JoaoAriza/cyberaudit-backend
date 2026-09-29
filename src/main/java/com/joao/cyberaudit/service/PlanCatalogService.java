@@ -45,8 +45,8 @@ public class PlanCatalogService {
     public static final String ACTIVE_SCAN         = "ACTIVE_SCAN";
 
     @Value("${billing.currency:BRL}")            private String     currency;
-    @Value("${billing.pro.amount:29.90}")        private BigDecimal proAmount;
-    @Value("${billing.enterprise.amount:99.90}") private BigDecimal enterpriseAmount;
+    @Value("${billing.pro.amount:19.99}")        private BigDecimal proAmount;
+    @Value("${billing.enterprise.amount:59.99}") private BigDecimal enterpriseAmount;
 
     /** Os três planos, na ordem em que os cards aparecem. */
     public List<PlanCatalogDto> catalogo() {

@@ -225,7 +225,7 @@ public class PlanLimitService {
      *  PRO EMPRESA / ENTERPRISE → sem restrição de domínio
      *
      * A tela pode mostrar o laudo de qualquer site — é consulta. O que a posse
-     * governa é o ENTREGÁVEL: sem ela, a assinatura pessoal de R$ 29,90 viraria
+     * governa é o ENTREGÁVEL: sem ela, a assinatura pessoal de R$ 19,99 viraria
      * gerador de auditoria de site de terceiro em PDF timbrado.
      *
      * Não há check de staff aqui: {@link #effectivePlan(AppUser)} já promove a

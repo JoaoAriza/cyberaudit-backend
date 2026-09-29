@@ -37,10 +37,10 @@ class BillingPlansEndpointTest {
                 .andExpect(jsonPath("$[0].plan").value("FREE"))
                 .andExpect(jsonPath("$[0].amount").doesNotExist())   // FREE não se assina
                 .andExpect(jsonPath("$[1].plan").value("PRO"))
-                .andExpect(jsonPath("$[1].amount").value(29.90))
+                .andExpect(jsonPath("$[1].amount").value(19.99))
                 .andExpect(jsonPath("$[1].currency").value("BRL"))
                 .andExpect(jsonPath("$[2].plan").value("ENTERPRISE"))
-                .andExpect(jsonPath("$[2].amount").value(99.90));
+                .andExpect(jsonPath("$[2].amount").value(59.99));
     }
 
     @Test

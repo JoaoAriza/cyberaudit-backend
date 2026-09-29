@@ -35,8 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PlanCatalogServiceTest {
 
-    private static final BigDecimal PRECO_PRO        = new BigDecimal("29.90");
-    private static final BigDecimal PRECO_ENTERPRISE = new BigDecimal("99.90");
+    private static final BigDecimal PRECO_PRO        = new BigDecimal("19.99");
+    private static final BigDecimal PRECO_ENTERPRISE = new BigDecimal("59.99");
 
     private PlanCatalogService service() {
         var s = new PlanCatalogService();

@@ -32,8 +32,8 @@ public class BillingService {
     private final AccountRepository accountRepository;
     private final MercadoPagoService mpService;
 
-    @Value("${billing.pro.amount:29.90}")        private BigDecimal proAmount;
-    @Value("${billing.enterprise.amount:99.90}") private BigDecimal enterpriseAmount;
+    @Value("${billing.pro.amount:19.99}")        private BigDecimal proAmount;
+    @Value("${billing.enterprise.amount:59.99}") private BigDecimal enterpriseAmount;
     @Value("${billing.currency:BRL}")            private String currency;
     @Value("${app.base-url:http://localhost:5173}") private String appBaseUrl;
 
