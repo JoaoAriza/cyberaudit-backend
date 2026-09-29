@@ -46,8 +46,21 @@ public class Subscription {
     @Column(name = "mp_payment_id", unique = true)
     private String mpPaymentId;
 
+    /**
+     * Nullable de propósito, mesmo todo registro NOVO sempre vir com um valor
+     * (ver {@code @Builder.Default}): {@code ddl-auto=update} tentou adicionar esta
+     * coluna como NOT NULL numa tabela de produção que já tinha linhas, e o Postgres
+     * recusa isso sem um default — a migração falhava silenciosamente no boot
+     * (Hibernate loga o erro e segue, a coluna nunca chegava a existir). Nullable
+     * evita a migração quebrar, e toda leitura já trata NULL corretamente por
+     * semântica de SQL: uma linha antiga (sempre cartão, de antes desta coluna
+     * existir) nunca casa com `payment_method = 'PIX'`
+     * (ver {@link com.joao.cyberaudit.repository.SubscriptionRepository#findByPaymentMethodAndStatusAndCurrentPeriodEndBefore}),
+     * então o job de expiração do Pix simplesmente ignora essas linhas, que é o
+     * comportamento certo.
+     */
     @Enumerated(EnumType.STRING)
-    @Column(name = "payment_method", nullable = false, length = 10)
+    @Column(name = "payment_method", length = 10)
     @Builder.Default
     private PaymentMethod paymentMethod = PaymentMethod.CARD;
 
