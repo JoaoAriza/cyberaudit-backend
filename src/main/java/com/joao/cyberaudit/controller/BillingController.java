@@ -2,6 +2,7 @@ package com.joao.cyberaudit.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.joao.cyberaudit.dto.PixCheckoutDto;
 import com.joao.cyberaudit.dto.PlanCatalogDto;
 import com.joao.cyberaudit.dto.SubscriptionDto;
 import com.joao.cyberaudit.model.AppUser;
@@ -30,16 +31,28 @@ import java.util.Map;
 
 /**
  * Endpoints de billing/assinatura.
- * /billing/subscribe|subscription|cancel → autenticados (regra /billing/** no SecurityConfig).
+ * /billing/subscribe|subscription|cancel|checkout/** → autenticados (regra /billing/** no SecurityConfig).
+ * /billing/checkout/card|pix → checkout transparente (tela própria do CyberAudit, sem
+ * redirecionar pro MP) — ver {@link BillingService#startCardCheckout} e
+ * {@link BillingService#startPixCheckout}.
  * /billing/plans → público: é o cardápio, e visitante precisa vê-lo antes de ter conta.
  * /billing/webhook → público (Mercado Pago), mas confirma tudo contra a API do MP e valida
- * a assinatura x-signature quando o secret está configurado.
+ * a assinatura x-signature quando o secret está configurado. Trata dois topics:
+ * preapproval (assinatura via cartão) e payment (Pix).
  */
 @RestController
 public class BillingController {
 
     /** Teto de notificações aceitas por minuto e por IP. O MP real fica muito abaixo disso. */
     private static final int WEBHOOK_MAX_PER_MINUTE = 60;
+
+    /**
+     * Teto de tentativas de checkout transparente por usuário/minuto. Baixo de
+     * propósito: diferente do redirect pro MP, aqui o próprio backend aceita
+     * cardTokenId/CPF direto — sem teto, vira superfície de teste de cartão roubado
+     * (tentar vários tokens até um "authorized" passar).
+     */
+    private static final int CHECKOUT_MAX_PER_MINUTE = 5;
 
     private final BillingService     billingService;
     private final MercadoPagoService mercadoPagoService;
@@ -85,17 +98,36 @@ public class BillingController {
     @PostMapping("/billing/subscribe")
     public Map<String, String> subscribe(@AuthenticationPrincipal AppUser caller,
                                          @RequestBody(required = false) Map<String, String> body) {
-        Plan escolhido = null;
-        String bruto = body == null ? null : body.get("plan");
-        if (bruto != null && !bruto.isBlank()) {
-            try {
-                escolhido = Plan.valueOf(bruto.trim().toUpperCase(Locale.ROOT));
-            } catch (IllegalArgumentException e) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Plano inválido: " + bruto + ". Use PRO ou ENTERPRISE.");
-            }
-        }
+        Plan escolhido = parsePlan(body == null ? null : body.get("plan"));
         return Map.of("initPoint", billingService.startSubscription(caller, escolhido));
+    }
+
+    // ── Checkout transparente (tela própria, sem redirecionamento) ────────────────
+
+    /**
+     * Body: {"plan":"PRO"|"ENTERPRISE" (opcional), "cardTokenId":"..."}.
+     * cardTokenId vem do SDK do Mercado Pago no navegador (mp.cardForm) — este
+     * endpoint nunca recebe número de cartão, CVV ou validade.
+     */
+    @PostMapping("/billing/checkout/card")
+    public SubscriptionDto checkoutCard(@AuthenticationPrincipal AppUser caller,
+                                        @RequestBody Map<String, String> body) {
+        enforceCheckoutRateLimit(caller);
+        Plan escolhido = parsePlan(body.get("plan"));
+        return billingService.startCardCheckout(caller, escolhido, body.get("cardTokenId"));
+    }
+
+    /**
+     * Body: {"plan":"PRO"|"ENTERPRISE" (opcional), "cpf":"..."}.
+     * Devolve o QR code/copia-e-cola; o cliente confirma pagando no próprio app do
+     * banco — o plano só é liberado quando o webhook confirmar o payment.
+     */
+    @PostMapping("/billing/checkout/pix")
+    public PixCheckoutDto checkoutPix(@AuthenticationPrincipal AppUser caller,
+                                      @RequestBody Map<String, String> body) {
+        enforceCheckoutRateLimit(caller);
+        Plan escolhido = parsePlan(body.get("plan"));
+        return billingService.startPixCheckout(caller, escolhido, body.get("cpf"));
     }
 
     @GetMapping("/billing/subscription")
@@ -140,9 +172,12 @@ public class BillingController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("invalid signature");
             }
 
-            // Processa apenas notificações de assinatura (preapproval).
-            if (type != null && type.contains("preapproval") && dataId != null) {
+            // preapproval → assinatura via cartão (hospedado ou transparente).
+            // payment    → Pix (cada ciclo é um payment novo, nunca um preapproval).
+            if (dataId != null && type != null && type.contains("preapproval")) {
                 billingService.handleWebhook(dataId);
+            } else if (dataId != null && "payment".equals(type)) {
+                billingService.handlePaymentWebhook(dataId);
             }
         } catch (Exception e) {
             // Nunca propaga — responde 200 para o MP não reenviar em loop; loga para diagnóstico.
@@ -203,5 +238,23 @@ public class BillingController {
     private static String firstNonBlank(String... vals) {
         for (String v : vals) if (v != null && !v.isBlank()) return v;
         return null;
+    }
+
+    private Plan parsePlan(String bruto) {
+        if (bruto == null || bruto.isBlank()) return null;
+        try {
+            return Plan.valueOf(bruto.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Plano inválido: " + bruto + ". Use PRO ou ENTERPRISE.");
+        }
+    }
+
+    private void enforceCheckoutRateLimit(AppUser caller) {
+        String key = "billing-checkout:" + caller.getId();
+        if (!rateLimitService.allow(key, CHECKOUT_MAX_PER_MINUTE, 60_000)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Muitas tentativas de checkout. Aguarde um minuto e tente de novo.");
+        }
     }
 }

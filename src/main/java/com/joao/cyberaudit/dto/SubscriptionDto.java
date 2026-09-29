@@ -1,5 +1,6 @@
 package com.joao.cyberaudit.dto;
 
+import com.joao.cyberaudit.model.PaymentMethod;
 import com.joao.cyberaudit.model.Plan;
 import com.joao.cyberaudit.model.Subscription;
 import com.joao.cyberaudit.model.SubscriptionStatus;
@@ -17,6 +18,9 @@ public class SubscriptionDto {
     private UUID id;
     private Plan plan;
     private SubscriptionStatus status;
+    private PaymentMethod paymentMethod;
+    /** Só preenchido para PIX — até quando o plano liberado por este pagamento continua válido. */
+    private LocalDateTime currentPeriodEnd;
     private BigDecimal amount;
     private String currency;
     private LocalDateTime createdAt;
@@ -28,6 +32,8 @@ public class SubscriptionDto {
                 .id(s.getId())
                 .plan(s.getPlan())
                 .status(s.getStatus())
+                .paymentMethod(s.getPaymentMethod())
+                .currentPeriodEnd(s.getCurrentPeriodEnd())
                 .amount(s.getAmount())
                 .currency(s.getCurrency())
                 .createdAt(s.getCreatedAt())

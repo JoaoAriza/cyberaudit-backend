@@ -12,9 +12,10 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Assinatura recorrente de uma conta, vinculada a um preapproval do Mercado Pago.
- * O upgrade/downgrade do {@link Account#getPlan()} é dirigido pelo status desta assinatura,
- * confirmado sempre contra a API do MP (nunca só pelo corpo do webhook).
+ * Assinatura de uma conta, vinculada a um preapproval (CARD) ou a um payment (PIX)
+ * do Mercado Pago — ver {@link PaymentMethod}. O upgrade/downgrade do
+ * {@link Account#getPlan()} é dirigido pelo status desta assinatura, confirmado
+ * sempre contra a API do MP (nunca só pelo corpo do webhook).
  */
 @Entity
 @Table(name = "subscriptions", indexes = {
@@ -37,9 +38,26 @@ public class Subscription {
     @Column(nullable = false, length = 20)
     private Plan plan;
 
-    /** id do preapproval no Mercado Pago. */
+    /** id do preapproval no Mercado Pago. Só para PaymentMethod.CARD. */
     @Column(name = "mp_preapproval_id", unique = true)
     private String mpPreapprovalId;
+
+    /** id do payment no Mercado Pago. Só para PaymentMethod.PIX — cada ciclo é um payment novo. */
+    @Column(name = "mp_payment_id", unique = true)
+    private String mpPaymentId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_method", nullable = false, length = 10)
+    @Builder.Default
+    private PaymentMethod paymentMethod = PaymentMethod.CARD;
+
+    /**
+     * Até quando o plano liberado por este pagamento continua válido.
+     * Só para PaymentMethod.PIX: CARD renova sozinho via preapproval e não precisa
+     * de prazo — o status do MP já diz se está ativo. Ver {@link SubscriptionStatus#EXPIRED}.
+     */
+    @Column(name = "current_period_end")
+    private LocalDateTime currentPeriodEnd;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
