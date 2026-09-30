@@ -1,152 +1,159 @@
-# HANDOFF — CyberAudit (próxima fase)
+# HANDOFF — CyberAudit (checkout transparente: o que falta)
 
-> Cole/abra este arquivo no chat novo. Ele resume **o estado atual** do projeto e os
-> **próximos passos** (as ideias novas). Foi criado porque a janela de contexto do chat
-> anterior encheu.
-
----
-
-## 0. Contexto rápido (para o novo chat se situar)
-
-**CyberAudit** = scanner de postura de segurança de sites. A partir de uma URL, avalia
-TLS, headers, DNS/e-mail, exposições e vulnerabilidades comuns, e dá uma nota 0–100 com
-nível de risco, issues e relatórios (texto/PDF).
-
-- **Backend:** `Seg_site` — Spring Boot 3.2.5 + Java 17 + PostgreSQL. Ver `README.md`.
-- **Frontend:** `cyberaudit-ui` — React 19 + TS + Vite. Ver o `README.md` dele.
-- Scan passivo (aberto, com rate-limit) × ativo (autenticado + prova de propriedade).
-
-**O que a última rodada entregou** (já commitado):
-- Anti-falso-positivo: SsrfGuard, CSP via `<meta>`, apex via Public Suffix List,
-  CVE "potencial", WAF por bloqueio diferencial, host-header no body = LOW,
-  debug-endpoints por marcador.
-- Resultado parcial honesto (`moduleStatus` OK/TIMEOUT/SKIPPED), `analyzedHost`,
-  auditoria de **hosts relacionados** (api./server./www.).
-- Cor do score por nível de risco (Scanner e Histórico consistentes).
-- Layout da tabela de Agendamentos, limpeza de comentários, READMEs dos dois repos.
-
-**Backlog técnico já identificado (não feito):**
-- Sem crawler → probes de injeção (XSS/SQLi/SSRF/LFI/CRLF) só rodam com `?param=`.
-- ~~SSRF: DNS-rebinding não fechado (residual)~~ — fechado 2026-09-27 via bump para
-  Java 21 + `SsrfPinningResolverProvider` (JEP 418). Ver `docs/SECURITY_REVIEW_SCOPE.md`.
-- PSL é snapshot → refresh periódico.
-- `App.tsx` é monolito (~6k linhas) → candidato a refactor por feature.
-- ⭐ **Falta limite global de scans concorrentes** (semáforo no `ScanOrchestrator`) —
-  é a melhoria #1 de capacidade antes de escalar hardware.
+> Cole/abra este arquivo no chat novo. Resume o estado atual e o que falta do
+> checkout transparente (Pix + cartão). Criado em 2026-09-30 porque a janela de
+> contexto do chat anterior encheu.
 
 ---
 
-## 1. Tarefas desta próxima fase (as ideias novas)
+## 0. Contexto rápido
 
-### ✅ Tarefa 1 — Mover o projeto do OneDrive para o disco C: (FAZER PRIMEIRO)
+**CyberAudit** = scanner de postura de segurança de sites (TLS, headers, DNS,
+exposições, vulnerabilidades comuns → nota 0–100 + relatório PDF).
 
-**Por quê:** o OneDrive sincroniza `.git/`, `node_modules/`, `target/`, trava arquivos e
-corrompe o repositório → causa erros de build. Tem que sair do OneDrive.
+- **Backend**: `C:\Projetos\Cyberaudit\Backend` — Spring Boot 3.5.16, Java 21,
+  PostgreSQL (Render). Deploy: `https://api.cyberauditapp.com`.
+- **Frontend**: `C:\Projetos\Cyberaudit\Frontend` — React + TS + Vite (Cloudflare
+  Pages). Deploy: `https://www.cyberauditapp.com`.
+- **cyberaudit-qa**: `C:\Projetos\Cyberaudit\cyberaudit-qa` — projeto de portfólio de
+  QA (Postman/Newman, RestAssured, Cypress, Selenium). Ainda **não é um repositório
+  git** — só uma pasta local com o PDF de escopo original e os artefatos que já
+  registramos (ver seção 3).
 
-**Passos (fazer com o OneDrive pausado e as IDEs fechadas):**
-
-```powershell
-# 1) Pausar o OneDrive (ícone na bandeja → Pausar sincronização)
-
-# 2) Copiar os repos para fora do OneDrive, SEM as pastas regeneráveis (mantém o .git)
-$srcBack = "C:\Users\joaoa\OneDrive\Documentos\Linguagens_Codigos\JAVA\seg_sites\Seg_site"
-$srcFront = "C:\Users\joaoa\OneDrive\Documentos\Linguagens_Codigos\JAVASCRIPT\front_cyberaudit\cyberaudit-ui"
-
-robocopy $srcBack  "C:\Projetos\CyberAudit\Seg_site"      /E /XD target .idea
-robocopy $srcFront "C:\Projetos\CyberAudit\cyberaudit-ui" /E /XD node_modules dist
-
-# 3) Validar no destino
-cd C:\Projetos\CyberAudit\Seg_site;      git status; mvn -o compile
-cd C:\Projetos\CyberAudit\cyberaudit-ui; git status; npm install; npm run build
-
-# 4) Só depois de validar, apagar as cópias antigas do OneDrive
-```
-
-**Conferir o `.gitignore`** de cada repo inclui: `target/`, `node_modules/`, `dist/`, `.env`.
-Depois de mover, o working directory dos próximos comandos passa a ser `C:\Projetos\CyberAudit\...`.
+Ambos os repos (Backend/Frontend) estão com push feito e testados em produção até
+o último commit de cada um.
 
 ---
 
-### 💳 Tarefa 2 — Fluxo de pagamento + conta destino
+## 1. O que foi entregue nesta fase (checkout transparente)
 
-**Decisão de provedor (a definir):**
-- **Stripe** — melhor DX, assinaturas prontas, aceita Pix no BR. Ótimo pra SaaS.
-- **Mercado Pago** — maior alcance no Brasil (Pix + boleto + cartão), checkout simples.
-- **Asaas / Pagar.me** — alternativas BR (Pix/boleto/cartão), boas pra recorrência.
-- Recomendação: **Stripe** (se o público é mais tech) ou **Mercado Pago** (alcance BR).
+**Motivação original**: reduzir dependência do checkout hospedado do Mercado Pago.
+Importante lembrar — **isso NÃO reduz a taxa cobrada** (taxa é da forma de pagamento,
+não do tipo de checkout); o ganho real é UX/conversão e, com Pix, evitar o
+processamento de cartão. Preço do PRO caiu para R$19,99 e do Empresa para R$59,99
+nesta mesma janela (motivo diferente: tornar o produto mais acessível na fase inicial).
 
-**"Para qual conta vai o dinheiro":** cai na **sua conta de merchant** dentro do provedor
-escolhido, que repassa pro seu **banco** (isso é configurado no *dashboard do provedor*,
-não no código). No código ficam só as **chaves** (secret) + o **webhook** que ativa o plano.
+### Backend
+- `POST /billing/checkout/card` — cartão tokenizado no navegador (`card_token_id`
+  do SDK do MP), cria `preapproval` recorrente via API. Libera o plano na hora se
+  vier `authorized`.
+- `POST /billing/checkout/pix` — pagamento único de 1 ciclo (30 dias — Pix comum não
+  tem débito automático). Devolve QR code + copia-e-cola. Plano só libera quando o
+  webhook confirmar `approved`.
+- `Subscription` ganhou `paymentMethod` (CARD/PIX), `mpPaymentId`, `currentPeriodEnd`.
+  Novo status `EXPIRED`, rebaixado por job diário (`expirarAssinaturasPixVencidas`)
+  quando uma assinatura Pix vence sem renovar.
+- Webhook (`/billing/webhook`) agora trata dois topics: `preapproval` (cartão, já
+  existia) e `payment` (Pix, novo).
+- Rate limit dedicado nos dois endpoints de checkout: 5 tentativas/minuto por
+  usuário, **compartilhado** entre cartão e Pix (não é 5+5).
+- 16 testes novos (`BillingServiceTest` + `SubscriptionSchemaTest`).
 
-**Integração (usa o que já existe):** o projeto já tem `Plan` + `PlanLimitService` +
-`Account`. Fluxo: usuário assina no Checkout do provedor → provedor manda **webhook** de
-confirmação → backend faz upgrade do plano da `Account` → limites liberam.
+### Frontend
+- `CheckoutModal` (abas Pix/Cartão) substituiu o botão que redirecionava pro MP.
+- Pix: CPF → QR code + copia-e-cola na tela, com polling em `/billing/subscription`
+  até confirmar.
+- Cartão: SDK do MP carregado sob demanda, Secure Fields (número/validade/CVV nunca
+  tocam nosso DOM), token gerado no navegador.
+- CSP liberou `sdk.mercadopago.com` e domínios dos Secure Fields (só no build de
+  produção — dev não tem CSP).
 
-**Passos:** escolher provedor → criar conta merchant → plugar Checkout/Subscription →
-handler de webhook (assinatura confirmada / cancelada / falha) → tela de billing no front.
-
-> ⚠️ Regra: o assistente **não insere credenciais financeiras nem move dinheiro**. Você
-> configura as chaves e a conta; o código só faz a integração e reage ao webhook.
-
----
-
-### 🔑 Tarefa 3 — APIs / chaves a obter (checklist p/ ficar funcional)
-
-| Serviço | Para quê | Custo | Env var |
-|---|---|---|---|
-| **NVD API key** | Aumenta rate-limit da correlação de CVE | Grátis (registrar) | (novo) |
-| **E-mail (Brevo/SendGrid/Mailgun/Gmail)** | Notificações, OTP, convites | Grátis (free tier) | `MAIL_*` |
-| **Provedor de pagamento** (Stripe/MP) | Assinaturas | % por transação | (novo) chave + webhook secret |
-| **Domínio** (registrar) | app.seudominio + api.seudominio | ~R$40/ano | — |
-| **Let's Encrypt** | TLS | Grátis | — |
-| **crt.sh / OSV / PSL** | CT logs / vuln / apex | Grátis, sem chave | — |
-| **Sentry** (opcional) | Monitorar erros | Grátis (free tier) | (novo) |
-| **UptimeRobot** (opcional) | Uptime / alerta de queda | Grátis | — |
-
-`JWT_SECRET` e `DB_*` já existem no `application.properties`.
-
----
-
-### 🌗 Tarefa 4 — Modo escuro / claro
-
-O frontend **já usa variáveis CSS** (`index.css` `:root` tem `--bg`, `--surface`, `--text`…),
-então o toggle é barato:
-1. Definir a **paleta light** (valores das variáveis) — **cores a decidir com você**.
-2. Toggle no header seta `data-theme="light"` no `<html>` e persiste em `localStorage`.
-3. CSS: `:root[data-theme="light"] { --bg: …; --surface: …; … }` sobrescreve o dark.
-
-Hoje a paleta é dark-only; falta só criar a versão clara e o botão.
+### Incidente em produção — já corrigido
+`ddl-auto=update` tentou adicionar `payment_method` como `NOT NULL` numa tabela
+`subscriptions` que já tinha linhas reais → Postgres recusou → a coluna nunca foi
+criada → **todo** endpoint que tocava `Subscription` (inclusive o `/billing/subscription`
+que já existia antes desta fase) respondia 401 em vez do erro de verdade. Corrigido
+tornando a coluna nullable. Confirmado resolvido em produção pelo usuário.
+**Lição**: `ddl-auto` não migra bem contra tabela com dado existente — já tínhamos
+um caso assim (`audit_logs`, ver `docs/SECURITY_REVIEW_SCOPE.md`) e caiu de novo.
+Considerar Testcontainers com Postgres real pra pegar isso ANTES de produção (ver
+seção 2).
 
 ---
 
-### 💬 Tarefa 5 — Campo de feedback (contestar um achado)
+## 2. O que falta implementar
 
-Cliente que achar que um resultado está errado marca "isso está errado?" num finding/módulo,
-escreve o motivo, e o admin tria → vocês debatem. Bônus: vira **dado real de falso positivo**
-pra melhorar o produto.
-
-- **Backend:** entidade `Feedback` (scanId/host, módulo/finding, usuário, mensagem,
-  status: OPEN/REVIEWING/RESOLVED). Endpoints: submeter + admin listar/responder.
-  Pode reusar `AuditService` / notificação por e-mail.
-- **Frontend:** botão + modal no card do finding/módulo → envia; view de admin pra triar.
-- **A decidir:** feedback por-finding (mais granular) ou por-scan (mais simples)?
+1. **`VITE_MP_PUBLIC_KEY` não está configurada em lugar nenhum** — nem no `.env`
+   local, nem (provavelmente) nas variáveis de build do Cloudflare Pages. **Sem
+   isso, o checkout de cartão não funciona em NENHUM ambiente** — a aba Cartão
+   mostra "indisponível" e o botão fica desabilitado (funciona como projetado, mas
+   ninguém consegue pagar com cartão até essa chave existir). Pegar em
+   painel do Mercado Pago → Suas integrações → Credenciais → Public Key.
+2. **Nunca testado contra o Mercado Pago de verdade** — nem sandbox (`TEST-`), nem
+   uma transação real de ponta a ponta em produção. Tudo que foi validado foi:
+   contrato da API do CyberAudit (Postman/Newman) e o bug de schema em produção —
+   nunca uma confirmação real de pagamento (Pix aprovado ou cartão autorizado).
+3. **CSP do SDK do MP é a minha melhor leitura da documentação, não confirmada**
+   — `script-src`/`frame-src` em `vite.config.ts` podem precisar de ajuste ao abrir
+   o DevTools com uma public key de verdade e ver o que o navegador bloqueia.
+4. **CPF só valida tamanho (11 dígitos), não o dígito verificador** — decidir se
+   vale a pena adicionar a validação matemática completa (não é obrigatório pro MP
+   aceitar, mas evita gerar Pix/cobrança pra CPF obviamente inválido).
+5. **`/billing/subscribe` (checkout hospedado antigo) continua existindo** no
+   Backend, só o Frontend parou de chamar. Decidir: remover de vez, ou manter como
+   fallback?
+6. **Pix Automático (recorrência de verdade) foi propositalmente deixado de fora**
+   — o que existe hoje é Pix comum (1 pagamento manual por ciclo). Se for
+   implementar depois, é fase separada — tem regra do Bacen própria (pré-aviso de
+   cobrança, cancelamento) que não foi pesquisada a fundo ainda.
 
 ---
 
-## 2. Perguntas a resolver no chat novo
+## 3. O que falta testar
 
-1. **Provedor de pagamento:** Stripe, Mercado Pago ou Asaas?
-2. **Planos e preços:** quais tiers e valores? (o `Plan`/`PlanLimitService` já existe)
-3. **Modo claro:** qual paleta de cores?
-4. **Feedback:** por-finding ou por-scan?
-5. Ordem: sugiro **Tarefa 1 (mover) → 3 (chaves) → 2 (pagamento) → 5 (feedback) → 4 (tema)**.
+### Já feito
+- Suíte JUnit/Mockito do Backend (635 testes) cobre a lógica de negócio dos dois
+  fluxos de checkout, idempotência do webhook, e o job de expiração.
+- Validação de contrato via Postman/Newman (autenticação, validação de entrada,
+  rate limit, falha segura sem `MP_ACCESS_TOKEN`) — artefatos em
+  `cyberaudit-qa/api-postman/collection.json` + `environment.local.json`.
+- Request/response de cada endpoint documentados em
+  `cyberaudit-qa/docs/payment-module-requests.md`, com 12 casos catalogados
+  (PAY-01 a PAY-12) no formato da matriz do escopo original.
+
+### Falta fazer
+1. **Teste de integração real com o MP sandbox** — assim que existir uma credencial
+   `TEST-`: confirmar que `createPixPayment`/`createPreapprovalWithCard`/`getPayment`
+   batem com o formato real de resposta (hoje só bateram contra a documentação).
+2. **Suíte RestAssured** (Fase 3 do escopo do `cyberaudit-qa`, PDF original) — ainda
+   não começou. Os 12 casos PAY-01..PAY-12 já catalogados são o ponto de partida.
+3. **Cypress E2E do checkout** — nenhum teste de UI ainda. Fluxos mínimos: abrir
+   modal → aba Pix → CPF inválido mostra erro → CPF válido mostra QR (mockar a API
+   do MP ou usar sandbox); aba Cartão → SDK carrega → Secure Fields aparecem →
+   submit gera token (precisa de cartão de teste do MP).
+4. **Teste de migração de schema com Postgres real** (Testcontainers, não H2) —
+   especificamente pra pegar a classe de bug que acabou de quebrar produção: subir
+   um Postgres com uma linha "antiga" (sem a coluna nova) e confirmar que
+   `ddl-auto=update` consegue migrar sem erro. H2 com `create-drop` estrutural e
+   nunca vai pegar isso — é um teste genuinamente novo pro projeto, não só mais um
+   caso na suíte atual.
+5. **CPF com dígito verificador inválido mas 11 dígitos** — hoje passa na validação
+   do backend; decidir se isso é o comportamento desejado antes de escrever o teste.
+6. **Revisão de segurança específica da tela de checkout** — CSP realmente
+   restritiva (nenhum script/frame fora do necessário), confirmar que nenhum campo
+   de cartão cru toca o DOM do CyberAudit (inspecionar via DevTools com o SDK
+   carregado de verdade), e teste de que a página de checkout nunca loga
+   `cardTokenId`/CPF em texto puro no console ou nos logs do Backend.
+7. **Rate limit sob concorrência real** — o teste atual (Postman `pm.sendRequest`
+   sequencial) prova a lógica, mas não testa duas requisições literalmente
+   simultâneas. Vale um teste de carga leve se o `cyberaudit-qa` chegar na fase de
+   RestAssured com threads paralelas.
+
+### Projeto `cyberaudit-qa` como um todo
+Continua não iniciado como repositório de verdade — só a pasta local com PDF +
+os dois artefatos desta fase. Retomar da Fase 0 (plano de teste formal) quando este
+recurso de pagamento estiver estável, ou intercalar: os 12 casos PAY-* já dão
+conteúdo real pra começar a Fase 2/3 (Postman + RestAssured) sem esperar o resto
+do escopo original (Juice Shop, WireMock, allowlist de SSRF pro ambiente de teste).
 
 ---
 
-## 3. Próximo projeto separado (futuro): DepGuard
+## 4. Ordem sugerida pro próximo chat
 
-Já discutimos o escopo de uma **suíte DevSecOps** (scanner de dependências + SBOM +
-scanner de segredos, com GitHub App que comenta no PR). É um projeto **à parte** — não
-misturar com o CyberAudit. Quando for a hora, começar pela "Fase 0" (npm + segredos,
-saída JSON+SARIF+CycloneDX). Reaproveita a experiência de CVE/OSV, DNS e relatórios daqui.
+1. Configurar `VITE_MP_PUBLIC_KEY` (bloqueia literalmente tudo de cartão).
+2. Conseguir uma credencial `TEST-` do MP e validar os dois fluxos de ponta a ponta
+   de verdade (Pix aprovado, cartão autorizado e recusado).
+3. Ajustar CSP conforme o que o DevTools acusar nesse teste real.
+4. A partir daí, decidir: continuar fechando o recurso de pagamento (CPF checksum,
+   remover `/billing/subscribe` antigo) ou migrar o foco pro `cyberaudit-qa` de
+   verdade, usando os casos PAY-* como primeiro conteúdo real do projeto de QA.
