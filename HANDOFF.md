@@ -176,20 +176,20 @@ seção 2).
    preto em fundo claro tem contraste). O que funciona é passar `style` **direto**
    nas opções de `fields.create(field, { placeholder, style })`. Ver
    `secureFieldStyle()` em `App.tsx`.
-9. **`getSubscription`/`cancelSubscription` sempre pegam a assinatura mais recente
-   por `createdAt` — um Pix não pago gerado depois de um pago "esconde" o pago.**
-   Achado testando o fluxo Pix de verdade em 2026-09-30: paguei um Pix, o webhook
-   ainda não tinha confirmado (por outro motivo, ver item 2), gerei um SEGUNDO Pix
-   pra testar de novo sem pagar, e `GET /billing/subscription` passou a devolver
-   o segundo (não pago) em vez do primeiro (pago). Isso não é hipotético — aconteceu
-   de verdade nesta sessão. Não chega a ser crítico pro uso normal (cliente comum
-   não fica gerando Pix repetido sem pagar), mas é uma janela real: qualquer
-   PENDING novo criado depois de um pago-mas-ainda-não-confirmado torna esse pago
-   invisível pro app até o webhook processar (e se o webhook nunca processar por
-   outro motivo, fica invisível pra sempre). Não corrigido ainda — possíveis
-   caminhos: cancelar/expirar o PENDING anterior ao criar um novo, ou
-   `getSubscription` preferir o mais recente **AUTHORIZED**, caindo pro mais
-   recente qualquer só se não houver nenhum autorizado.
+9. ~~**`getSubscription`/`cancelSubscription` sempre pegavam a assinatura mais
+   recente por `createdAt` — um Pix não pago gerado depois de um pago "escondia"
+   o pago.**~~ ✅ **corrigido em 2026-09-30.** Achado testando o fluxo Pix de
+   verdade nesta mesma sessão: paguei um Pix, o webhook ainda não tinha confirmado
+   (por outro motivo, ver item 2), gerei um SEGUNDO Pix pra testar de novo sem
+   pagar, e `GET /billing/subscription` passou a devolver o segundo (não pago) em
+   vez do primeiro (pago) — não hipotético, aconteceu de verdade. Pior em
+   `cancelSubscription`: cancelar rebaixava a conta pra FREE mesmo com uma
+   assinatura paga ativa, se um checkout abandonado mais novo existisse por cima
+   dela. Corrigido com `currentSubscription()` — prefere a mais recente
+   **AUTHORIZED**, cai pra mais recente de qualquer status só se nunca houve
+   nenhuma autorizada. Novo método `findFirstByAccountAndStatusOrderByCreatedAtDesc`
+   no `SubscriptionRepository`. 3 testes novos (nenhum existia pra esses dois
+   métodos antes). 651 testes passando.
 
 ## 3. O que falta testar
 
@@ -245,17 +245,14 @@ do escopo original (Juice Shop, WireMock, allowlist de SSRF pro ambiente de test
 
 ## 4. Ordem sugerida pro próximo chat
 
-Public key, CSP e **Pix de ponta a ponta** ✅ feitos e confirmados em produção com
-dinheiro real em 2026-09-30 — ver seção 2. O que sobrou:
+Public key, CSP, **Pix de ponta a ponta** (dinheiro real) e o bug do
+`getSubscription`/`cancelSubscription` ✅ feitos e confirmados em 2026-09-30 — ver
+seção 2. O que sobrou:
 
 1. Cartão ainda falta autorizar de verdade (só foi testado o caminho de rejeição
    com o cartão de teste público do MP, que produção recusa de propósito) —
    precisa do par `TEST-` (aba "Credenciais de teste" do painel MP) pra sandbox,
    ou um cartão real de alguém.
-2. Item 9 da seção 2 — `getSubscription` pega sempre a assinatura mais recente por
-   `createdAt`, não a mais recente **autorizada**. Vale corrigir antes de qualquer
-   outro teste de Pix, porque foi o que causou confusão real nesta sessão (Pix
-   pago "sumiu" atrás de um Pix não-pago gerado depois).
-3. Decidir: continuar fechando o recurso de pagamento (item 7 da seção 2 — CPF
+2. Decidir: continuar fechando o recurso de pagamento (item 7 da seção 2 — CPF
    pra cliente estrangeiro) ou migrar o foco pro `cyberaudit-qa` de verdade,
    usando os casos PAY-* como primeiro conteúdo real do projeto de QA.

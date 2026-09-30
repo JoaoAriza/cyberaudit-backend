@@ -412,4 +412,62 @@ class BillingServiceTest {
         assertEquals(Plan.PRO, account.getPlan());
         verify(accountRepository, never()).save(any(Account.class));
     }
+
+    // ── Assinatura atual (getSubscription / cancelSubscription) ──────────────────
+
+    @Test
+    @DisplayName("getSubscription prefere a AUTHORIZED mais recente, mesmo com um PENDING mais novo por cima")
+    void getSubscriptionIgnoraPendingMaisNovoQuandoHaAuthorized() {
+        Subscription paga = Subscription.builder()
+                .id(UUID.randomUUID()).account(account).plan(Plan.PRO)
+                .status(SubscriptionStatus.AUTHORIZED).build();
+        Subscription abandonada = Subscription.builder()
+                .id(UUID.randomUUID()).account(account).plan(Plan.PRO)
+                .status(SubscriptionStatus.PENDING).build();
+        when(subscriptionRepository.findFirstByAccountAndStatusOrderByCreatedAtDesc(account, SubscriptionStatus.AUTHORIZED))
+                .thenReturn(Optional.of(paga));
+        when(subscriptionRepository.findFirstByAccountOrderByCreatedAtDesc(account))
+                .thenReturn(Optional.of(abandonada));
+
+        SubscriptionDto dto = billingService.getSubscription(user);
+
+        assertEquals(paga.getId(), dto.getId());
+        assertEquals(SubscriptionStatus.AUTHORIZED, dto.getStatus());
+    }
+
+    @Test
+    @DisplayName("getSubscription cai pra mais recente de qualquer status quando nunca houve AUTHORIZED")
+    void getSubscriptionCaiParaMaisRecenteSemAuthorized() {
+        when(subscriptionRepository.findFirstByAccountAndStatusOrderByCreatedAtDesc(account, SubscriptionStatus.AUTHORIZED))
+                .thenReturn(Optional.empty());
+        when(subscriptionRepository.findFirstByAccountOrderByCreatedAtDesc(account))
+                .thenReturn(Optional.of(subscription));
+
+        SubscriptionDto dto = billingService.getSubscription(user);
+
+        assertEquals(SubscriptionStatus.PENDING, dto.getStatus());
+    }
+
+    @Test
+    @DisplayName("cancelSubscription cancela a AUTHORIZED de verdade, não um checkout abandonado mais novo")
+    void cancelSubscriptionAlvejaAAuthorizedNaoOPendingMaisNovo() {
+        account.setPlan(Plan.PRO);
+        Subscription paga = Subscription.builder()
+                .id(UUID.randomUUID()).account(account).plan(Plan.PRO)
+                .status(SubscriptionStatus.AUTHORIZED).mpPreapprovalId("preapproval-paga").build();
+        Subscription abandonada = Subscription.builder()
+                .id(UUID.randomUUID()).account(account).plan(Plan.PRO)
+                .status(SubscriptionStatus.PENDING).build();
+        when(subscriptionRepository.findFirstByAccountAndStatusOrderByCreatedAtDesc(account, SubscriptionStatus.AUTHORIZED))
+                .thenReturn(Optional.of(paga));
+        when(subscriptionRepository.findFirstByAccountOrderByCreatedAtDesc(account))
+                .thenReturn(Optional.of(abandonada));
+
+        billingService.cancelSubscription(user);
+
+        assertEquals(SubscriptionStatus.CANCELLED, paga.getStatus());
+        assertEquals(SubscriptionStatus.PENDING, abandonada.getStatus(), "não deveria tocar no checkout abandonado");
+        assertEquals(Plan.FREE, account.getPlan());
+        verify(mpService).cancelPreapproval("preapproval-paga");
+    }
 }

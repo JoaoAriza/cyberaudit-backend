@@ -22,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -159,8 +160,26 @@ public class BillingService {
     public SubscriptionDto getSubscription(AppUser user) {
         Account account = user.getAccount();
         if (account == null) return null;
-        return subscriptionRepository.findFirstByAccountOrderByCreatedAtDesc(account)
-                .map(SubscriptionDto::from).orElse(null);
+        return currentSubscription(account).map(SubscriptionDto::from).orElse(null);
+    }
+
+    /**
+     * Assinatura "atual" de uma conta: a mais recente AUTHORIZED, ou — se nunca
+     * houve nenhuma — a mais recente de qualquer status.
+     *
+     * Sem isto, {@code findFirstByAccountOrderByCreatedAtDesc} sozinho pegava
+     * sempre a linha mais NOVA por data, ponto. Um Pix pago (AUTHORIZED) seguido
+     * de um segundo Pix gerado pra testar de novo e nunca pago (PENDING) fazia o
+     * pago desaparecer de {@code GET /billing/subscription} — aconteceu de
+     * verdade validando o checkout Pix em produção (ver HANDOFF.md, seção 2 item 9).
+     * Pior em {@link #cancelSubscription}: cancelar rebaixava a conta pra FREE
+     * mesmo com uma assinatura paga ativa, se um checkout abandonado mais novo
+     * existisse por cima dela.
+     */
+    private Optional<Subscription> currentSubscription(Account account) {
+        return subscriptionRepository
+                .findFirstByAccountAndStatusOrderByCreatedAtDesc(account, SubscriptionStatus.AUTHORIZED)
+                .or(() -> subscriptionRepository.findFirstByAccountOrderByCreatedAtDesc(account));
     }
 
     @Transactional
@@ -169,7 +188,7 @@ public class BillingService {
         if (account == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Conta não encontrada.");
         }
-        Subscription sub = subscriptionRepository.findFirstByAccountOrderByCreatedAtDesc(account)
+        Subscription sub = currentSubscription(account)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Nenhuma assinatura encontrada."));
         if (sub.getMpPreapprovalId() != null) {

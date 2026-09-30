@@ -22,8 +22,11 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
 
     Optional<Subscription> findByMpPaymentId(String mpPaymentId);
 
-    /** Assinatura mais recente de uma conta (a "atual"). */
+    /** Assinatura mais recente de uma conta, qualquer status — usar {@link #findFirstByAccountAndStatusOrderByCreatedAtDesc} primeiro. */
     Optional<Subscription> findFirstByAccountOrderByCreatedAtDesc(Account account);
+
+    /** Assinatura mais recente de uma conta NUM status específico — ver BillingService#currentSubscription. */
+    Optional<Subscription> findFirstByAccountAndStatusOrderByCreatedAtDesc(Account account, SubscriptionStatus status);
 
     /** Assinaturas PIX ativas cujo período venceu sem um pagamento novo — ver o job diário em BillingService. */
     List<Subscription> findByPaymentMethodAndStatusAndCurrentPeriodEndBefore(
