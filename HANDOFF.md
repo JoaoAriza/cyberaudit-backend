@@ -73,16 +73,21 @@ seção 2).
 
 ## 2. O que falta implementar
 
-1. **`VITE_MP_PUBLIC_KEY` não está configurada em lugar nenhum** — nem no `.env`
-   local, nem (provavelmente) nas variáveis de build do Cloudflare Pages. **Sem
-   isso, o checkout de cartão não funciona em NENHUM ambiente** — a aba Cartão
-   mostra "indisponível" e o botão fica desabilitado (funciona como projetado, mas
-   ninguém consegue pagar com cartão até essa chave existir). Pegar em
-   painel do Mercado Pago → Suas integrações → Credenciais → Public Key.
-2. **Nunca testado contra o Mercado Pago de verdade** — nem sandbox (`TEST-`), nem
-   uma transação real de ponta a ponta em produção. Tudo que foi validado foi:
-   contrato da API do CyberAudit (Postman/Newman) e o bug de schema em produção —
-   nunca uma confirmação real de pagamento (Pix aprovado ou cartão autorizado).
+1. ~~**`VITE_MP_PUBLIC_KEY` não está configurada em lugar nenhum**~~ 🟡 **parcial
+   em 2026-09-29** — chave de **produção** (`APP_USR-...`) configurada em
+   `Frontend/.env` e `Frontend/.env.production` (gitignored, não vai pro repo).
+   **Falta**: adicionar a mesma variável nas variáveis de build do Cloudflare
+   Pages e disparar um redeploy — isso só o dono da conta consegue fazer (acesso
+   ao dashboard). Sem esse passo, o build publicado continua sem a chave.
+2. **Nunca testado contra o Mercado Pago de verdade** — a chave configurada no
+   item 1 é de **produção**, não sandbox (`TEST-`) — então cartão de teste do MP
+   não serve para validar com ela. Ainda falta: (a) conseguir o par `TEST-`
+   (Public Key + Access Token) na aba "Credenciais de teste" do painel MP para
+   validar sem risco, e/ou (b) uma transação real de ponta a ponta em produção
+   depois do Cloudflare Pages redeploy do item 1. Tudo que foi validado até aqui
+   foi: contrato da API do CyberAudit (Postman/Newman) e o bug de schema em
+   produção — nunca uma confirmação real de pagamento (Pix aprovado ou cartão
+   autorizado).
 3. **CSP do SDK do MP é a minha melhor leitura da documentação, não confirmada**
    — `script-src`/`frame-src` em `vite.config.ts` podem precisar de ajuste ao abrir
    o DevTools com uma public key de verdade e ver o que o navegador bloqueia.
