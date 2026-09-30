@@ -154,18 +154,26 @@ seção 2).
    — o que existe hoje é Pix comum (1 pagamento manual por ciclo). Se for
    implementar depois, é fase separada — tem regra do Bacen própria (pré-aviso de
    cobrança, cancelamento) que não foi pesquisada a fundo ainda.
-7. **CPF obrigatório trava cliente estrangeiro — verificar depois (pedido em
-   2026-09-30).** Hoje `BillingService.startPixCheckout` e o
-   `CardCheckoutPanel`/`PixCheckoutPanel` do Frontend (`App.tsx`) exigem CPF
-   pra qualquer checkout, cartão ou Pix — sem alternativa pra quem não tem CPF
-   brasileiro. Não é um bug isolado: é o mesmo ponto já registrado na seção 3.4 do
-   handoff de 08/24 (`docs/HANDOFF-2026-09-13.md`), "Bloco D — pagamento
-   internacional", adiado de propósito porque o MP exige `identification.type`
-   pra qualquer pagador no Brasil — não dá pra simplesmente tornar opcional sem o
-   MP recusar a transação. Decisão de produto em aberto: manter adiado (cliente de
-   fora paga em BRL do jeito que dá) ou migrar pra Merchant of Record/gateway
-   próprio pra pagador estrangeiro. Só revisitar quando houver sinal real de
-   cliente de fora tentando pagar e travando nisso.
+7. 🟡 **CPF obrigatório trava cliente estrangeiro — parcialmente destravado em
+   2026-09-30.** Investigado a pedido do usuário se dava pra resolver sem trocar
+   de provedor (a hipótese original era que precisava de Merchant of
+   Record/gateway novo, ver "Bloco D" no handoff de 08/24,
+   `docs/HANDOFF-2026-09-13.md`, seção 3.4). Achado real, testado ao vivo com a
+   public key de produção: **o cartão nunca precisou de CPF** — nem o SDK do MP
+   (`createCardToken` tokenizou de verdade sem nenhum campo de identificação, token
+   `status: "active"`, `live_mode: true`), nem o nosso próprio backend
+   (`MercadoPagoService.createPreapprovalWithCard` nunca mandou `identification`
+   pro MP). A exigência de CPF no cartão era só uma trava que o Frontend impôs
+   sozinho. Corrigido: CPF virou opcional em `CardCheckoutPanel` — manda pro MP só
+   se preenchido, tokeniza sem identification se vazio.
+   **Pix continua exigindo CPF, e isso não tem solução** — é estrutural: Pix exige
+   uma conta bancária brasileira do lado de quem paga, não tem como contornar
+   trocando parâmetro nenhum. Cliente de fora sem CPF agora consegue assinar por
+   **cartão**; por Pix, nunca vai conseguir enquanto o produto usar Pix comum.
+   O "Bloco D" (Merchant of Record/gateway internacional, moeda local) continua
+   como decisão de produto em aberto — só que agora é sobre UX/conversão
+   (cobrar em USD, evitar IOF) e sobre destravar Pix pra fora, não mais sobre
+   "cliente de fora não consegue pagar de jeito nenhum".
 8. ~~**Texto do Secure Fields (número/validade/CVV) ilegível no tema escuro**~~ ✅
    **corrigido em 2026-09-30**, em `CardCheckoutPanel` (`App.tsx`). Achado real: a
    documentação e a tipagem da comunidade (`@types/mercadopago-sdk-js`) dizem que
