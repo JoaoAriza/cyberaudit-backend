@@ -86,12 +86,16 @@ seção 2).
 3. **CSP do SDK do MP é a minha melhor leitura da documentação, não confirmada**
    — `script-src`/`frame-src` em `vite.config.ts` podem precisar de ajuste ao abrir
    o DevTools com uma public key de verdade e ver o que o navegador bloqueia.
-4. **CPF só valida tamanho (11 dígitos), não o dígito verificador** — decidir se
-   vale a pena adicionar a validação matemática completa (não é obrigatório pro MP
-   aceitar, mas evita gerar Pix/cobrança pra CPF obviamente inválido).
-5. **`/billing/subscribe` (checkout hospedado antigo) continua existindo** no
-   Backend, só o Frontend parou de chamar. Decidir: remover de vez, ou manter como
-   fallback?
+4. ~~**CPF só valida tamanho (11 dígitos), não o dígito verificador**~~ ✅ **feito
+   em 2026-09-29** — `CpfUtil` (módulo 11, mesmo padrão do `CnpjUtil`) plugado em
+   `BillingService.startPixCheckout`. Mensagem de erro não ecoa o CPF (é dado
+   pessoal). 12 testes novos em `CpfUtilTest` + 1 em `BillingServiceTest`.
+5. ~~**`/billing/subscribe` (checkout hospedado antigo) continua existindo**~~ ✅
+   **removido em 2026-09-29** — decisão: sem uso do Frontend e sem teste nenhum,
+   não valia manter como fallback morto. Foram junto `BillingService.startSubscription`,
+   `MercadoPagoService.createPreapproval` e o helper `checkoutUtilizavel` (só
+   existia para o init_point do checkout hospedado) — e o teste dedicado a ele,
+   `MercadoPagoCheckoutUrlTest`. 648 testes passando depois da remoção.
 6. **Pix Automático (recorrência de verdade) foi propositalmente deixado de fora**
    — o que existe hoje é Pix comum (1 pagamento manual por ciclo). Se for
    implementar depois, é fase separada — tem regra do Bacen própria (pré-aviso de
@@ -127,8 +131,9 @@ seção 2).
    `ddl-auto=update` consegue migrar sem erro. H2 com `create-drop` estrutural e
    nunca vai pegar isso — é um teste genuinamente novo pro projeto, não só mais um
    caso na suíte atual.
-5. **CPF com dígito verificador inválido mas 11 dígitos** — hoje passa na validação
-   do backend; decidir se isso é o comportamento desejado antes de escrever o teste.
+5. ~~**CPF com dígito verificador inválido mas 11 dígitos**~~ ✅ **decidido e testado
+   em 2026-09-29** — agora recusa (ver item 4 da seção 2). Coberto por
+   `cpfComDigitoVerificadorInvalidoRecusa` em `BillingServiceTest`.
 6. **Revisão de segurança específica da tela de checkout** — CSP realmente
    restritiva (nenhum script/frame fora do necessário), confirmar que nenhum campo
    de cartão cru toca o DOM do CyberAudit (inspecionar via DevTools com o SDK

@@ -11,6 +11,7 @@ import com.joao.cyberaudit.model.Subscription;
 import com.joao.cyberaudit.model.SubscriptionStatus;
 import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.SubscriptionRepository;
+import com.joao.cyberaudit.util.CpfUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -24,13 +25,13 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Regras de assinatura/upgrade de plano via Mercado Pago — três formas de pagar:
+ * Regras de assinatura/upgrade de plano via Mercado Pago — duas formas de pagar,
+ * ambas em tela própria (checkout transparente, sem redirecionar pro MP):
  *
- *  hospedado (startSubscription)  → redireciona pro checkout do MP, sem tela própria.
- *  cartão transparente (startCardCheckout) → tela própria, card_token_id, recorrente de verdade.
- *  Pix (startPixCheckout)         → tela própria, pagamento único por ciclo, sem débito
- *                                    automático — {@link #expirarAssinaturasPixVencidas()}
- *                                    rebaixa a conta quando o período vence sem renovar.
+ *  cartão (startCardCheckout) → card_token_id, recorrente de verdade.
+ *  Pix (startPixCheckout)     → pagamento único por ciclo, sem débito automático —
+ *                                {@link #expirarAssinaturasPixVencidas()} rebaixa a
+ *                                conta quando o período vence sem renovar.
  *
  * O upgrade só acontece quando o MP confirma o pagamento/preapproval — nunca só pelo corpo
  * do webhook ({@link #handleWebhook}/{@link #handlePaymentWebhook} sempre consultam a API do MP).
@@ -53,45 +54,6 @@ public class BillingService {
         this.subscriptionRepository = subscriptionRepository;
         this.accountRepository      = accountRepository;
         this.mpService              = mpService;
-    }
-
-    // ── Cliente ──────────────────────────────────────────────────────────────────
-
-    /** Cria a assinatura no MP e devolve o init_point (URL de checkout) para redirecionar. */
-    @Transactional
-    public String startSubscription(AppUser user) {
-        return startSubscription(user, null);
-    }
-
-    /** @param escolhido plano pedido pelo cliente; null usa o padrão do tipo de conta. */
-    public String startSubscription(AppUser user, Plan escolhido) {
-        Account account = user.getAccount();
-        Plan target = validateUpgradeTarget(account, escolhido);
-
-        BigDecimal amount = amountFor(target);
-        String reason  = reasonFor(target);
-        String backUrl = appBaseUrl + "/billing/return";
-
-        var result = mpService.createPreapproval(
-                reason, amount, currency, user.getEmail(), account.getId().toString(), backUrl);
-
-        Subscription sub = Subscription.builder()
-                .account(account)
-                .plan(target)
-                .mpPreapprovalId(result.id())
-                .paymentMethod(PaymentMethod.CARD)
-                .status(SubscriptionStatus.PENDING)
-                .amount(amount)
-                .currency(currency)
-                .createdAt(LocalDateTime.now())
-                .build();
-        subscriptionRepository.save(sub);
-
-        if (result.initPoint() == null || result.initPoint().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-                    "Mercado Pago não retornou a URL de checkout (init_point).");
-        }
-        return result.initPoint();
     }
 
     // ── Checkout transparente (tela própria) ──────────────────────────────────────
@@ -153,6 +115,11 @@ public class BillingService {
         if (cpf.length() != 11) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "CPF inválido: informe os 11 dígitos, com ou sem pontuação.");
+        }
+        if (!CpfUtil.isValid(cpf)) {
+            // Não ecoa o CPF na mensagem — é dado pessoal, e o erro já aparece na tela.
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "CPF inválido: dígito verificador não confere.");
         }
         Account account = user.getAccount();
         Plan target = validateUpgradeTarget(account, escolhido);

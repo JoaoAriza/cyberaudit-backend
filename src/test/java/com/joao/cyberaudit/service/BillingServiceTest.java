@@ -187,7 +187,7 @@ class BillingServiceTest {
     void cartaoAuthorizedLiberaNaHora() {
         when(mpService.createPreapprovalWithCard(anyString(), any(), anyString(), anyString(),
                 anyString(), anyString(), anyString()))
-                .thenReturn(new MercadoPagoService.PreapprovalResult("preapproval-novo", null, "authorized"));
+                .thenReturn(new MercadoPagoService.PreapprovalResult("preapproval-novo", "authorized"));
 
         SubscriptionDto dto = billingService.startCardCheckout(user, Plan.PRO, "card-token-abc");
 
@@ -202,7 +202,7 @@ class BillingServiceTest {
     void cartaoPendingNaoLiberaAinda() {
         when(mpService.createPreapprovalWithCard(anyString(), any(), anyString(), anyString(),
                 anyString(), anyString(), anyString()))
-                .thenReturn(new MercadoPagoService.PreapprovalResult("preapproval-novo", null, "pending"));
+                .thenReturn(new MercadoPagoService.PreapprovalResult("preapproval-novo", "pending"));
 
         billingService.startCardCheckout(user, Plan.PRO, "card-token-abc");
 
@@ -268,6 +268,16 @@ class BillingServiceTest {
     void cpfInvalidoRecusa() {
         var erro = assertThrows(ResponseStatusException.class,
                 () -> billingService.startPixCheckout(user, Plan.PRO, "123"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, erro.getStatusCode());
+        verify(mpService, never()).createPixPayment(any(), anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("CPF com 11 dígitos mas dígito verificador inválido — 400, nem chama o Mercado Pago")
+    void cpfComDigitoVerificadorInvalidoRecusa() {
+        var erro = assertThrows(ResponseStatusException.class,
+                () -> billingService.startPixCheckout(user, Plan.PRO, "111.444.777-36"));
 
         assertEquals(HttpStatus.BAD_REQUEST, erro.getStatusCode());
         verify(mpService, never()).createPixPayment(any(), anyString(), anyString(), anyString(), anyString(), anyString());

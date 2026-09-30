@@ -14,10 +14,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Cliente REST das APIs de Assinaturas (preapproval) e Pagamentos (payments) do Mercado Pago.
@@ -25,9 +23,9 @@ import java.util.stream.Collectors;
  *              https://www.mercadopago.com.br/developers/pt/reference/payments/_payments/post
  *
  * Nunca vê número de cartão, CVV ou validade — só o {@code card_token_id} gerado
- * pelo SDK do MP no navegador do cliente (checkout transparente), ou nada, quando
- * o fluxo é o checkout hospedado (via init_point). Aqui só criamos/consultamos/
- * cancelamos assinatura e pagamento com o access token do servidor.
+ * pelo SDK do MP no navegador do cliente (checkout transparente). Aqui só
+ * criamos/consultamos/cancelamos assinatura e pagamento com o access token do
+ * servidor.
  */
 @Service
 public class MercadoPagoService {
@@ -116,7 +114,7 @@ public class MercadoPagoService {
 
     // ── Resultados ──────────────────────────────────────────────────────────────
 
-    public record PreapprovalResult(String id, String initPoint, String status) {}
+    public record PreapprovalResult(String id, String status) {}
 
     /**
      * {@code amount} vem de {@code auto_recurring.transaction_amount} — o valor que o MP
@@ -143,59 +141,6 @@ public class MercadoPagoService {
                               BigDecimal amount, String currency) {}
 
     // ── Operações ───────────────────────────────────────────────────────────────
-
-    /** Cria uma assinatura (preapproval) sem cartão → retorna o init_point p/ redirecionar o cliente. */
-    public PreapprovalResult createPreapproval(String reason, BigDecimal amount, String currency,
-                                               String payerEmail, String externalReference, String backUrl) {
-        requireConfigured();
-
-        Map<String, Object> autoRecurring = new LinkedHashMap<>();
-        autoRecurring.put("frequency", 1);
-        autoRecurring.put("frequency_type", "months");
-        autoRecurring.put("transaction_amount", amount);
-        autoRecurring.put("currency_id", currency);
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("reason", reason);
-        body.put("external_reference", externalReference);
-        body.put("payer_email", payerEmail);
-        body.put("auto_recurring", autoRecurring);
-        body.put("back_url", backUrl);
-        body.put("status", "pending");
-
-        JsonNode json = send("POST", "/preapproval", body);
-        return new PreapprovalResult(
-                text(json, "id"),
-                checkoutUtilizavel(text(json, "init_point")),
-                text(json, "status"));
-    }
-
-    /**
-     * Remove o parâmetro {@code activation} do init_point de CRIAÇÃO.
-     *
-     * A resposta de POST /preapproval devolve um init_point com {@code &activation=true}
-     * — e essa URL responde "esta página não existe". A MESMA URL sem o parâmetro (que
-     * é o que GET /preapproval/{id} devolve) abre o checkout normalmente, tanto para
-     * visitante quanto para quem está logado no Mercado Pago. É inconsistência do MP
-     * entre criar e consultar; aqui só descartamos o parâmetro que quebra, preservando
-     * o domínio e o caminho que o próprio MP montou.
-     */
-    static String checkoutUtilizavel(String initPoint) {
-        if (initPoint == null) return null;
-        int q = initPoint.indexOf('?');
-        if (q < 0) return initPoint;
-
-        String base = initPoint.substring(0, q);
-        String novaQuery = Arrays.stream(initPoint.substring(q + 1).split("&"))
-                .filter(p -> !p.regionMatches(true, 0, "activation=", 0, "activation=".length()))
-                .collect(Collectors.joining("&"));
-
-        if (novaQuery.length() != initPoint.length() - q - 1) {
-            System.out.println("[MercadoPago] init_point de criação trazia 'activation'; "
-                    + "removido para o checkout abrir.");
-        }
-        return novaQuery.isEmpty() ? base : base + "?" + novaQuery;
-    }
 
     public PreapprovalInfo getPreapproval(String id) {
         requireConfigured();
@@ -245,7 +190,7 @@ public class MercadoPagoService {
         body.put("status", "authorized");
 
         JsonNode json = send("POST", "/preapproval", body);
-        return new PreapprovalResult(text(json, "id"), null, text(json, "status"));
+        return new PreapprovalResult(text(json, "id"), text(json, "status"));
     }
 
     /**

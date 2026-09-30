@@ -31,7 +31,7 @@ import java.util.Map;
 
 /**
  * Endpoints de billing/assinatura.
- * /billing/subscribe|subscription|cancel|checkout/** → autenticados (regra /billing/** no SecurityConfig).
+ * /billing/subscription|cancel|checkout/** → autenticados (regra /billing/** no SecurityConfig).
  * /billing/checkout/card|pix → checkout transparente (tela própria do CyberAudit, sem
  * redirecionar pro MP) — ver {@link BillingService#startCardCheckout} e
  * {@link BillingService#startPixCheckout}.
@@ -87,19 +87,6 @@ public class BillingController {
     @GetMapping("/billing/plans")
     public List<PlanCatalogDto> plans() {
         return planCatalogService.catalogo();
-    }
-
-    // ── Cliente ──────────────────────────────────────────────────────────────────
-
-    /**
-     * Body opcional: {"plan":"PRO"} ou {"plan":"ENTERPRISE"}.
-     * Sem body, cai no plano sugerido pelo tipo da conta.
-     */
-    @PostMapping("/billing/subscribe")
-    public Map<String, String> subscribe(@AuthenticationPrincipal AppUser caller,
-                                         @RequestBody(required = false) Map<String, String> body) {
-        Plan escolhido = parsePlan(body == null ? null : body.get("plan"));
-        return Map.of("initPoint", billingService.startSubscription(caller, escolhido));
     }
 
     // ── Checkout transparente (tela própria, sem redirecionamento) ────────────────
