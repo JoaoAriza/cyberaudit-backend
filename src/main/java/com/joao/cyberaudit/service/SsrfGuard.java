@@ -32,6 +32,23 @@ public final class SsrfGuard {
     private static final Set<String> ALLOWED_SCHEMES = Set.of("http", "https");
 
     /**
+     * Hostnames liberados da checagem de IP interno/privado — vazio em produção,
+     * sempre. Só é populado por {@link SsrfTestAllowlistConfig}, um bean que
+     * carrega exclusivamente sob o profile Spring {@code qa-docker} (usado pelo
+     * ambiente Docker do `cyberaudit-qa`, onde os alvos de teste — Juice Shop,
+     * WireMock — vivem na rede privada do Docker e seriam bloqueados por
+     * definição). Fora desse profile o bean nunca é instanciado, então este campo
+     * nunca sai de {@code Set.of()} — não é um "if profile == X" escrito à mão,
+     * é o `@Profile` do próprio Spring decidindo se a classe chega a carregar.
+     */
+    private static volatile Set<String> testAllowlist = Set.of();
+
+    /** Só chamado por SsrfTestAllowlistConfig — não usar em nenhum outro lugar. */
+    static void setTestAllowlist(Set<String> hosts) {
+        testAllowlist = hosts == null ? Set.of() : hosts;
+    }
+
+    /**
      * Nomes que nunca devem ser alvo, mesmo que a resolução falhe ou aponte para
      * fora. Defesa em profundidade — a checagem por IP resolvido é a principal.
      */
@@ -91,11 +108,13 @@ public final class SsrfGuard {
             return;
         }
 
-        for (InetAddress addr : addresses) {
-            if (isForbidden(addr)) {
-                throw new DomainBlockedException(
-                        "Scan bloqueado: o domínio aponta para um endereço interno/privado ("
-                                + addr.getHostAddress() + "). Apenas alvos públicos são permitidos.");
+        if (!testAllowlist.contains(normalized)) {
+            for (InetAddress addr : addresses) {
+                if (isForbidden(addr)) {
+                    throw new DomainBlockedException(
+                            "Scan bloqueado: o domínio aponta para um endereço interno/privado ("
+                                    + addr.getHostAddress() + "). Apenas alvos públicos são permitidos.");
+                }
             }
         }
 

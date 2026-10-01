@@ -1,12 +1,14 @@
 package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.exception.DomainBlockedException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.InetAddress;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +16,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SsrfGuardTest {
+
+    // Campo estático mutável em SsrfGuard — sem isto, um teste que a preenche
+    // vazaria estado para os testes seguintes na mesma JVM.
+    @AfterEach
+    void limparAllowlist() {
+        SsrfGuard.setTestAllowlist(Set.of());
+    }
 
     // ── Esquemas ─────────────────────────────────────────────────────────────
 
@@ -133,5 +142,34 @@ class SsrfGuardTest {
         assertFalse(SsrfGuard.isAllowed("http://169.254.169.254/"));
         assertFalse(SsrfGuard.isAllowed("file:///etc/passwd"));
         assertTrue(SsrfGuard.isAllowed("https://example.com"));
+    }
+
+    // ── Allowlist de teste (cyberaudit-qa, profile qa-docker) ────────────────
+
+    @Test
+    @DisplayName("allowlist vazia (padrão/produção) não muda nada — IP privado continua bloqueado")
+    void allowlistVaziaPorPadrao() {
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validateHost("192.168.1.100"));
+    }
+
+    @Test
+    @DisplayName("host na allowlist de teste passa mesmo sendo endereço privado")
+    void allowlistLiberaHostEspecifico() {
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validateHost("192.168.1.100"),
+                "sanity check: sem allowlist, bloqueado");
+
+        SsrfGuard.setTestAllowlist(Set.of("192.168.1.100"));
+
+        assertDoesNotThrow(() -> SsrfGuard.validateHost("192.168.1.100"));
+        // Só o host exato liberado passa — outro IP privado qualquer continua bloqueado.
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validateHost("192.168.1.101"));
+    }
+
+    @Test
+    @DisplayName("allowlist não libera nomes de rede interna (BLOCKED_SUFFIXES continua valendo)")
+    void allowlistNaoContornaBlockedSuffixes() {
+        SsrfGuard.setTestAllowlist(Set.of("localhost"));
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validateHost("localhost"),
+                "allowlist só afasta a checagem de IP — nomes bloqueados por suffix continuam bloqueados");
     }
 }
