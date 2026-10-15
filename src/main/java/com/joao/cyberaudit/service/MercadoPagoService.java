@@ -30,7 +30,13 @@ import java.util.Map;
 @Service
 public class MercadoPagoService {
 
-    private static final String BASE = "https://api.mercadopago.com";
+    /**
+     * URL base da API do Mercado Pago. Default = produção, então o comportamento
+     * normal não muda; sobrescrevível por {@code mp.base-url} (env MP_BASE_URL) para
+     * apontar a um mock (WireMock) no ambiente de teste do cyberaudit-qa.
+     */
+    @Value("${mp.base-url:https://api.mercadopago.com}")
+    private String base;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).build();
@@ -265,7 +271,7 @@ public class MercadoPagoService {
         try {
             String payload = body != null ? mapper.writeValueAsString(body) : null;
             HttpRequest.Builder req = HttpRequest.newBuilder()
-                    .uri(URI.create(BASE + path))
+                    .uri(URI.create(base + path))
                     .timeout(Duration.ofSeconds(15))
                     .header("Authorization", "Bearer " + tokenLimpo())
                     .header("Content-Type", "application/json");
