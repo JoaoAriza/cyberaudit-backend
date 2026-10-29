@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.joao.cyberaudit.exception.DomainBlockedException;
 
+import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -98,6 +99,8 @@ public final class SsrfGuard {
             }
         }
 
+        rejectNonCanonicalIpv4(normalized, host);
+
         InetAddress[] addresses;
         try {
             addresses = InetAddress.getAllByName(normalized);
@@ -122,6 +125,89 @@ public final class SsrfGuard {
         // HttpClient faz ao conectar) devolve estes mesmos objetos em vez de
         // consultar o DNS de novo. Ver SsrfPinningResolverProvider.
         ScanDnsPinRegistry.pin(normalized, List.of(addresses));
+    }
+
+    /**
+     * Recusa IPv4 escrito fora da forma canônica {@code a.b.c.d} decimal.
+     *
+     * Pela especificação de URL do WHATWG — a que navegadores e o curl seguem —, um
+     * host cujo ÚLTIMO rótulo é numérico (decimal ou {@code 0x}-hex) é um IPv4, e cada
+     * parte pode vir em hex ({@code 0x7f}), octal ({@code 0177}) ou decimal, com 1 a 4
+     * partes ({@code 127.1}, {@code 2130706433}). O {@code InetAddress} do Java só
+     * entende parte disso: converte as formas decimal e curta, mas trata o hex como
+     * nome (não resolve → o guard deixava passar, BUG-02) e lê {@code 0177.0.0.1} como
+     * 177.0.0.1 — público — onde um navegador lê 127.0.0.1.
+     *
+     * Validar e conectar com parsers que discordam é a receita clássica de SSRF. Em
+     * vez de reimplementar todos os parsers e torcer para eles concordarem, a forma
+     * ambígua é recusada na entrada, inclusive quando o destino seria público
+     * ({@code 134744072} = 8.8.8.8): nenhum alvo legítimo precisa ser escrito assim.
+     */
+    private static void rejectNonCanonicalIpv4(String normalized, String original) {
+        if (normalized.indexOf(':') >= 0) return;   // literal IPv6 — o InetAddress cuida
+
+        String[] parts = normalized.split("\\.", -1);
+        // "Ends in a number" do WHATWG: só dígitos (mesmo octal inválido, como "08") ou
+        // um número válido em alguma base. Fora isso é hostname comum e segue para o DNS.
+        String last = parts[parts.length - 1];
+        boolean endsInNumber = last.matches("[0-9]+") || parseIpv4Part(last) >= 0;
+        if (!endsInNumber || isCanonicalIpv4(parts)) return;
+
+        String equivalent = whatwgIpv4(parts);
+        throw new DomainBlockedException(equivalent != null
+                ? "Scan bloqueado: '" + original + "' é um endereço IP em formato alternativo "
+                        + "(equivale a " + equivalent + "). Informe o IP no formato decimal a.b.c.d."
+                : "Scan bloqueado: '" + original + "' não é um endereço IP válido.");
+    }
+
+    /** Exatamente quatro octetos decimais, sem zero à esquerda, de 0 a 255. */
+    private static boolean isCanonicalIpv4(String[] parts) {
+        if (parts.length != 4) return false;
+        for (String p : parts) {
+            if (!p.matches("0|[1-9][0-9]{0,2}") || Integer.parseInt(p) > 255) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Interpreta o host como o parser IPv4 do WHATWG e devolve o {@code a.b.c.d}
+     * equivalente, ou null se não for um IPv4 válido nessa leitura.
+     */
+    private static String whatwgIpv4(String[] parts) {
+        int n = parts.length;
+        if (n > 4) return null;
+
+        long[] values = new long[n];
+        for (int i = 0; i < n; i++) {
+            values[i] = parseIpv4Part(parts[i]);
+            if (values[i] < 0) return null;
+            if (i < n - 1 && values[i] > 255) return null;
+        }
+        // A última parte preenche os bytes que sobraram: em "127.1", o 1 ocupa três.
+        if (values[n - 1] >= 1L << (8 * (5 - n))) return null;
+
+        long ipv4 = values[n - 1];
+        for (int i = 0; i < n - 1; i++) ipv4 += values[i] << (8 * (3 - i));
+        return ((ipv4 >> 24) & 0xFF) + "." + ((ipv4 >> 16) & 0xFF) + "."
+                + ((ipv4 >> 8) & 0xFF) + "." + (ipv4 & 0xFF);
+    }
+
+    /**
+     * Uma parte de IPv4 no WHATWG: {@code 0x}=hex, zero à esquerda=octal. -1 se não
+     * for número. Sem limite de tamanho: {@code 0x00000000007f000001} ainda é
+     * 127.0.0.1 para um navegador — cortar por comprimento deixaria essa forma cair
+     * como hostname. Acima de 32 bits devolve 2^32, que nenhuma posição aceita.
+     */
+    private static long parseIpv4Part(String part) {
+        if (part.isEmpty()) return -1;
+        boolean hex   = part.startsWith("0x");
+        boolean octal = !hex && part.length() > 1 && part.startsWith("0");
+        int radix     = hex ? 16 : octal ? 8 : 10;
+        String digits = hex ? part.substring(2) : octal ? part.substring(1) : part;
+        if (digits.isEmpty()) return 0;   // "0x" sozinho vale 0, como no WHATWG
+        if (!digits.chars().allMatch(c -> Character.digit(c, radix) >= 0)) return -1;
+        BigInteger value = new BigInteger(digits, radix);
+        return value.bitLength() > 32 ? 1L << 32 : value.longValue();
     }
 
     /** true se a URL é aceitável — versão não-lançante, para filtrar candidatos. */

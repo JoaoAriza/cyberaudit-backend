@@ -108,6 +108,52 @@ class SsrfGuardTest {
                 "deveria bloquear " + url);
     }
 
+    // ── Formas numéricas alternativas de IPv4 (BUG-02, cyberaudit-qa) ─────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://0x7f000001/",       // hex inteiro → 127.0.0.1 (o caso do BUG-02)
+            "http://0X7F000001/",       // hex maiúsculo
+            "http://0x7f.0.0.1/",       // hex por octeto
+            "http://0x7f.1/",           // hex + forma curta
+            "http://0x00000000000000007f000001/",  // hex com zeros à esquerda (qualquer tamanho)
+            "http://0xa9fea9fe/",       // hex → 169.254.169.254 (metadata cloud)
+            "http://017700000001/",     // octal inteiro → 127.0.0.1
+            "http://0177.0.0.1/",       // octal por octeto: o JDK lê 177.0.0.1 (público!),
+                                        // navegador e curl leem 127.0.0.1
+            "http://2130706433/",       // decimal inteiro → 127.0.0.1
+            "http://127.1/",            // forma curta → 127.0.0.1
+            "http://127.0.0.01/",       // zero à esquerda num octeto
+            "http://134744072/",        // decimal inteiro de IP PÚBLICO (8.8.8.8) — também
+                                        // ambíguo, recusado pelo formato e não pelo destino
+            "http://1.2.3.4.5/",        // cinco partes: não é IPv4 válido
+            "http://999999999999/"      // estoura 32 bits
+    })
+    @DisplayName("recusa IPv4 fora da forma canônica a.b.c.d (hex, octal, inteiro, curta)")
+    void recusaIpv4NaoCanonico(String url) {
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validate(url),
+                "deveria bloquear " + url);
+    }
+
+    @Test
+    @DisplayName("a mensagem diz a qual endereço a forma alternativa equivale")
+    void mensagemMostraEquivalente() {
+        DomainBlockedException e = assertThrows(DomainBlockedException.class,
+                () -> SsrfGuard.validate("http://0x7f000001/"));
+        assertTrue(e.getMessage().contains("127.0.0.1"), e.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://8.8.8.8/",              // IPv4 canônico público continua aceito
+            "http://0x7f000001.invalid/",   // só o ÚLTIMO rótulo decide se é IP; .invalid
+            "http://123.invalid/"           // nunca resolve (RFC 6761), então segue
+    })
+    @DisplayName("IPv4 canônico público e hostnames com rótulos numéricos não são recusados pelo formato")
+    void naoRecusaFormaCanonicaNemHostname(String url) {
+        assertDoesNotThrow(() -> SsrfGuard.validate(url));
+    }
+
     // ── URLs inválidas ───────────────────────────────────────────────────────
 
     @ParameterizedTest
