@@ -2,10 +2,17 @@ package com.joao.cyberaudit.service;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.SocketTimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DomainProtectionServiceTest {
@@ -65,6 +72,39 @@ class DomainProtectionServiceTest {
         assertFalse(service.isOwnershipVerified("169.254.169.254"));
         assertFalse(service.isOwnershipVerified("localhost"));
         assertFalse(service.isOwnershipVerified("192.168.1.1"));
+    }
+
+    /**
+     * Regressão do BUG-05 (cyberaudit-qa). O {@code /scan/verify-check} é público e o
+     * guard validava o texto cru do host: com porta, espaço ou um delimitador de URL,
+     * o {@code InetAddress} não resolvia e o guard deixava passar — mas o {@code URI}
+     * montado depois extraía {@code 127.0.0.1} e a requisição saía.
+     *
+     * Só afirmar {@code false} não prova nada: contra um destino interno a verificação
+     * falha de qualquer jeito (o TLS não fecha). O que se afirma é que NENHUMA conexão
+     * chegou ao socket que faz o papel de serviço interno.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "127.0.0.1:%d",
+            "127.0.0.1:%d/",
+            "127.0.0.1:%d#",
+            " 127.0.0.1:%d",
+            "x@127.0.0.1:%d"
+    })
+    @DisplayName("host disfarçado (porta, espaço, delimitador de URL) não gera conexão a destino interno")
+    void naoConectaEmDestinoInternoDisfarcado(String formato) throws Exception {
+        try (ServerSocket servicoInterno = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))) {
+            servicoInterno.setSoTimeout(300);
+            String host = formato.formatted(servicoInterno.getLocalPort());
+
+            assertFalse(service.isOwnershipVerified(host));
+
+            // Uma conexão feita teria completado o handshake TCP e estaria na fila do
+            // accept — mesmo que o cliente já tenha desistido no TLS.
+            assertThrows(SocketTimeoutException.class, servicoInterno::accept,
+                    "o serviço conectou em '" + host + "'");
+        }
     }
 
     @Test

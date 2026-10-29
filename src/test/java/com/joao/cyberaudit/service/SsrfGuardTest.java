@@ -154,6 +154,53 @@ class SsrfGuardTest {
         assertDoesNotThrow(() -> SsrfGuard.validate(url));
     }
 
+    // ── Host com porta ou delimitador (BUG-05, cyberaudit-qa) ─────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "127.0.0.1:8081",           // porta: o InetAddress não resolvia → passava
+            "localhost:8081",           // e o sufixo "localhost" não casava com ":8081"
+            "169.254.169.254:80",
+            "0x7f000001:80",            // porta + forma alternativa (BUG-02)
+            "[::1]:443",
+            "10.0.0.1:",                // porta vazia
+            "127.0.0.1:abc",            // porta não numérica
+            " 127.0.0.1",               // espaço: quem usa o host apara antes de montar a URL
+            "127.0.0.1 ",
+            "x@example.com",            // userinfo: o URI leria o host como example.com
+            "example.com/caminho",      // path, query e fragmento: idem
+            "example.com?q=1",
+            "example.com#frag",
+            "exa mple.com",
+            ":8080"                     // só porta, sem host
+    })
+    @DisplayName("validateHost recusa host disfarçado por porta interna, espaço ou delimitador de URL")
+    void validateHostRecusaHostDisfarcado(String host) {
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validateHost(host),
+                "deveria bloquear '" + host + "'");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "8.8.8.8:443",
+            "[2606:4700:4700::1111]:443",
+            "example.invalid:8443"      // porta em host público é legítima (domínio verificado com porta)
+    })
+    @DisplayName("validateHost aceita porta em host público — a porta não muda o destino validado")
+    void validateHostAceitaPortaEmHostPublico(String host) {
+        assertDoesNotThrow(() -> SsrfGuard.validateHost(host));
+    }
+
+    @Test
+    @DisplayName("allowlist de teste casa pelo host sem a porta (juice-shop:3000 → juice-shop)")
+    void allowlistCasaSemPorta() {
+        // O seed do cyberaudit-qa guarda domínios com porta (juice-shop:3000). Antes, eles
+        // passavam pelo mesmo buraco do BUG-05; agora passam porque o host está na allowlist.
+        SsrfGuard.setTestAllowlist(Set.of("192.168.1.100"));
+        assertDoesNotThrow(() -> SsrfGuard.validateHost("192.168.1.100:3000"));
+        assertThrows(DomainBlockedException.class, () -> SsrfGuard.validateHost("192.168.1.101:3000"));
+    }
+
     // ── URLs inválidas ───────────────────────────────────────────────────────
 
     @ParameterizedTest

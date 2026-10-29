@@ -9,6 +9,7 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Guard anti-SSRF aplicado a toda URL de scan antes de qualquer requisição —
@@ -89,7 +90,12 @@ public final class SsrfGuard {
             throw new DomainBlockedException("Host inválido para scan: host ausente.");
         }
 
-        String normalized = host.toLowerCase(Locale.ROOT);
+        String bare = stripPort(host.trim());
+        if (bare.isBlank()) {
+            throw new DomainBlockedException("Host inválido para scan: host ausente.");
+        }
+
+        String normalized = bare.toLowerCase(Locale.ROOT);
         if (normalized.endsWith(".")) normalized = normalized.substring(0, normalized.length() - 1);
         for (String suffix : BLOCKED_SUFFIXES) {
             if (normalized.equals(suffix) || normalized.endsWith(suffix)) {
@@ -128,6 +134,56 @@ public final class SsrfGuard {
     }
 
     /**
+     * Caracteres que um parser de URL lê como fim do host (userinfo, path, query,
+     * fragmento) e espaço/controle. Nenhum aparece num host de verdade.
+     */
+    private static final Pattern URL_DELIMITERS = Pattern.compile("[@/?#\\\\\\s\\p{Cntrl}]");
+
+    /**
+     * Separa a porta de {@code host:porta} e {@code [ipv6]:porta} (e tira os colchetes
+     * de {@code [ipv6]}) e recusa delimitadores de URL — o que sobra é exatamente o
+     * host que um {@code URI} montado com este valor conectaria.
+     *
+     * Quem chama {@link #validateHost} recebe o host cru de um parâmetro e depois
+     * monta {@code "https://" + host + ...} (ex. a verificação de posse). Sem isto, o
+     * guard e o {@code URI} liam o mesmo texto de jeitos diferentes: com
+     * {@code 127.0.0.1:8081}, {@code x@host-interno} ou {@code 127.0.0.1/}, o
+     * {@code InetAddress} não resolvia e o guard deixava passar, mas o {@code URI}
+     * extraía o host interno e a requisição saía (BUG-05). Porta em host público
+     * continua valendo — domínio verificado pode ter porta ({@code juice-shop:3000}).
+     *
+     * IPv6 sem colchetes (mais de um {@code :}) volta como está.
+     */
+    private static String stripPort(String host) {
+        if (URL_DELIMITERS.matcher(host).find()) {
+            throw new DomainBlockedException("Host inválido para scan: '" + host
+                    + "'. Informe só o domínio, sem caminho, espaço ou credenciais.");
+        }
+
+        String bare;
+        String port;
+        if (host.startsWith("[")) {
+            int end = host.indexOf(']');
+            String rest = end < 0 ? null : host.substring(end + 1);
+            if (rest == null || (!rest.isEmpty() && !rest.startsWith(":"))) {
+                throw new DomainBlockedException("Host inválido para scan: '" + host + "'.");
+            }
+            bare = host.substring(1, end);
+            port = rest.isEmpty() ? null : rest.substring(1);
+        } else {
+            int colon = host.indexOf(':');
+            if (colon < 0 || colon != host.lastIndexOf(':')) return host;
+            bare = host.substring(0, colon);
+            port = host.substring(colon + 1);
+        }
+
+        if (port != null && !port.matches("[0-9]{1,5}")) {
+            throw new DomainBlockedException("Host inválido para scan: porta inválida em '" + host + "'.");
+        }
+        return bare;
+    }
+
+    /**
      * Recusa IPv4 escrito fora da forma canônica {@code a.b.c.d} decimal.
      *
      * Pela especificação de URL do WHATWG — a que navegadores e o curl seguem —, um
@@ -144,7 +200,8 @@ public final class SsrfGuard {
      * ({@code 134744072} = 8.8.8.8): nenhum alvo legítimo precisa ser escrito assim.
      */
     private static void rejectNonCanonicalIpv4(String normalized, String original) {
-        if (normalized.indexOf(':') >= 0) return;   // literal IPv6 — o InetAddress cuida
+        // A porta já saiu em stripPort: o que tem ':' aqui é literal IPv6 — o InetAddress cuida.
+        if (normalized.indexOf(':') >= 0) return;
 
         String[] parts = normalized.split("\\.", -1);
         // "Ends in a number" do WHATWG: só dígitos (mesmo octal inválido, como "08") ou

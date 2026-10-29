@@ -47,13 +47,16 @@ public class DomainProtectionService {
      * (/scan/verify-check) e sem isso faria requisição de saída para qualquer destino.
      * Redirects não são seguidos de propósito — prova de posse tem que vir do próprio
      * host, não de onde ele apontar.
+     *
+     * O guard valida a URL MONTADA, não o parâmetro: é ela que o cliente conecta. Validar
+     * o texto cru e conectar no que o {@code URI} extrai dele foi o BUG-05 — com porta,
+     * espaço ou {@code x@}, os dois liam hosts diferentes.
      */
     public boolean isOwnershipVerified(String host) {
         if (host == null || host.isBlank()) return false;
         try {
-            SsrfGuard.validateHost(host);
-
             String url = "https://" + normalizeHost(host) + "/.well-known/cyberaudit.txt";
+            SsrfGuard.validate(url);
 
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .GET()
