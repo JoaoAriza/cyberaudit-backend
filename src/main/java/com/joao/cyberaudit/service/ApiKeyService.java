@@ -135,7 +135,7 @@ public class ApiKeyService {
         }
         String prefix = rawKey.substring(0, Math.min(11, rawKey.length()));
 
-        List<ApiKey> candidates = apiKeyRepository.findByKeyPrefixAndRevokedAtIsNull(prefix);
+        List<ApiKey> candidates = apiKeyRepository.findActiveByKeyPrefixWithOwner(prefix);
         for (ApiKey k : candidates) {
             if (!k.isActive()) continue;
             if (passwordEncoder.matches(rawKey, k.getKeyHash())) {
