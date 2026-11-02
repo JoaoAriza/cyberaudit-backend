@@ -20,7 +20,7 @@ public class SecurityTxtService {
      * Locais padrão: /.well-known/security.txt ou /security.txt
      */
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();

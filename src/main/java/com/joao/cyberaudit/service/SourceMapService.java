@@ -131,7 +131,7 @@ public class SourceMapService {
         this.catalog = catalog;
     }
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();

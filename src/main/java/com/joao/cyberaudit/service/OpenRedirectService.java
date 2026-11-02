@@ -32,7 +32,7 @@ public class OpenRedirectService {
             "//open-redirect-probe.cyberaudit.io"
     );
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();

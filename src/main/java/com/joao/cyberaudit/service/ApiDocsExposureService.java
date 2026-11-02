@@ -61,7 +61,7 @@ public class ApiDocsExposureService {
         this.catalog = catalog;
     }
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();

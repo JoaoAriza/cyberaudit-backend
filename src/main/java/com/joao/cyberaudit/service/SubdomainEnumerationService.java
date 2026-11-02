@@ -31,7 +31,7 @@ public class SubdomainEnumerationService {
 
     private final CrtShService crtShService;
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
+    private final HttpClient httpClient = ScannerHttp.newClientBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .build();

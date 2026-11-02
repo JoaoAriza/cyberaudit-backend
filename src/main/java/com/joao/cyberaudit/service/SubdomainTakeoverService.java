@@ -70,7 +70,7 @@ public class SubdomainTakeoverService {
 
     private final CrtShService crtShService; // ← compartilhado
     private final MessageCatalog catalog;
-    private final HttpClient   httpClient = HttpClient.newBuilder()
+    private final HttpClient   httpClient = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();

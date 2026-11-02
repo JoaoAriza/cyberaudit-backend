@@ -71,7 +71,7 @@ public class PathTraversalService {
             new String[]{ "windows/win.ini","[mci",         null    }
     );
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // nao seguir redirects — LFI raramente redireciona
             .connectTimeout(Duration.ofSeconds(5))
             .build();

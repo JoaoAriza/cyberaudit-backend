@@ -23,12 +23,12 @@ public class HttpFetchService {
 
     // connectTimeout: tempo máximo para estabelecer a conexão TCP
     // Reduzido de 8s para 5s — se o servidor não responde em 5s, não vale esperar mais
-    private final HttpClient clientFollow = HttpClient.newBuilder()
+    private final HttpClient clientFollow = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    private final HttpClient clientNoRedirect = HttpClient.newBuilder()
+    private final HttpClient clientNoRedirect = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();

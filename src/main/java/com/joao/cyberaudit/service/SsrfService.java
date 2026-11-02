@@ -102,7 +102,7 @@ public class SsrfService {
             Pattern.CASE_INSENSITIVE
     );
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // interceptar redirects manualmente
             .connectTimeout(Duration.ofSeconds(5))
             .build();

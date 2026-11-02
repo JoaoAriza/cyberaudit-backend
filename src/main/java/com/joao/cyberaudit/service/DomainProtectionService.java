@@ -23,7 +23,7 @@ public class DomainProtectionService {
     /** Teto do arquivo de verificação — o conteúdo esperado tem ~50 bytes. */
     private static final int MAX_VERIFICATION_BYTES = 4096;
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(ScannerHttp.CONNECT_TIMEOUT)
             .build();

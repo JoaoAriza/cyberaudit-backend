@@ -46,7 +46,7 @@ public class RobotsTxtService {
     /** Diferença de corpo, em bytes, a partir da qual duas respostas são páginas distintas. */
     private static final int DIFERENCA_MINIMA_CORPO = 256;
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)  // redirects seguidos por ScannerHttp.sendFollowingSafely (revalida cada hop)
             .connectTimeout(Duration.ofSeconds(6))
             .build();

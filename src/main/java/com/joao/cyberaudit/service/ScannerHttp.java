@@ -63,6 +63,22 @@ public final class ScannerHttp {
     /** Timeout de conexão padrão dos probes. */
     public static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
 
+    /**
+     * Ponto de partida de todo {@link HttpClient} que fala com o ALVO do scan: já sai
+     * em HTTP/1.1.
+     *
+     * O padrão do JDK é HTTP/2, e num alvo {@code http://} isso vira um pedido de
+     * upgrade h2c na primeira requisição. O RFC 9113 depreciou esse upgrade e muito
+     * servidor o trata mal — Node com socket.io (o Juice Shop) derruba a conexão sem
+     * responder, e o scan inteiro rodava sem resposta para analisar (BUG-03). Em
+     * {@code https://} o h2 viria por ALPN, sem esse problema, mas os probes modelam
+     * HTTP/1.1 (Host, CRLF, métodos) e um protocolo só deixa o resultado igual nos dois
+     * esquemas. APIs externas fixas (NVD, CT, Mercado Pago, Resend) não usam isto.
+     */
+    public static HttpClient.Builder newClientBuilder() {
+        return HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1);
+    }
+
     /** Headers atrelados à conexão/origem atual — não devem atravessar um redirect. */
     private static final Set<String> HOP_LOCAL_HEADERS = Set.of(
             "host", "connection", "content-length", "authorization", "cookie", "origin", "referer");

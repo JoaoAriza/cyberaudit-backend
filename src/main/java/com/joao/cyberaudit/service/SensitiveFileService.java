@@ -80,7 +80,7 @@ public class SensitiveFileService {
     private static final Pattern SECURE_FALSE = Pattern.compile(
             "secure\\s*=\\s*[\"']false[\"']", Pattern.CASE_INSENSITIVE);
 
-    private final HttpClient client = HttpClient.newBuilder()
+    private final HttpClient client = ScannerHttp.newClientBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
