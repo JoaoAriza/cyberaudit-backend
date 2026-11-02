@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class ErrorDisclosureService {
@@ -40,7 +41,8 @@ public class ErrorDisclosureService {
                     .build();
 
             HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
-            String body = resp.body() == null ? "" : resp.body().toLowerCase();
+            // Locale.ROOT: no locale turco o "I" de SQLITE_ERROR viraria "ı" e não casaria.
+            String body = resp.body() == null ? "" : resp.body().toLowerCase(Locale.ROOT);
 
             return containsDbErrorPatterns(body);
 
@@ -80,7 +82,13 @@ public class ErrorDisclosureService {
                 "java.sql.sqlexception",
                 "mysqli_fetch",
                 "pg_query()",
-                "sqlite3.operationalerror",
+                // SQLite: o mesmo banco aparece com outro nome em cada driver (BUG-06 —
+                // só havia o do Python, e o Juice Shop, em Node, passava sem achado).
+                "sqlite3.operationalerror",   // Python
+                "sqlite_error",               // código do próprio SQLite: Node (sqlite3), Java (sqlite-jdbc)
+                "sqliteerror",                // Node, better-sqlite3
+                "sqliteexception",            // Java, .NET, Android
+                "sqlite3::",                  // Ruby (SQLite3::SQLException), PHP (SQLite3::query())
                 "ora-00907",
                 "ora-00933",
                 "ora-00942",
