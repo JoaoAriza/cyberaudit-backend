@@ -1,10 +1,13 @@
 package com.joao.cyberaudit.service;
 
+import dev.samstevens.totp.code.DefaultCodeGenerator;
+import dev.samstevens.totp.code.HashingAlgorithm;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Base64;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -68,5 +71,47 @@ class TotpServiceTest {
         assertFalse(service.verify(null, "123456"));
         assertFalse(service.verify(secret, "000000"));
         assertFalse(service.verify(secret, "nao-numerico"));
+    }
+
+    // ── Janela que casou (base do consumo do código, BUG-04) ────────────────
+
+    /** 1_000_000_020 s cai na janela 33_333_334 (de 30 s) — longe da borda. */
+    private static final long AGORA_S = 1_000_000_020L;
+    private static final long JANELA  = AGORA_S / 30;
+
+    private final TotpService comRelogioFixo = new TotpService(() -> AGORA_S);
+    private final DefaultCodeGenerator gerador = new DefaultCodeGenerator(HashingAlgorithm.SHA1);
+
+    @Test
+    @DisplayName("devolve a janela em que o código casou: a atual e uma para cada lado")
+    void devolveAJanelaQueCasou() throws Exception {
+        String secret = service.generateSecret();
+
+        assertEquals(JANELA,     comRelogioFixo.matchingTimeStep(secret, gerador.generate(secret, JANELA)));
+        assertEquals(JANELA - 1, comRelogioFixo.matchingTimeStep(secret, gerador.generate(secret, JANELA - 1)));
+        assertEquals(JANELA + 1, comRelogioFixo.matchingTimeStep(secret, gerador.generate(secret, JANELA + 1)));
+    }
+
+    @Test
+    @DisplayName("fora da tolerância de ±1 janela, ou código errado: -1")
+    void foraDaToleranciaNaoCasa() throws Exception {
+        String secret = service.generateSecret();
+
+        assertEquals(-1, comRelogioFixo.matchingTimeStep(secret, gerador.generate(secret, JANELA - 2)));
+        assertEquals(-1, comRelogioFixo.matchingTimeStep(secret, gerador.generate(secret, JANELA + 2)));
+        assertEquals(-1, comRelogioFixo.matchingTimeStep(secret, "000000".equals(gerador.generate(secret, JANELA))
+                ? "111111" : "000000"));
+        assertEquals(-1, comRelogioFixo.matchingTimeStep(null, "123456"));
+        assertEquals(-1, comRelogioFixo.matchingTimeStep(secret, null));
+    }
+
+    @Test
+    @DisplayName("espaço no meio do código (como o app mostra, \"123 456\") ainda casa")
+    void aceitaCodigoComEspaco() throws Exception {
+        String secret = service.generateSecret();
+        String codigo = gerador.generate(secret, JANELA);
+
+        assertEquals(JANELA, comRelogioFixo.matchingTimeStep(secret,
+                codigo.substring(0, 3) + " " + codigo.substring(3)));
     }
 }

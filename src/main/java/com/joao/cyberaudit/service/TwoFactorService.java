@@ -69,10 +69,9 @@ public class TwoFactorService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Inicie o setup TOTP antes de confirmar.");
         }
-        if (!totpService.verify(user.getTotpSecret(), code)) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Código TOTP inválido. Verifique o horário do dispositivo.");
-        }
+        // Consome também aqui: o código que confirmou a ativação não pode servir de
+        // segundo fator para um login logo em seguida.
+        consumeTotpCode(user, code, "Código TOTP inválido. Verifique o horário do dispositivo.");
         user.setTotpEnabled(true);
         userRepository.save(user);
     }
@@ -182,10 +181,7 @@ public class TwoFactorService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "TOTP não está ativado para este usuário.");
             }
-            if (!totpService.verify(user.getTotpSecret(), code)) {
-                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                        "Código TOTP inválido.");
-            }
+            consumeTotpCode(user, code, "Código TOTP inválido.");
         } else if ("EMAIL".equalsIgnoreCase(method)) {
             if (!user.isEmailOtpEnabled()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -195,6 +191,27 @@ public class TwoFactorService {
         } else {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Método 2FA inválido. Use 'TOTP' ou 'EMAIL'.");
+        }
+    }
+
+    /**
+     * Aceita o código TOTP uma vez só (RFC 6238 §5.2). Validar não basta: a verificação
+     * é stateless, e o mesmo código passava de novo — com o mesmo token pré-auth, uma
+     * sessão nova a cada chamada, enquanto durasse a janela (BUG-04).
+     *
+     * O consumo é a UPDATE condicional do repositório, e não ler-comparar-gravar aqui:
+     * dois pedidos simultâneos com o mesmo código leriam o mesmo "último usado" e
+     * passariam os dois. Na UPDATE, o segundo encontra a janela já gravada e altera 0
+     * linhas.
+     */
+    private void consumeTotpCode(AppUser user, String code, String invalidMessage) {
+        long step = totpService.matchingTimeStep(user.getTotpSecret(), code);
+        if (step < 0) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, invalidMessage);
+        }
+        if (userRepository.consumeTotpStep(user.getId(), step) == 0) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Código TOTP já utilizado. Aguarde o próximo código no aplicativo.");
         }
     }
 

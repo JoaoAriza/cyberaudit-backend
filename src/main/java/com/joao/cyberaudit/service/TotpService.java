@@ -1,6 +1,7 @@
 package com.joao.cyberaudit.service;
 
 import dev.samstevens.totp.code.*;
+import dev.samstevens.totp.exceptions.CodeGenerationException;
 import dev.samstevens.totp.exceptions.QrGenerationException;
 import dev.samstevens.totp.qr.QrData;
 import dev.samstevens.totp.qr.QrGenerator;
@@ -11,6 +12,8 @@ import dev.samstevens.totp.time.SystemTimeProvider;
 import dev.samstevens.totp.time.TimeProvider;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 
 @Service
@@ -18,11 +21,25 @@ public class TotpService {
 
     private static final String ISSUER = "CyberAudit";
 
+    /** Duração de cada janela do código, em segundos (RFC 6238). */
+    private static final int PERIOD_SECONDS = 30;
+
+    /** Janelas aceitas para cada lado da atual — o mesmo ±1 do DefaultCodeVerifier. */
+    private static final int ALLOWED_DRIFT = 1;
+
     private final SecretGenerator secretGenerator = new DefaultSecretGenerator(32);
-    private final TimeProvider    timeProvider    = new SystemTimeProvider();
+    private final TimeProvider    timeProvider;
     private final CodeGenerator   codeGenerator   = new DefaultCodeGenerator(HashingAlgorithm.SHA1);
-    private final CodeVerifier    codeVerifier    = new DefaultCodeVerifier(codeGenerator, timeProvider);
     private final QrGenerator     qrGenerator     = new ZxingPngQrGenerator();
+
+    public TotpService() {
+        this(new SystemTimeProvider());
+    }
+
+    /** Relógio fixo para o teste acertar a janela sem depender da hora. */
+    TotpService(TimeProvider timeProvider) {
+        this.timeProvider = timeProvider;
+    }
 
     /** Gera um novo segredo TOTP base32 (32 chars). */
     public String generateSecret() {
@@ -69,7 +86,32 @@ public class TotpService {
      * Aceita ±1 janela de 30s para compensar desincronismo de relógio.
      */
     public boolean verify(String secret, String code) {
-        if (secret == null || code == null) return false;
-        return codeVerifier.isValidCode(secret, code.replace(" ", "").trim());
+        return matchingTimeStep(secret, code) >= 0;
+    }
+
+    /**
+     * Janela de 30s (time-step do RFC 6238) em que o código bate, ou -1 se não bate em
+     * nenhuma das aceitas (a atual ±1, para compensar desincronismo de relógio).
+     *
+     * Existe porque o {@code DefaultCodeVerifier} da biblioteca só diz sim/não — e sem
+     * saber QUAL janela casou não há como marcar o código como usado (BUG-04). A
+     * conferência é a mesma dele: mesmo gerador, todas as janelas percorridas,
+     * comparação em tempo constante.
+     */
+    public long matchingTimeStep(String secret, String code) {
+        if (secret == null || code == null) return -1;
+        byte[] informed = code.replace(" ", "").trim().getBytes(StandardCharsets.UTF_8);
+
+        long current = Math.floorDiv(timeProvider.getTime(), PERIOD_SECONDS);
+        long matched = -1;
+        for (long step = current - ALLOWED_DRIFT; step <= current + ALLOWED_DRIFT; step++) {
+            try {
+                byte[] expected = codeGenerator.generate(secret, step).getBytes(StandardCharsets.UTF_8);
+                if (MessageDigest.isEqual(expected, informed)) matched = step;
+            } catch (CodeGenerationException e) {
+                return -1;   // segredo inválido: nenhum código vale
+            }
+        }
+        return matched;
     }
 }

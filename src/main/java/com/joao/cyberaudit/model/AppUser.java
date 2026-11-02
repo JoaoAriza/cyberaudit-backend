@@ -109,6 +109,18 @@ public class AppUser implements UserDetails {
     @Column(nullable = false)
     private boolean totpEnabled = false;
 
+    /**
+     * Janela de 30s (time-step do RFC 6238) do último código TOTP aceito. Um código só
+     * passa se a janela dele for MAIOR que esta — é o que faz cada código valer uma vez
+     * (BUG-04). Nulo = nenhum código usado ainda.
+     *
+     * {@code updatable = false}: quem grava é só a UPDATE condicional de
+     * {@code AppUserRepository.consumeTotpStep}. Um {@code save()} de uma entidade
+     * carregada antes do consumo devolveria o valor antigo e reabriria o replay.
+     */
+    @Column(updatable = false)
+    private Long totpLastUsedStep;
+
     @Builder.Default
     @Column(nullable = false)
     private boolean emailOtpEnabled = false;
