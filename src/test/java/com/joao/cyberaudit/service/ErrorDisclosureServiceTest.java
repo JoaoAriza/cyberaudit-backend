@@ -6,6 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.InvalidMediaTypeException;
+import org.springframework.http.MediaType;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -38,12 +40,24 @@ class ErrorDisclosureServiceTest {
 
     private HttpServer server;
     private volatile String corpoDoErro;
+    /** Alvo que lê o Accept como o Spring MVC: item inválido → 406, sem rodar a consulta. */
+    private volatile boolean acceptEstrito;
     private volatile String ultimoValor;
 
     @BeforeEach
     void sobeServidor() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", troca -> {
+            if (acceptEstrito) {
+                try {
+                    // O mesmo parser que o Spring MVC usa na negociação de conteúdo.
+                    MediaType.parseMediaTypes(troca.getRequestHeaders().getFirst("Accept"));
+                } catch (InvalidMediaTypeException e) {
+                    troca.sendResponseHeaders(406, -1);
+                    troca.close();
+                    return;
+                }
+            }
             String query = troca.getRequestURI().getRawQuery();
             String valor = query == null ? "" : URLDecoder.decode(
                     query.substring(query.indexOf('=') + 1), StandardCharsets.UTF_8);
@@ -101,6 +115,19 @@ class ErrorDisclosureServiceTest {
         corpoDoErro = "sqlite3.OperationalError: near \"'\": syntax error";
 
         assertTrue(service.detectsDbErrorLeakage(alvo()));
+    }
+
+    // Alvo em Spring (BUG-07): o MVC lê o Accept inteiro e, se um item for inválido,
+    // recusa a requisição antes do controller — a consulta com a aspa nem roda. O probe
+    // mandava "/" no lugar do curinga "*/*", e assim nunca via erro num alvo Spring.
+    @Test
+    void alvoQueValidaOAcceptRecebeOProbe() {
+        acceptEstrito = true;
+        corpoDoErro = "org.springframework.jdbc.BadSqlGrammarException: PreparedStatementCallback; "
+                + "You have an error in your SQL syntax; check the manual near ''apple'''";
+
+        assertTrue(service.detectsDbErrorLeakage(alvo()));
+        assertEquals("apple'", ultimoValor, "a requisição mutada chegou ao controller");
     }
 
     /** A aspa não quebra nada: resposta normal, sem erro de banco → sem achado. */

@@ -37,7 +37,9 @@ public class ErrorDisclosureService {
                     .GET()
                     .timeout(Duration.ofSeconds(12))
                     .header("User-Agent", ScannerHttp.USER_AGENT)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,/;q=0.8")
+                    // "*/*", não "/": um item inválido no Accept faz o Spring MVC recusar a
+                    // requisição inteira antes do controller, e a consulta nem roda (BUG-07).
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                     .build();
 
             HttpResponse<String> resp = ScannerHttp.sendFollowingSafely(client, req, ScannerHttp.limitedString());
