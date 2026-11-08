@@ -33,8 +33,11 @@ public class CVECorrelationService {
      * CVEs onde nome/versão aparecia em qualquer parte da descrição — incluindo
      * "fixed in X.Y.Z" ou menções contextuais — gerando alto volume de falsos positivos.
      *
-     * Com cpeName, o NVD retorna apenas CVEs cujo "vulnerable configuration"
-     * inclui a versão pesquisada (com suporte a ranges: affects >= 1.18.0, < 1.24.1).
+     * Com cpeName + isVulnerable, o NVD retorna apenas CVEs em que o CPE pesquisado é o
+     * VULNERÁVEL da config, na versão pesquisada (com ranges: affects >= 1.18.0, < 1.24.1).
+     * Sem o isVulnerable, o cpeName casa também com o CPE que aparece só como plataforma
+     * ("roda em", vulnerable:false) — era assim que CVE de extensão PECL virava CVE do
+     * PHP (BUG-08).
      *
      * CPE format: cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*
      * Referência: https://nvd.nist.gov/products/cpe/search
@@ -65,6 +68,17 @@ public class CVECorrelationService {
     private final HttpClient   client  = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper jackson = new ObjectMapper();
+
+    /** Endpoint de CVEs do NVD. Só o teste troca, para apontar um servidor local. */
+    private final String nvdCveApi;
+
+    public CVECorrelationService() {
+        this(NVD_CVE_API);
+    }
+
+    CVECorrelationService(String nvdCveApi) {
+        this.nvdCveApi = nvdCveApi;
+    }
 
     /**
      * Chave da API do NVD (opcional). Com chave, o rate-limit sobe de 5 → 50 req/30s,
@@ -111,8 +125,9 @@ public class CVECorrelationService {
     }
 
     /**
-     * Consulta o NVD via cpeName — retorna somente CVEs cujo vulnerable configuration
-     * inclui a versão exata (ou um range que a contenha).
+     * Consulta o NVD via cpeName + isVulnerable — retorna somente CVEs em que o produto é
+     * o vulnerável da config, na versão exata (ou num range que a contenha). Sem o
+     * isVulnerable vinham também os CVEs em que o produto é só plataforma (BUG-08).
      *
      * Elimina a principal causa de falsos positivos: keywordSearch retornava CVEs
      * onde versão/software aparecia em qualquer parte do texto da descrição.
@@ -133,7 +148,10 @@ public class CVECorrelationService {
 
         try {
             String encoded = URLEncoder.encode(cpeName, StandardCharsets.UTF_8);
-            String url = NVD_CVE_API + "?cpeName=" + encoded
+            // isVulnerable: sem ele o cpeName casa também com o CPE que está na config só
+            // como plataforma (vulnerable:false) — ver produtoMarcadoVulneravel.
+            String url = nvdCveApi + "?cpeName=" + encoded
+                    + "&isVulnerable"
                     + "&resultsPerPage=" + MAX_PER_SW;
 
             HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(URI.create(url))
@@ -156,14 +174,15 @@ public class CVECorrelationService {
 
             if (resp.statusCode() != 200) return List.of();
 
-            return parseResponse(resp.body(), software + " " + ver, alvo);
+            return parseResponse(resp.body(), software + " " + ver, cpe, alvo);
 
         } catch (Exception e) {
             return List.of();
         }
     }
 
-    private List<CVEFinding> parseResponse(String json, String affectedSoftware, Plataforma alvo) {
+    private List<CVEFinding> parseResponse(String json, String affectedSoftware,
+                                           String[] cpe, Plataforma alvo) {
         List<CVEFinding> findings = new ArrayList<>();
         try {
             JsonNode root  = jackson.readTree(json);
@@ -176,6 +195,10 @@ public class CVECorrelationService {
 
                 String id = cve.path("id").asText("");
                 if (id.isBlank()) continue;
+
+                // CVE de extensão/plugin em que o nosso produto é só a plataforma: não é
+                // dele. Foi o CVE-2013-2220 (PECL radius) num PHP 8.3.36 — BUG-08.
+                if (!produtoMarcadoVulneravel(cve, cpe[0], cpe[1])) continue;
 
                 // Filtro de plataforma: um CVE cuja config no NVD exige um SO que o
                 // alvo comprovadamente NÃO é não se aplica. Foi o que gerou o falso
@@ -334,6 +357,44 @@ public class CVECorrelationService {
         if (p.length < 5 || !"o".equals(p[2])) return null;
         boolean windows = "microsoft".equals(p[3]) && p[4].startsWith("windows");
         return windows ? Plataforma.WINDOWS : Plataforma.UNIX;
+    }
+
+    // ── Produto vulnerável x plataforma ─────────────────────────────────────────
+
+    /**
+     * O nosso produto aparece como VULNERÁVEL na config do CVE, e não só como plataforma?
+     *
+     * O NVD escreve "extensão X do PHP" como um AND: o CPE da extensão marcado
+     * {@code vulnerable:true} e o {@code php:php} marcado {@code vulnerable:false} —
+     * "roda em PHP". Uma consulta por {@code cpeName} casa com os dois lados. O
+     * {@code isVulnerable} na URL já pede ao NVD só o lado vulnerável; esta checagem
+     * repete a regra aqui para o resultado não depender só do parâmetro (BUG-08: o
+     * CVE-2013-2220, da extensão PECL radius, num PHP 8.3.36).
+     *
+     * Só vendor e produto: a versão o NVD já casou do lado dele, com os ranges.
+     */
+    boolean produtoMarcadoVulneravel(JsonNode cve, String vendor, String product) {
+        return temCriterioVulneravel(cve.path("configurations"), vendor, product);
+    }
+
+    private boolean temCriterioVulneravel(JsonNode node, String vendor, String product) {
+        if (node == null || node.isMissingNode()) return false;
+        if (node.isObject()) {
+            JsonNode crit = node.get("criteria");
+            if (crit != null && crit.isTextual() && node.path("vulnerable").asBoolean(false)) {
+                // cpe : 2.3 : part : vendor : product : ...
+                String[] p = crit.asText().split(":");
+                if (p.length > 4 && "a".equals(p[2]) && vendor.equals(p[3]) && product.equals(p[4])) {
+                    return true;
+                }
+            }
+        }
+        if (node.isObject() || node.isArray()) {
+            for (JsonNode filho : node) {
+                if (temCriterioVulneravel(filho, vendor, product)) return true;
+            }
+        }
+        return false;
     }
 
     /** Junta todo {@code criteria} de qualquer profundidade da árvore do CVE. */
