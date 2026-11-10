@@ -72,7 +72,9 @@ public class DnsSecurityService {
             // ActiveCampaign
             "ac",
             // OVH
-            "ovhex"
+            "ovhex",
+            // Hostinger — só o -a costuma ter chave; -b/-c ficam revogados (p= vazio)
+            "hostingermail-a", "hostingermail-b", "hostingermail-c"
     );
 
     /**
@@ -160,7 +162,14 @@ public class DnsSecurityService {
                     List.of("ac")),
             new ProvedorDeEmail("OVH",
                     List.of("mx.ovh.com", "ovh.net"),
-                    List.of("ovhex"))
+                    List.of("ovhex")),
+            // Conferido no DNS de um domínio de cliente (2026-11-09): SPF com
+            // `include:_spf.mail.hostinger.com`, MX mx1/mx2.hostinger.com, e os três
+            // seletores como CNAME para *.dkim.mail.hostinger.com. Fora da tabela, o laudo
+            // dizia "DKIM não detectado" num domínio que tem (BUG-09).
+            new ProvedorDeEmail("Hostinger",
+                    List.of("_spf.mail.hostinger.com", "mx1.hostinger.com", "mx2.hostinger.com"),
+                    List.of("hostingermail-a", "hostingermail-b", "hostingermail-c"))
     );
 
     /**
@@ -591,7 +600,7 @@ public class DnsSecurityService {
                     try {
                         org.xbill.DNS.Record[] records =
                                 consultar(p[0] + "._domainkey." + p[1], Type.TXT, falhou);
-                        return (records != null && records.length > 0) ? p[0] : null;
+                        return temChaveDkim(textosQueComecamCom(records, "")) ? p[0] : null;
                     } catch (Exception e) { return null; }
                 }, pool))
                 .toList();
@@ -612,6 +621,46 @@ public class DnsSecurityService {
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Algum dos TXT publicados no seletor é uma chave DKIM em uso?
+     *
+     * Existir TXT no nome não basta (RFC 6376 §3.6.1), e era o que a sonda contava:
+     * - {@code p=} vazio é chave REVOGADA, o jeito oficial de desligar um seletor. A
+     *   Hostinger publica {@code hostingermail-a/-b/-c} e só o {@code -a} tem chave; o
+     *   {@code -b} e o {@code -c} são {@code v=DKIM1;p=}. Contá-los afirmaria uma
+     *   assinatura que nenhum receptor aceita (BUG-09).
+     * - registro que começa com {@code v=} diferente de {@code DKIM1} é descartado. É
+     *   o caso do TXT curinga ({@code *.dominio TXT "v=spf1 ..."}), que faria TODO
+     *   seletor "existir".
+     *
+     * Visível ao pacote e estático para o teste exercitar a regra sem rede.
+     *
+     * @param textos os TXT do nome, cada um com as partes já juntadas
+     */
+    static boolean temChaveDkim(List<String> textos) {
+        if (textos == null) return false;
+        return textos.stream().anyMatch(DnsSecurityService::chaveDkimEmUso);
+    }
+
+    private static boolean chaveDkimEmUso(String registro) {
+        if (registro == null) return false;
+
+        String[] tags = registro.split(";");
+        String chave = null;
+        for (int i = 0; i < tags.length; i++) {
+            int igual = tags[i].indexOf('=');
+            if (igual < 0) continue;
+
+            String nome = tags[i].substring(0, igual).trim();
+            // Espaço dentro do valor é permitido (a chave pode vir quebrada).
+            String valor = tags[i].substring(igual + 1).replaceAll("\\s+", "");
+
+            if (i == 0 && nome.equals("v") && !valor.equalsIgnoreCase("DKIM1")) return false;
+            if (nome.equals("p")) chave = valor;
+        }
+        return chave != null && !chave.isEmpty();
     }
 
     // ── CAA ───────────────────────────────────────────────────────────────────

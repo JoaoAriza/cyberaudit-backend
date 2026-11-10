@@ -63,6 +63,25 @@ class DkimProviderHintTest {
         assertTrue(s.containsAll(List.of("selector1", "selector2")), "veio: " + s);
     }
 
+    @Test
+    @DisplayName("SPF da Hostinger entrega os seletores hostingermail-a/-b/-c (BUG-09)")
+    void spfDaHostinger() {
+        // Conferido no DNS de um domínio de cliente em 2026-11-09: SPF com este include,
+        // DKIM em hostingermail-a._domainkey (CNAME para *.dkim.mail.hostinger.com). Sem
+        // a Hostinger na tabela o laudo dizia "DKIM não detectado" num domínio que tem.
+        var s = seletores("v=spf1 include:_spf.mail.hostinger.com ~all");
+
+        assertEquals(List.of("hostingermail-a", "hostingermail-b", "hostingermail-c"), s);
+    }
+
+    @Test
+    @DisplayName("MX da Hostinger também revela o provedor")
+    void mxDaHostinger() {
+        var s = seletores("10 mx2.hostinger.com. 5 mx1.hostinger.com.");
+
+        assertTrue(s.contains("hostingermail-a"), "veio: " + s);
+    }
+
     // ── O caso comum de verdade ──────────────────────────────────────────────
 
     @Test
@@ -136,7 +155,8 @@ class DkimProviderHintTest {
                       + "mail.protection.outlook.com spf.mandrillapp.com mailgun.org "
                       + "spf.mtasv.net messagingengine.com protonmail.ch zoho.com "
                       + "hubspotemail.net mailjet.com sparkpostmail.com brevo.com "
-                      + "convertkit.com createsend.com activecampaign.com ovh.net")
+                      + "convertkit.com createsend.com activecampaign.com ovh.net "
+                      + "_spf.mail.hostinger.com")
                 .stream().flatMap(p -> p.seletores().stream()).distinct().toList();
 
         assertFalse(todos.isEmpty(), "a evidência acima deveria casar com a tabela inteira");
