@@ -205,6 +205,11 @@ public class DnsSecurityService {
             "(?:^|;)\\s*sp=([^;\\s]+)", Pattern.CASE_INSENSITIVE
     );
 
+    /** Fração das mensagens que reprovam à qual a política se aplica. O ABNF aceita espaço em volta do `=`. */
+    private static final Pattern DMARC_PCT = Pattern.compile(
+            "(?:^|;)\\s*pct\\s*=\\s*([^;\\s]+)", Pattern.CASE_INSENSITIVE
+    );
+
     private static final Logger log = LoggerFactory.getLogger(DnsSecurityService.class);
 
     private final PublicSuffixService publicSuffixService;
@@ -362,19 +367,45 @@ public class DnsSecurityService {
             }
 
             String content = spfs.get(0);
-            b.spfPresent(true).spfRecord(content);
-
-            String lower = content.toLowerCase(Locale.ROOT);
-            if      (lower.contains("-all")) b.spfPolicy("STRONG");
-            else if (lower.contains("~all")) b.spfPolicy("MEDIUM");
-            else if (lower.contains("+all") || lower.contains("?all")) b.spfPolicy("WEAK");
-            else                             b.spfPolicy("MEDIUM");
+            b.spfPresent(true).spfRecord(content).spfPolicy(politicaSpf(content));
             return true;
 
         } catch (Exception e) {
             b.spfPresent(false).spfPolicy("MISSING");
             return false;
         }
+    }
+
+    /**
+     * Política do SPF pelo qualificador do termo {@code all}: {@code -all} STRONG,
+     * {@code ~all} MEDIUM, {@code ?all}/{@code +all} WEAK, sem {@code all} MEDIUM.
+     *
+     * Lia por substring: {@code include:spf-all.exemplo.com ~all} saía STRONG por
+     * conter "-all", e {@code all} sem qualificador — que é {@code +all} — saía MEDIUM.
+     */
+    static String politicaSpf(String content) {
+        Character q = qualificadorDoAll(content);
+        if (q == null) return "MEDIUM";   // sem all, ou com redirect=: o all mora em outro registro
+        return switch (q) {
+            case '-' -> "STRONG";
+            case '~' -> "MEDIUM";
+            default  -> "WEAK";           // '?' (neutral) e '+' (pass)
+        };
+    }
+
+    /**
+     * O qualificador do PRIMEIRO termo {@code all} do SPF, ou null se não há nenhum.
+     * O primeiro porque nada depois do {@code all} é avaliado (RFC 7208 §5.1), e
+     * {@code all} sem qualificador é {@code +} (RFC 7208 §4.6.2).
+     */
+    static Character qualificadorDoAll(String spf) {
+        if (spf == null) return null;
+        for (String termo : spf.trim().split("\\s+")) {
+            String t = termo.toLowerCase(Locale.ROOT);
+            if (t.equals("all")) return '+';
+            if (t.length() == 4 && t.endsWith("all") && "+-~?".indexOf(t.charAt(0)) >= 0) return t.charAt(0);
+        }
+        return null;
     }
 
     /**
@@ -766,8 +797,9 @@ public class DnsSecurityService {
         if (r.isLookupFailed()) return "UNKNOWN";
 
         // Registro que EXISTE mas é inválido (duplicado) não protege ninguém: o
-        // receptor descarta. Para efeito de risco, equivale a não ter.
-        boolean spfOk   = r.isSpfPresent()   && !"INVALID".equals(r.getSpfPolicy());
+        // receptor descarta. Para efeito de risco, equivale a não ter. O +all
+        // também — ver spfAutorizaTodos.
+        boolean spfOk   = spfProtege(r);
         boolean dmarcOk = r.isDmarcPresent() && !"INVALID".equals(r.getDmarcPolicy());
 
         if (!spfOk && !dmarcOk) {
@@ -776,8 +808,53 @@ public class DnsSecurityService {
             return r.isMxPresent() ? "CRITICAL" : "HIGH";
         }
         if (!spfOk || !dmarcOk) return "HIGH";
-        if ("STRONG".equals(r.getSpfPolicy()) && "STRONG".equals(r.getDmarcPolicy())) return "LOW";
-        return "MEDIUM";
+
+        // LOW exigia SPF -all E DMARC reject (BUG-10). Com o DMARC em bloqueio, o
+        // qualificador do SPF não muda o destino do email falso: fail, softfail e
+        // neutral reprovam do mesmo jeito no DMARC, que é quem manda barrar. O que
+        // separa LOW de MEDIUM é o receptor ser mandado barrar — ou só observar.
+        return dmarcEmBloqueio(r) ? "LOW" : "MEDIUM";
+    }
+
+    /** SPF que o receptor aceita e que não autoriza qualquer servidor. */
+    private static boolean spfProtege(DnsSecurityResult r) {
+        return r.isSpfPresent() && !"INVALID".equals(r.getSpfPolicy()) && !spfAutorizaTodos(r);
+    }
+
+    /**
+     * {@code +all} (ou {@code all} sem qualificador) dá PASS para qualquer servidor. O
+     * email falso enviado com o envelope no próprio domínio passa no SPF alinhado — e
+     * passa no DMARC por isso, até em {@code p=reject}. É pior que não ter SPF.
+     */
+    private static boolean spfAutorizaTodos(DnsSecurityResult r) {
+        return r.isSpfPresent() && !"INVALID".equals(r.getSpfPolicy())
+                && Character.valueOf('+').equals(qualificadorDoAll(r.getSpfRecord()));
+    }
+
+    /**
+     * DMARC que manda o receptor barrar o email que reprova: {@code reject} com
+     * qualquer {@code pct}, ou {@code quarantine} em 100%.
+     *
+     * RFC 7489 §6.6.4: a fração de um {@code reject} que fica fora do {@code pct} é
+     * tratada como {@code quarantine} — continua barrada. A de um {@code quarantine}
+     * cai para nenhuma política: com {@code pct=50}, metade do email falso chega na
+     * caixa de entrada.
+     */
+    private boolean dmarcEmBloqueio(DnsSecurityResult r) {
+        if ("STRONG".equals(r.getDmarcPolicy())) return true;
+        return "MEDIUM".equals(r.getDmarcPolicy()) && pctDmarc(r.getDmarcRecord()) == 100;
+    }
+
+    /** O {@code pct=} do registro; ausente ou inválido vale o padrão, 100 (RFC 7489 §6.3). */
+    private int pctDmarc(String registro) {
+        String valor = registro == null ? null : extrair(DMARC_PCT, registro);
+        if (valor == null) return 100;
+        try {
+            int pct = Integer.parseInt(valor.trim());
+            return pct >= 0 && pct <= 100 ? pct : 100;
+        } catch (NumberFormatException e) {
+            return 100;
+        }
     }
 
     /**
@@ -789,10 +866,18 @@ public class DnsSecurityService {
      * título em inglês e impacto em português.
      */
     private String buildSummary(DnsSecurityResult r) {
-        return switch (r.getEmailSpoofingRisk()) {
+        // +all leva a HIGH ou CRITICAL, e nos dois o problema a nomear é ele: o texto
+        // genérico diria "sem SPF" ou mandaria configurar um DMARC que já existe.
+        String risco = r.getEmailSpoofingRisk();
+        if (("HIGH".equals(risco) || "CRITICAL".equals(risco)) && spfAutorizaTodos(r)) {
+            return catalog.desc("DNS_SPOOFING_SPF_TODOS");
+        }
+        return switch (risco) {
             case "CRITICAL" -> catalog.desc("DNS_SPOOFING_CRITICAL");
             // O que falta entra como parâmetro: a frase é uma, o registro varia.
-            case "HIGH"     -> catalog.desc("DNS_SPOOFING_HIGH", !r.isSpfPresent() ? "SPF" : "DMARC");
+            // spfProtege, e não isSpfPresent: SPF duplicado está presente e não
+            // vale — o texto mandava configurar o DMARC, que estava certo.
+            case "HIGH"     -> catalog.desc("DNS_SPOOFING_HIGH", spfProtege(r) ? "DMARC" : "SPF");
             case "MEDIUM"   -> catalog.desc("DNS_SPOOFING_MEDIUM");
             case "LOW"      -> catalog.desc("DNS_SPOOFING_LOW");
             case "UNKNOWN"  -> catalog.desc("DNS_SPOOFING_UNKNOWN");
