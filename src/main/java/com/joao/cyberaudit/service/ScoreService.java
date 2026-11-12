@@ -642,8 +642,14 @@ public class ScoreService {
 
             case "Strict-Transport-Security" -> {
                 if (status.startsWith("MISSING")) {
+                    // MEDIUM, não HIGH (BUG-11). O peso fica em 10 — é o que o achado
+                    // custa na nota —, mas o rótulo HIGH acionava o piso de risco lá
+                    // embaixo: todo site sem HSTS saía no mínimo "risco médio", até com
+                    // nota 90. HSTS ausente é endurecimento de transporte (o ataque pede
+                    // posição de rede e um acesso que comece em http://), não falha
+                    // explorável de saída.
                     notes.add(catalog.note("HSTS_MISSING"));
-                    issues.add(achado("HSTS_MISSING", "HIGH"));
+                    issues.add(achado("HSTS_MISSING", "MEDIUM"));
                     yield score - 10;
                 } else if (status.startsWith("WEAK")) {
                     notes.add(catalog.note("HSTS_WEAK"));
