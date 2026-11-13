@@ -222,15 +222,20 @@ public class ScoreService {
         // 6. Cookies
         // ═══════════════════════════════════════════
         if (cookieIssues != null && !cookieIssues.isEmpty()) {
+            // O desconto é o do pior cookie, não a soma. Cookie LOW (não é de sessão)
+            // fica no card e não conta — nem no desconto, nem no "N cookie(s)" do título.
             int penalty = 0;
+            int contam  = 0;
             for (CookieFinding c : cookieIssues) {
-                if ("HIGH".equals(c.getRisk()))   penalty = Math.max(penalty, 10);
-                if ("MEDIUM".equals(c.getRisk())) penalty = Math.max(penalty, 5);
+                if ("HIGH".equals(c.getRisk()))        { penalty = Math.max(penalty, 10); contam++; }
+                else if ("MEDIUM".equals(c.getRisk())) { penalty = Math.max(penalty, 5);  contam++; }
             }
             if (penalty > 0) {
                 score -= penalty;
                 notes.add(catalog.note("INSECURE_COOKIES", penalty));
-                issues.add(achado("INSECURE_COOKIES", "MEDIUM", cookieIssues.size()));
+                // Severidade = a do pior cookie (BUG-12). Fixa em MEDIUM, o laudo dizia
+                // MEDIUM na lista e HIGH no card do mesmo cookie, com o desconto de HIGH.
+                issues.add(achado("INSECURE_COOKIES", penalty >= 10 ? "HIGH" : "MEDIUM", contam));
             }
         }
 
