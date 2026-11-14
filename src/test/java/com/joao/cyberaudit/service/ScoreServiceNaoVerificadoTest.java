@@ -83,7 +83,8 @@ class ScoreServiceNaoVerificadoTest {
         int presente = scoreCom(true).getScore();
         int ausente  = scoreCom(false).getScore();
 
-        assertEquals(3, presente - ausente,
+        // O peso em si é do BUG-14 (era 3); aqui importa que o false ainda custa.
+        assertEquals(ScoreService.LOW_BOA_PRATICA, presente - ausente,
                 "a penalidade real precisa sobreviver — o alvo do conserto era o null, não o false");
     }
 

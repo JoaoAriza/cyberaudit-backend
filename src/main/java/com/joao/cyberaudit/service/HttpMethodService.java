@@ -45,7 +45,9 @@ public class HttpMethodService {
      *
      * A calibração estava invertida: TRACE (inofensivo na prática) pesava mais que PUT
      * e DELETE, que sem autenticação dão upload de webshell (RCE) e remoção de arquivo.
-     * Estes seguem HIGH; TRACE desce para LOW, e o −20 vira −3 no {@code ScoreService}.
+     * Estes seguem HIGH; TRACE desce para LOW, e o −20 vira −2 no {@code ScoreService}
+     * (teto do LOW, BUG-14): o eco da requisição ainda devolve os headers que um proxy
+     * na frente acrescenta.
      */
     private static final Map<String, MethodRisk> METHOD_RISKS = Map.of(
             "TRACE",   new MethodRisk("LOW",  "METHOD_TRACE"),

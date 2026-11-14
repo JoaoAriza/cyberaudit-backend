@@ -34,6 +34,24 @@ public class ScoreService {
     }
 
     /**
+     * Teto do achado LOW (BUG-14). LOW custava 3 a 5 — o mesmo que um MEDIUM como
+     * X-Frame-Options ausente —, e três itens de higiene somavam mais que um cookie de
+     * sessão sem HttpOnly. A severidade já separava risco explorável de higiene; o peso
+     * agora acompanha: nenhum LOW passa de 2.
+     *
+     * {@code LOW_INFORMA} (2): o LOW entrega informação ao atacante — versão para
+     * buscar CVE, mapa do robots.txt, TRACE, UI de documentação de API.
+     * {@code LOW_BOA_PRATICA} (1): só uma boa prática ausente, sem nada vazando —
+     * security.txt, Permissions-Policy, WAF e Referrer-Policy (sem o header, o navegador
+     * atual já aplica strict-origin-when-cross-origin).
+     *
+     * O número também está escrito nas notas do catálogo; o {@code PesoLowTest} confere
+     * que os dois batem.
+     */
+    static final int LOW_INFORMA     = 2;
+    static final int LOW_BOA_PRATICA = 1;
+
+    /**
      * Pacote padrão de um servidor de hospedagem gerenciada (cPanel): SSH, DNS e a
      * pilha de e-mail. Em hospedagem compartilhada, essas portas são serviço normal
      * do provedor, não risco que o dono do site escolheu — então não descontam.
@@ -186,7 +204,7 @@ public class ScoreService {
         }
 
         if (serverVersionExposed) {
-            score -= 5;
+            score -= LOW_INFORMA;
             notes.add(catalog.note("SERVER_VERSION_EXPOSED"));
             issues.add(achado("SERVER_VERSION_EXPOSED", "LOW"));
         }
@@ -273,8 +291,13 @@ public class ScoreService {
         // ═══════════════════════════════════════════
         // 9. robots.txt
         // ═══════════════════════════════════════════
+        // Mesmo custo com o caminho respondendo 200, 30x ou 401/403. A sonda não segue
+        // redirect: área com tela de login responde 302 (ou 200, se a tela mora na própria
+        // URL), e área com Basic auth responde 401 — a proteção é a mesma e o que o
+        // Disallow revelou ("/admin existe") também. Zerar só o 401/403 premiaria a forma
+        // de responder, não a proteção.
         if (sensitiveRobotsPaths != null && !sensitiveRobotsPaths.isEmpty()) {
-            score -= 5;
+            score -= LOW_INFORMA;
             notes.add(catalog.note("SENSITIVE_ROBOTS_PATHS"));
             issues.add(achado("SENSITIVE_ROBOTS_PATHS", "LOW", sensitiveRobotsPaths.size()));
         }
@@ -306,7 +329,7 @@ public class ScoreService {
                     case "CRITICAL" -> 20;
                     case "HIGH"     -> 15;
                     case "MEDIUM"   -> 8;
-                    default         -> 3;
+                    default         -> LOW_INFORMA;   // TRACE, ou método atrás de auth
                 };
                 score -= penalty;
                 notes.add(catalog.note("DANGEROUS_HTTP_METHOD", m.getMethod(), penalty));
@@ -328,7 +351,7 @@ public class ScoreService {
         // alvo uma falha do scanner — e a nota de resultado parcial, que já
         // avisa que a verificação não rodou, não desfazia o desconto.
         if (Boolean.FALSE.equals(securityTxtPresent)) {
-            score -= 3;
+            score -= LOW_BOA_PRATICA;
             notes.add(catalog.note("SECURITY_TXT_MISSING"));
             issues.add(achado("SECURITY_TXT_MISSING", "LOW"));
         }
@@ -397,7 +420,7 @@ public class ScoreService {
         // ═══════════════════════════════════════════════════════
         if (wafDetectionResult != null) {
             if (!wafDetectionResult.isDetected()) {
-                score -= 3;
+                score -= LOW_BOA_PRATICA;
                 notes.add(catalog.note("NO_WAF_DETECTED"));
                 issues.add(achado("NO_WAF_DETECTED", "LOW"));
             } else {
@@ -575,11 +598,12 @@ public class ScoreService {
         }
 
         // API docs exposure penalty
-        // Cada endpoint exposto e -3 pts, cap de -8 pts total.
-        // Severidade HIGH (spec JSON/YAML) gera issue MEDIUM no score;
-        // MEDIUM (UI) gera issue LOW — informacional mas relevante.
+        // Severidade HIGH (spec JSON/YAML) gera issue MEDIUM no score, -3 por endpoint;
+        // MEDIUM (UI) gera issue LOW, -2 (teto do LOW). Cap de -8 pts total.
         if (apiDocsExposure != null && !apiDocsExposure.isEmpty()) {
-            int apiPenalty = Math.min(apiDocsExposure.size() * 3, 8);
+            int apiPenalty = Math.min(apiDocsExposure.stream()
+                    .mapToInt(f -> "HIGH".equals(f.getSeverity()) ? 3 : LOW_INFORMA)
+                    .sum(), 8);
             score -= apiPenalty;
             notes.add(catalog.note("API_DOCS", apiDocsExposure.size(), apiPenalty));
             for (ApiDocsExposureFinding f : apiDocsExposure) {
@@ -699,8 +723,9 @@ public class ScoreService {
                 if (status.startsWith("MISSING")) {
                     notes.add(catalog.note("REFERRER_POLICY_MISSING"));
                     issues.add(achado("REFERRER_POLICY_MISSING", "LOW"));
-                    yield score - 5;
+                    yield score - LOW_BOA_PRATICA;
                 } else if (status.startsWith("WEAK")) {
+                    // Este sim segue MEDIUM -5: troca o padrão seguro do navegador por um pior.
                     notes.add(catalog.note("REFERRER_POLICY_WEAK"));
                     issues.add(achado("REFERRER_POLICY_WEAK", "MEDIUM"));
                     yield score - 5;
@@ -712,7 +737,7 @@ public class ScoreService {
                 if (status.startsWith("MISSING")) {
                     notes.add(catalog.note("PERMISSIONS_POLICY_MISSING"));
                     issues.add(achado("PERMISSIONS_POLICY_MISSING", "LOW"));
-                    yield score - 3;
+                    yield score - LOW_BOA_PRATICA;
                 }
                 yield score;
             }
