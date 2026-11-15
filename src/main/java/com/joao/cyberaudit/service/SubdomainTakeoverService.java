@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.joao.cyberaudit.model.SubdomainTakeoverFinding;
+import com.joao.cyberaudit.util.IdiomaThreads;
 import org.springframework.stereotype.Service;
 import org.xbill.DNS.*;
 
@@ -107,7 +108,9 @@ public class SubdomainTakeoverService {
 
         if (toProbe.isEmpty()) return List.of();
 
-        ExecutorService pool = Executors.newFixedThreadPool(CONCURRENT_PROBES);
+        // Com idioma (BUG-15): o probe monta a vulnerabilidade e a evidência pelo catálogo,
+        // e thread de pool sem a fábrica cai no idioma do servidor.
+        ExecutorService pool = Executors.newFixedThreadPool(CONCURRENT_PROBES, IdiomaThreads.fabrica("takeover"));
         List<CompletableFuture<SubdomainTakeoverFinding>> futures = toProbe.stream()
                 .map(sub -> CompletableFuture
                         .supplyAsync(() -> probe(sub), pool)

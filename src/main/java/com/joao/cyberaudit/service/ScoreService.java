@@ -441,7 +441,12 @@ public class ScoreService {
                     else                                             bonus = 1;
 
                     score += bonus;
-                    notes.add(catalog.note("WAF_DETECTED", wafDetectionResult.getProvider(),
+                    // WAF achado só pelo bloqueio do payload não tem provedor: saía
+                    // "WAF detectado (null, probe bloqueado)" no laudo (BUG-15).
+                    String provedor = wafDetectionResult.getProvider() != null
+                            ? wafDetectionResult.getProvider()
+                            : catalog.valor("provedorNaoIdentificado");
+                    notes.add(catalog.note("WAF_DETECTED", provedor,
                             probeBlocked ? catalog.note("WAF_PROBE_BLOCKED") : "", bonus));
                 } else {
                     // CDN detectado — informativo, sem bônus de score

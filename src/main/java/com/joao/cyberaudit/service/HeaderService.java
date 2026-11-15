@@ -71,7 +71,7 @@ public class HeaderService {
 
         long maxAge = Long.parseLong(m.group(1));
         if (maxAge == 0) {
-            out.put("Strict-Transport-Security", "WEAK (max-age=0 deletes HSTS)");
+            out.put("Strict-Transport-Security", "WEAK (" + catalog.valor("hstsMaxAgeZero") + ")");
         } else if (maxAge < 2_592_000) {
             out.put("Strict-Transport-Security",
                     "WEAK (" + catalog.valor("hstsMaxAgeCurto", maxAge) + ")");

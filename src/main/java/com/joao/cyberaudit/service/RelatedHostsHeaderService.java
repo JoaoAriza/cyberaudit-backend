@@ -3,6 +3,7 @@ package com.joao.cyberaudit.service;
 import com.joao.cyberaudit.exception.DomainBlockedException;
 import com.joao.cyberaudit.model.HttpFetchResult;
 import com.joao.cyberaudit.model.RelatedHostHeaders;
+import com.joao.cyberaudit.util.IdiomaThreads;
 import org.springframework.stereotype.Service;
 
 import java.net.InetAddress;
@@ -59,7 +60,10 @@ public class RelatedHostsHeaderService {
         List<String> toProbe = candidates.stream().limit(MAX_HOSTS).collect(Collectors.toList());
         if (toProbe.isEmpty()) return List.of();
 
-        ExecutorService pool = Executors.newFixedThreadPool(Math.min(toProbe.size(), 6));
+        // Com idioma (BUG-15): sem a fábrica, o HeaderService montava os textos no idioma
+        // do servidor — "max-age far too short: 86,400s" num laudo em português.
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(toProbe.size(), 6),
+                IdiomaThreads.fabrica("hosts-relacionados"));
         try {
             List<CompletableFuture<RelatedHostHeaders>> futures = toProbe.stream()
                     .map(h -> CompletableFuture.supplyAsync(() -> probe(h), pool).exceptionally(e -> null))

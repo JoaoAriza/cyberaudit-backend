@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.*;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -159,12 +161,11 @@ public class PortScanService {
 
                 // ── Passo 3: HTTP/HTTPS evidence ───────────────────────
                 if (cfg.port() == 80 || cfg.port() == 8080) {
-                    String evidence = httpEvidence(host, cfg.port(), false);
-                    return buildFinding(cfg, latency, evidence, "HTTP");
+                    return achadoHttp(cfg, latency, httpEvidence(host, cfg.port(), false));
                 }
                 if (cfg.port() == 443 || cfg.port() == 8443 || cfg.port() == 993 || cfg.port() == 995) {
-                    String evidence = httpEvidence(host, cfg.port(), true);
-                    return buildFinding(cfg, latency, evidence, "TLS");
+                    RespostaHttp resp = httpEvidence(host, cfg.port(), true);
+                    return buildFinding(cfg, latency, resp != null ? resp.evidencia() : null, "TLS");
                 }
 
                 // DNS, outros — TCP-connect suficiente
@@ -251,7 +252,7 @@ public class PortScanService {
         };
     }
 
-    private String httpEvidence(String host, int port, boolean tls) {
+    private RespostaHttp httpEvidence(String host, int port, boolean tls) {
         try {
             if (!tls) {
                 try (Socket s = new Socket()) {
@@ -278,22 +279,65 @@ public class PortScanService {
         } catch (Exception e) { return null; }
     }
 
-    private String parseHttpEvidence(Socket s) {
+    private RespostaHttp parseHttpEvidence(Socket s) {
         try {
-            BufferedReader br = new BufferedReader(
-                    new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-            String status = null, server = null, line;
-            while ((line = br.readLine()) != null) {
-                if (status == null && line.startsWith("HTTP/")) status = line;
-                if (line.toLowerCase().startsWith("server:")) server = line;
-                if (line.isBlank()) break;
-            }
-            if (status != null || server != null) {
-                return (status != null ? trim(status, 60) : "") +
-                        (server != null ? " | " + trim(server, 80) : "");
-            }
+            return lerResposta(new BufferedReader(
+                    new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8)));
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /** O que o HEAD devolveu: o texto da evidência e se a raiz só redireciona para HTTPS. */
+    record RespostaHttp(String evidencia, boolean redirecionaParaHttps) {}
+
+    private static final Pattern STATUS_REDIRECT =
+            Pattern.compile("^HTTP/\\S+\\s+(301|302|303|307|308)\\b");
+
+    /**
+     * Lê status, Server e Location dos headers da resposta. Visível ao teste.
+     *
+     * O Location é o que faltava (BUG-15): sem ele, uma porta 80 que só responde 301 para
+     * https:// saía LOW com "HTTP exposto" — e é exatamente o que ela deve fazer. Só conta
+     * redirect com status 30x e destino absoluto em https://; caminho relativo ou http://
+     * continua sendo a porta servindo em texto claro.
+     */
+    static RespostaHttp lerResposta(BufferedReader br) throws IOException {
+        String status = null, server = null, location = null, line;
+        while ((line = br.readLine()) != null) {
+            if (status == null && line.startsWith("HTTP/")) { status = line; continue; }
+            if (line.isBlank()) break;
+            String l = line.toLowerCase(Locale.ROOT);
+            if (l.startsWith("server:"))   server   = line;
+            if (l.startsWith("location:")) location = line.substring("location:".length()).trim();
+        }
+        if (status == null && server == null) return null;
+
+        boolean redirect = status != null && STATUS_REDIRECT.matcher(status).find()
+                && location != null && location.toLowerCase(Locale.ROOT).startsWith("https://");
+        String evidencia = (status != null ? trim(status, 60) : "")
+                + (server != null ? " | " + trim(server, 80) : "")
+                + (redirect ? " | Location: " + trim(location, 80) : "");
+        return new RespostaHttp(evidencia, redirect);
+    }
+
+    /**
+     * Achado da porta HTTP. Visível ao teste. Se a raiz só redireciona para HTTPS, é INFO
+     * com texto próprio — a porta existe para isso; se serve conteúdo, segue a severidade
+     * da tabela e o "HTTP exposto". Nenhum dos dois desconta no score (80 nunca conta).
+     */
+    PortFinding achadoHttp(PortConfig cfg, long latency, RespostaHttp resp) {
+        if (resp != null && resp.redirecionaParaHttps()) {
+            return new PortFinding(
+                    catalog.impact("PORT_80_REDIRECT"),
+                    catalog.recommendation("PORT_80_REDIRECT"),
+                    cfg.port(), cfg.service(), "OPEN", "INFO", latency, resp.evidencia());
+        }
+        return buildFinding(cfg, latency, resp != null ? resp.evidencia() : null, "HTTP");
+    }
+
+    /** Visível ao teste: a configuração da tabela para uma porta. */
+    static PortConfig configDaPorta(int porta) {
+        return PORT_CONFIGS.stream().filter(c -> c.port() == porta).findFirst().orElseThrow();
     }
 
     private PortFinding buildFinding(PortConfig cfg, long latency,
@@ -311,7 +355,7 @@ public class PortScanService {
         );
     }
 
-    private String trim(String s, int max) {
+    private static String trim(String s, int max) {
         if (s == null) return null;
         s = s.trim();
         return s.length() <= max ? s : s.substring(0, max) + "…";
@@ -350,6 +394,6 @@ public class PortScanService {
         };
     }
 
-    private record PortConfig(int port, String service, String severity,
+    record PortConfig(int port, String service, String severity,
                               int connectMs, boolean requiresBanner) {}
 }

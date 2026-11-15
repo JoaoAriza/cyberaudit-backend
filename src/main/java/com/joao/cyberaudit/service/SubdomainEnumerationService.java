@@ -2,6 +2,7 @@ package com.joao.cyberaudit.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.joao.cyberaudit.dto.SubdomainInfo;
+import com.joao.cyberaudit.util.IdiomaThreads;
 import org.springframework.stereotype.Service;
 
 import java.net.InetAddress;
@@ -59,7 +60,9 @@ public class SubdomainEnumerationService {
                 .limit(MAX_TO_PROBE)
                 .toList();
 
-        ExecutorService pool = Executors.newFixedThreadPool(THREAD_POOL);
+        // O probe daqui não monta texto; a fábrica entra para a regra valer em todo pool
+        // (TextosDoLaudoTest) — o próximo texto que alguém puser aqui já nasce no idioma certo.
+        ExecutorService pool = Executors.newFixedThreadPool(THREAD_POOL, IdiomaThreads.fabrica("subdominios"));
         List<Future<SubdomainInfo>> futures = toProbe.stream()
                 .map(host -> pool.submit(() -> probe(host)))
                 .toList();

@@ -236,7 +236,9 @@ public class ScanChangeDetector {
                 .newValue(catalog.valor(curWaf  ? "detectado" : "naoDetectado"))
                 .severity(curWaf ? "LOW" : "MEDIUM")
                 .description(curWaf
-                        ? catalog.change("WAF_DETECTED", cur.getWafDetectionResult().getProvider())
+                        ? catalog.change("WAF_DETECTED", cur.getWafDetectionResult().getProvider() != null
+                                ? cur.getWafDetectionResult().getProvider()
+                                : catalog.valor("provedorNaoIdentificado"))
                         : catalog.change("WAF_GONE"))
                 .build());
     }

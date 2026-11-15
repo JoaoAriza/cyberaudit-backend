@@ -929,7 +929,8 @@ public class PdfReportService {
         if (r.getWafDetectionResult() != null && r.getWafDetectionResult().isDetected()) {
             sep();
             WafDetectionResult waf = r.getWafDetectionResult();
-            kv("WAF/CDN detected",  waf.getProvider(), OK);
+            // Sem provedor (WAF achado só pelo bloqueio do payload) a linha sumia: o kv pula valor nulo.
+            kv("WAF/CDN detected",  waf.getProvider() != null ? waf.getProvider() : "unidentified", OK);
             kv("WAF confidence",    waf.getConfidence());
             kv("Probe response",    waf.getProbeResponse());
             if (waf.getEvidence() != null) kv("Evidence", waf.getEvidence());
