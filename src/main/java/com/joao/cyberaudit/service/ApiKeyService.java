@@ -157,17 +157,23 @@ public class ApiKeyService {
     }
 
     /**
-     * API Keys disponíveis para: OWNER/ADMIN, COMPANY (qualquer plano), PRO INDIVIDUAL.
-     * FREE INDIVIDUAL → bloqueado.
+     * Criar API key é recurso de plano pago: PRO e ENTERPRISE, mais a equipe da
+     * plataforma ({@code effectivePlan(AppUser)} devolve ENTERPRISE para ela). FREE →
+     * 402, inclusive conta Empresa no FREE — o cadastro deixa escolher o tipo da conta,
+     * então liberar por tipo seria liberar para quem marcar "Empresa".
+     *
+     * Não decide pelo papel: OWNER é o dono da conta, e todo cadastro nasce OWNER. A
+     * versão anterior saía cedo para OWNER/ADMIN e o ramo do FREE ficava inalcançável
+     * (BUG-18) — a mesma armadilha que {@code PlanLimitService.checkActiveScan} já evita.
+     *
+     * Só a criação passa por aqui. Chave criada antes, ou de conta que voltou para o
+     * FREE, continua autenticando e aparece na lista para ser revogada: decisão do
+     * dono, para não quebrar pipeline de quem já usa.
      */
     private void checkApiKeyAccess(AppUser user) {
-        if (user.getRole() == Role.OWNER || user.getRole() == Role.ADMIN) return;
-        Account account = user.getAccount();
-        if (account.getType() == AccountType.COMPANY) return;
-        Plan plan = planLimitService.effectivePlan(account);
-        if (plan == Plan.FREE) {
+        if (planLimitService.effectivePlan(user) == Plan.FREE) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "API Keys requerem plano PRO ou conta Empresa.");
+                    "API Keys requerem plano PRO ou Empresa.");
         }
     }
 }
