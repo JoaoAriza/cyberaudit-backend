@@ -21,10 +21,9 @@ public class ScanController {
     private final AsyncScanService        asyncScanService;
     private final ReportService           reportService;
     private final PdfReportService        pdfReportService;
-    private final RateLimitService        rateLimitService;
     private final DomainProtectionService domainProtectionService;
-    private final GuestRateLimitService   guestRateLimitService;
     private final PlanLimitService        planLimitService;
+    private final ScanLimitsService       scanLimits;
     private final ScanEntitlementService  scanEntitlement;
     private final ClientIpResolver        clientIpResolver;
     private final UserTimeZoneService     userTimeZone;
@@ -34,10 +33,9 @@ public class ScanController {
             AsyncScanService asyncScanService,
             ReportService reportService,
             PdfReportService pdfReportService,
-            RateLimitService rateLimitService,
             DomainProtectionService domainProtectionService,
-            GuestRateLimitService guestRateLimitService,
             PlanLimitService planLimitService,
+            ScanLimitsService scanLimits,
             ScanEntitlementService scanEntitlement,
             ClientIpResolver clientIpResolver,
             UserTimeZoneService userTimeZone) {
@@ -45,10 +43,9 @@ public class ScanController {
         this.asyncScanService        = asyncScanService;
         this.reportService           = reportService;
         this.pdfReportService        = pdfReportService;
-        this.rateLimitService        = rateLimitService;
         this.domainProtectionService = domainProtectionService;
-        this.guestRateLimitService   = guestRateLimitService;
         this.planLimitService        = planLimitService;
+        this.scanLimits              = scanLimits;
         this.scanEntitlement         = scanEntitlement;
         this.clientIpResolver        = clientIpResolver;
         this.userTimeZone            = userTimeZone;
@@ -61,8 +58,7 @@ public class ScanController {
                            @RequestParam(defaultValue = "false") boolean active,
                            HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
-        checkRateLimit(request, currentUser);
-        enforceScanLimits(url, active, currentUser, request);
+        scanLimits.checkBeforeScan(url, active, currentUser, request);
         return scanEntitlement.applyEntitlement(
                 scanOrchestrator.execute(url, active, currentUser, false), currentUser);
     }
@@ -74,10 +70,9 @@ public class ScanController {
                              @RequestParam(defaultValue = "false") boolean active,
                              HttpServletRequest request) {
         AppUser currentUser = getCurrentUser();
-        checkRateLimit(request, currentUser);
         // Mesmas travas do GET /scan: este endpoint dispara um scan completo e é
         // público — sem isso era o caminho para scan ativo anônimo e ilimitado.
-        enforceScanLimits(url, active, currentUser, request);
+        scanLimits.checkBeforeScan(url, active, currentUser, request);
         return reportService.generateReport(scanEntitlement.applyEntitlement(
                 scanOrchestrator.execute(url, active, currentUser, false), currentUser),
                 userTimeZone.zonaDe(currentUser));
@@ -131,9 +126,8 @@ public class ScanController {
                     "Geração de PDF requer autenticação. Faça login para continuar.");
         }
         planLimitService.checkPdfExport(currentUser, url);
-        checkRateLimit(request, currentUser);
         // Re-scan completo: consome limite diário como qualquer outro scan.
-        enforceScanLimits(url, active, currentUser, request);
+        scanLimits.checkBeforeScan(url, active, currentUser, request);
         // Caminho de re-scan: o resultado sai cru do orchestrator, ao contrário do
         // PDF por scanId, que lê o status já travado pelo AsyncScanService. Sem isto
         // o PDF virava a porta dos fundos para o detalhe que a tela esconde.
@@ -155,8 +149,7 @@ public class ScanController {
             HttpServletRequest request) {
 
         AppUser currentUser = getCurrentUser();
-        checkRateLimit(request, currentUser);
-        enforceScanLimits(url, active, currentUser, request);
+        scanLimits.checkBeforeScan(url, active, currentUser, request);
         // Recusa aqui, na submissão: o scan roda em thread assíncrona e uma falha
         // lá vira scan perdido em vez de mensagem na tela.
         if (notify) planLimitService.checkEmailNotify(currentUser, url);
@@ -201,7 +194,7 @@ public class ScanController {
     @GetMapping("/verify-check")
     public ResponseEntity<Map<String, Object>> verifyCheck(@RequestParam String host,
                                                            HttpServletRequest request) {
-        checkRateLimit(request, getCurrentUser());
+        scanLimits.checkRateLimit(request, getCurrentUser());
         SsrfGuard.validateHost(host);
         boolean verified = domainProtectionService.isOwnershipVerified(host);
         return ResponseEntity.ok(Map.of(
@@ -215,38 +208,7 @@ public class ScanController {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /**
-     * Travas de custo de TODO endpoint que dispara um scan: scan ativo exige login,
-     * guest consome a cota diária por IP e usuário consome a cota do plano.
-     *
-     * Estava duplicado em /scan e /scan/async e ausente em /scan/report e
-     * /scan/report/pdf — o que fazia dos dois últimos um bypass completo dos limites.
-     */
-    private void enforceScanLimits(String url, boolean active,
-                                   AppUser currentUser, HttpServletRequest request) {
-        if (active && currentUser == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Scan ativo requer autenticação. Faça login ou solicite um convite.");
-        }
-        if (currentUser == null) {
-            guestRateLimitService.checkAndIncrement(clientIpResolver.resolve(request));
-        } else {
-            if (active) planLimitService.checkActiveScan(currentUser, url);
-            planLimitService.checkAndIncrementDailyScan(currentUser);
-        }
-    }
-
-    private void checkRateLimit(HttpServletRequest request, AppUser currentUser) {
-        if (!rateLimitService.allow(clientIpResolver.resolve(request), currentUser)) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Muitas requisições. " +
-                            (currentUser == null
-                                    ? "Limite de " + RateLimitService.GUEST_RPM
-                                    + " requests/min para visitantes."
-                                    : "Tente novamente em alguns segundos.")
-            );
-        }
-    }
+    // Travas antes de escanear: ScanLimitsService (o gate de CI usa as mesmas).
 
     private AppUser getCurrentUser() {
         var auth = SecurityContextHolder.getContext().getAuthentication();

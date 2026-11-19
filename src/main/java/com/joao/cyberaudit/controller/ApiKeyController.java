@@ -6,7 +6,9 @@ import com.joao.cyberaudit.model.AuditAction;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.service.ApiKeyService;
 import com.joao.cyberaudit.service.AuditService;
+import com.joao.cyberaudit.service.ScanLimitsService;
 import com.joao.cyberaudit.service.ScanOrchestrator;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,16 +22,19 @@ import java.util.UUID;
 @RequestMapping("/api-keys")
 public class ApiKeyController {
 
-    private final ApiKeyService   apiKeyService;
-    private final AuditService    auditService;
-    private final ScanOrchestrator scanOrchestrator;
+    private final ApiKeyService     apiKeyService;
+    private final AuditService      auditService;
+    private final ScanOrchestrator  scanOrchestrator;
+    private final ScanLimitsService scanLimits;
 
     public ApiKeyController(ApiKeyService apiKeyService,
                             AuditService auditService,
-                            ScanOrchestrator scanOrchestrator) {
+                            ScanOrchestrator scanOrchestrator,
+                            ScanLimitsService scanLimits) {
         this.apiKeyService    = apiKeyService;
         this.auditService     = auditService;
         this.scanOrchestrator = scanOrchestrator;
+        this.scanLimits       = scanLimits;
     }
 
     /** Lista todas as API keys da conta do usuário autenticado. */
@@ -81,6 +86,10 @@ public class ApiKeyController {
      *   threshold — score mínimo (0-100, padrão 70)
      *   active    — incluir checks ativos (padrão false; exige plano adequado)
      *
+     * Passa pelas mesmas travas do /scan antes de escanear: rate limit, cota diária
+     * do plano e, no ativo, a trava de plano e de domínio verificado na conta. Antes
+     * chamava o orchestrator direto e pulava as três (BUG-19 do cyberaudit-qa).
+     *
      * Exemplo:
      *   curl -H "X-Api-Key: ca_..." \
      *        "https://api.cyberaudit.io/api-keys/ci?url=example.com&threshold=80"
@@ -90,8 +99,10 @@ public class ApiKeyController {
             @RequestParam String url,
             @RequestParam(defaultValue = "70") int threshold,
             @RequestParam(defaultValue = "false") boolean active,
-            @AuthenticationPrincipal AppUser user) {
+            @AuthenticationPrincipal AppUser user,
+            HttpServletRequest request) {
 
+        scanLimits.checkBeforeScan(url, active, user, request);
         ScanResult result = scanOrchestrator.execute(url, active, user, false);
         int score = result.getScore() != null ? result.getScore().getScore() : 0;
         boolean pass = score >= threshold;
