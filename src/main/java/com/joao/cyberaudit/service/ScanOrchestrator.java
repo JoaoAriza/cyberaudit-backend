@@ -177,7 +177,7 @@ public class ScanOrchestrator {
                     "Scan bloqueado: '" + targetHost + "' é infraestrutura do provedor de "
                             + "hospedagem desta plataforma e não pode ser escaneado daqui.");
         }
-        String cacheKey = buildCacheKey(inputUrl, active);
+        String cacheKey = buildCacheKey(inputUrl, active, currentUser);
 
         if (!refresh) {
             ScanResult cached = scanCacheService.get(cacheKey, ScanResult.class);
@@ -770,7 +770,8 @@ public class ScanOrchestrator {
         try { return URI.create(url).getHost(); }
         catch (Exception e) { return null; }
     }
-    private static final String CACHE_VERSION = "v3";
+    // v4: endereço completo e conta na chave (BUG-17).
+    private static final String CACHE_VERSION = "v4";
 
     /**
      * O idioma entra na chave porque o resultado guardado já tem o TEXTO montado:
@@ -797,9 +798,55 @@ public class ScanOrchestrator {
         return LocaleContextHolder.getLocale().getLanguage();
     }
 
-    private String buildCacheKey(String url, boolean active) {
-        String h = extractHostSafe(url);
-        return CACHE_VERSION + ":scan:" + (h != null ? h : url) + ":active=" + active
+    /**
+     * Chave do cache de scan: quem pediu + endereço + modo + idioma.
+     *
+     * Era só host + modo + idioma, e isso trazia dois defeitos (BUG-17 do cyberaudit-qa):
+     *
+     * - Endereço. Por 2 minutos, outro caminho do mesmo host recebia o primeiro resultado.
+     *   No ativo, a busca do Juice Shop voltava com o scan da home: as sondas de XSS e SQL
+     *   rodam no parâmetro da URL, e o SQLi sumia. No passivo também erra, porque os
+     *   headers, os cookies e a tecnologia vêm da página pedida. Decisão do dono: caminho
+     *   e query entram em todo modo.
+     * - Conta. O acerto sai antes do {@code runScan}, que é quem grava o histórico, calcula
+     *   as {@code changes} com a conta de quem pediu, registra a auditoria e confere a prova
+     *   de posse do ativo. Outra conta recebia o resultado sem nada disso. Decisão do dono:
+     *   a conta entra na chave; membros da mesma conta dividem a entrada (o histórico é da
+     *   conta), e visitantes dividem uma entre si.
+     *
+     * O idioma continua na chave pelo motivo explicado acima.
+     */
+    private String buildCacheKey(String url, boolean active, AppUser user) {
+        return CACHE_VERSION + ":scan:" + quemPediu(user) + ":" + enderecoDe(url)
+                + ":active=" + active
                 + ":lang=" + LocaleContextHolder.getLocale().getLanguage();
+    }
+
+    /** Conta de quem pediu; visitantes dividem uma entrada. */
+    private static String quemPediu(AppUser user) {
+        if (user == null) return "guest";
+        if (user.getAccount() != null && user.getAccount().getId() != null) {
+            return "conta=" + user.getAccount().getId();
+        }
+        return "usuario=" + user.getId();
+    }
+
+    /**
+     * Esquema + host + porta + caminho + query. O caminho é normalizado como no
+     * histórico ({@code ScanHistoryService.normalizarCaminho}): sem barra e com barra no
+     * fim são o mesmo endereço. O fragmento (#) fica de fora, porque nunca chega ao
+     * servidor.
+     */
+    private static String enderecoDe(String url) {
+        try {
+            URI u = URI.create(url);
+            if (u.getHost() == null) return url;
+            return u.getScheme() + "://" + u.getHost()
+                    + (u.getPort() != -1 ? ":" + u.getPort() : "")
+                    + ScanHistoryService.normalizarCaminho(u.getRawPath())
+                    + (u.getRawQuery() != null ? "?" + u.getRawQuery() : "");
+        } catch (Exception e) {
+            return url;
+        }
     }
 }

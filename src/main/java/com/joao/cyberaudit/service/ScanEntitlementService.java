@@ -18,7 +18,8 @@ import java.util.List;
  * recebem o resultado com esses campos removidos e {@code detailsLocked=true}.
  *
  * IMPORTANTE: nunca muta o resultado recebido — o {@code ScanOrchestrator} mantém um cache
- * compartilhado entre usuários, então a versão travada é sempre uma CÓPIA (via toBuilder).
+ * dividido entre os membros de uma conta e entre os visitantes, então a versão travada é
+ * sempre uma CÓPIA (via toBuilder).
  */
 @Service
 public class ScanEntitlementService {
@@ -116,7 +117,7 @@ public class ScanEntitlementService {
                 .build();
     }
 
-    /** Cópia nova de cada sinal: o original mora no cache compartilhado. */
+    /** Cópia nova de cada sinal: o original mora no cache de scan. */
     private static List<ImpactSignal> semDetalhe(List<ImpactSignal> sinais) {
         if (sinais == null) return null;
         return sinais.stream()
