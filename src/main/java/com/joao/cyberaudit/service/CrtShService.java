@@ -51,7 +51,21 @@ public class CrtShService {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(8)).build();
 
+    /** Certificados do domínio; lista vazia também quando nenhuma fonte respondeu. */
     public List<JsonNode> fetchCerts(String host) {
+        List<JsonNode> certs = fetchCertsOuNull(host);
+        return certs != null ? certs : List.of();
+    }
+
+    /**
+     * Como {@link #fetchCerts}, mas devolve {@code null} quando nem o crt.sh nem o
+     * certspotter responderam. Lista vazia é "consultado, nenhum certificado".
+     *
+     * Antes as duas coisas eram lista vazia, e o módulo de Certificate Transparency
+     * marcava "OK" com as duas fontes fora do ar (BUG-16 do cyberaudit-qa). A falha não
+     * entra no cache: o próximo scan tenta de novo.
+     */
+    public List<JsonNode> fetchCertsOuNull(String host) {
         if (host == null || host.isBlank()) return List.of();
 
         String rootHost = host.startsWith("www.") ? host.substring(4) : host;
@@ -66,7 +80,7 @@ public class CrtShService {
                 CompletableFuture.supplyAsync(() -> {
                     try {
                         List<JsonNode> result = fetchWithFallback(key);
-                        cache.put(key, new CacheEntry(result, Instant.now()));
+                        if (result != null) cache.put(key, new CacheEntry(result, Instant.now()));
                         return result;
                     } finally {
                         inflight.remove(key);
@@ -78,20 +92,26 @@ public class CrtShService {
             return future.get(WAIT_TIMEOUT_S, TimeUnit.SECONDS);
         } catch (Exception e) {
             System.out.println("[CrtShService] Timeout waiting for " + rootHost);
-            return List.of();
+            return null;
         }
     }
 
     // ── Fetch com fallback ────────────────────────────────────────────────────
 
+    /** {@code null} quando as duas fontes falharam; ver {@link #fetchCertsOuNull}. */
     private List<JsonNode> fetchWithFallback(String host) {
         // 1. Tenta crt.sh
         List<JsonNode> crtSh = fetchFromCrtSh(host);
-        if (!crtSh.isEmpty()) return crtSh;
+        if (crtSh != null && !crtSh.isEmpty()) return crtSh;
 
         // 2. Fallback: certspotter
-        System.out.println("[CrtShService] crt.sh falhou para " + host + " — tentando certspotter");
-        return fetchFromCertspotter(host);
+        System.out.println("[CrtShService] crt.sh falhou ou veio vazio para " + host + " — tentando certspotter");
+        List<JsonNode> certspotter = fetchFromCertspotter(host);
+        if (certspotter != null && !certspotter.isEmpty()) return certspotter;
+
+        // Nenhuma trouxe certificado. Se alguma respondeu, "nenhum certificado" é a
+        // resposta; se as duas falharam, ninguém verificou.
+        return (crtSh != null || certspotter != null) ? List.of() : null;
     }
 
     // ── crt.sh (HttpURLConnection — envia % raw) ──────────────────────────────
@@ -111,16 +131,16 @@ public class CrtShService {
 
             int status = conn.getResponseCode();
             System.out.println("[CrtShService] crt.sh HTTP " + status + " for " + host);
-            if (status != 200) return List.of();
+            if (status != 200) return null;
 
             String body;
             try (InputStream is = conn.getInputStream()) {
                 body = new String(is.readAllBytes());
             }
-            if (body == null || body.isBlank() || body.trim().startsWith("<")) return List.of();
+            if (body == null || body.isBlank() || body.trim().startsWith("<")) return null;
 
             JsonNode root = jackson.readTree(body);
-            if (!root.isArray()) return List.of();
+            if (!root.isArray()) return null;
 
             List<JsonNode> certs = new ArrayList<>();
             for (JsonNode cert : root) {
@@ -132,7 +152,7 @@ public class CrtShService {
 
         } catch (Exception e) {
             System.out.println("[CrtShService] crt.sh exception: " + e.getMessage());
-            return List.of();
+            return null;
         }
     }
 
@@ -159,10 +179,10 @@ public class CrtShService {
                     ScannerHttp.limitedString(ScannerHttp.MAX_JSON_BODY_BYTES));
 
             System.out.println("[CrtShService] certspotter HTTP " + resp.statusCode() + " for " + host);
-            if (resp.statusCode() != 200) return List.of();
+            if (resp.statusCode() != 200) return null;
 
             JsonNode root = jackson.readTree(resp.body());
-            if (!root.isArray()) return List.of();
+            if (!root.isArray()) return null;
 
             // Normaliza para schema crt.sh
             List<JsonNode> normalized = new ArrayList<>();
@@ -199,7 +219,7 @@ public class CrtShService {
 
         } catch (Exception e) {
             System.out.println("[CrtShService] certspotter exception: " + e.getMessage());
-            return List.of();
+            return null;
         }
     }
 

@@ -64,6 +64,7 @@ public class ScanOrchestrator {
     private final PlatformStaffService            platformStaffService;
     private final HostingProviderPolicy           hostingProviderPolicy;
     private final MessageCatalog                  catalog;
+    private final ScanTargetService               scanTarget;
 
     public ScanOrchestrator(
             SSLService sslService, TlsVersionService tlsVersionService,
@@ -99,7 +100,8 @@ public class ScanOrchestrator {
             ScanConcurrencyLimiter concurrencyLimiter,
             PlatformStaffService platformStaffService,
             HostingProviderPolicy hostingProviderPolicy,
-            MessageCatalog catalog) {
+            MessageCatalog catalog,
+            ScanTargetService scanTarget) {
         this.sslService              = sslService;
         this.tlsVersionService       = tlsVersionService;
         this.headerService           = headerService;
@@ -144,6 +146,7 @@ public class ScanOrchestrator {
         this.platformStaffService               = platformStaffService;
         this.hostingProviderPolicy              = hostingProviderPolicy;
         this.catalog                            = catalog;
+        this.scanTarget                         = scanTarget;
     }
 
     public ScanResult execute(String url, boolean active, AppUser currentUser, boolean refresh) {
@@ -177,6 +180,11 @@ public class ScanOrchestrator {
                     "Scan bloqueado: '" + targetHost + "' é infraestrutura do provedor de "
                             + "hospedagem desta plataforma e não pode ser escaneado daqui.");
         }
+        // Domínio que não resolve não tem o que auditar (BUG-16). Os endpoints já
+        // recusam antes da cota (ScanLimitsService); isto cobre quem chama o motor
+        // direto, como o agendador.
+        scanTarget.exigeQueResolva(inputUrl);
+
         String cacheKey = buildCacheKey(inputUrl, active, currentUser);
 
         if (!refresh) {
@@ -224,6 +232,16 @@ public class ScanOrchestrator {
         progresso.registra(ScanCheck.HTTP_FETCH,
                 fetch.getError() != null ? ScanProgress.Estado.FALHOU : ScanProgress.Estado.OK);
 
+        // Nada aceitou a conexão: não há o que auditar, então não sai laudo nem nota
+        // (BUG-16). Antes o scan seguia, e um site fora do ar saía com 29/100 e 14
+        // módulos "OK". Se a página analisada foi a do http, o https é conferido antes
+        // de desistir: um site só com https (de certificado inválido, por exemplo)
+        // responde lá e segue escaneado como antes.
+        if (fetch.isSemConexao()
+                && (analysisUrl.equals(httpsUrl) || httpFetchService.fetchHeaders(httpsUrl).isSemConexao())) {
+            throw scanTarget.semResposta(host != null ? host : extractHostSafe(inputUrl));
+        }
+
         Map<String, String> analyzedHeaders;
         boolean serverVersionExposed = false;
         if (fetch.getError() != null) {
@@ -260,8 +278,9 @@ public class ScanOrchestrator {
         // aqui é uma Function, e o que interessa marcar é a correlação em si.
         var cveFuture = fingerprintFuture.thenApplyAsync(
                 fp -> progresso.acompanha(ScanCheck.CVE,
-                        () -> fp != null ? cveCorrelationService.correlate(fp) : List.<CVEFinding>of()).get(),
-                fingerprintPool);
+                        () -> fp != null ? cveCorrelationService.correlacionar(fp)
+                                         : CVECorrelationService.Correlacao.semConsulta()).get(),
+                fingerprintPool).exceptionally(e -> null);   // null = não verificado
 
         // ── Busca scan anterior ANTES de salvar (para change detection) ───────
         ScanResult previousScan = (host != null)
@@ -353,9 +372,9 @@ public class ScanOrchestrator {
             moduleStatus.put(ScanCheck.HOST_HEADER.name(),       moduleState(hostHeaderFuture));
             moduleStatus.put(ScanCheck.API_DOCS.name(),          moduleState(apiDocsFuture));
             moduleStatus.put(ScanCheck.GRAPHQL.name(),           moduleState(graphQlFuture));
-            moduleStatus.put(ScanCheck.CERT_TRANSPARENCY.name(),moduleState(certTransFuture));
+            moduleStatus.put(ScanCheck.CERT_TRANSPARENCY.name(),moduleStateVerificado(certTransFuture, CT_RESPONDEU));
             moduleStatus.put(ScanCheck.TECH_FINGERPRINT.name(), moduleState(fingerprintFuture));
-            moduleStatus.put(ScanCheck.CVE.name(),               moduleState(cveFuture));
+            moduleStatus.put(ScanCheck.CVE.name(),               moduleStateVerificado(cveFuture, CVE_RESPONDEU));
             moduleStatus.put(ScanCheck.RELATED_HOSTS.name(),     moduleState(relatedHostsFuture));
 
             // Quem estourou o teto de 120s continuaria "rodando" no feed para sempre:
@@ -381,7 +400,9 @@ public class ScanOrchestrator {
             List<SourceMapFinding>     sourceMapFindings    = sourceMapFuture.getNow(List.of());
             List<ApiDocsExposureFinding>         apiDocsExposure      = apiDocsFuture.getNow(List.of());
             List<GraphQlIntrospectionFinding>    graphQlIntrospection = graphQlFuture.getNow(List.of());
-            List<CVEFinding>              cveFindings              = cveFuture.getNow(List.of());
+            CVECorrelationService.Correlacao cveCorrelacao         = cveFuture.getNow(null);
+            List<CVEFinding>              cveFindings              = cveCorrelacao != null
+                    ? cveCorrelacao.achados() : List.of();
             List<RelatedHostHeaders>      relatedHostHeaders       = relatedHostsFuture.getNow(List.of());
 
             SecurityTxtService.SecurityTxtResult securityTxt = secTxtFuture.getNow(null);
@@ -679,6 +700,13 @@ public class ScanOrchestrator {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /** CT respondeu: null é "nem o crt.sh nem o certspotter responderam". */
+    static final java.util.function.Predicate<CertTransparencyResult> CT_RESPONDEU = Objects::nonNull;
+
+    /** NVD respondeu: null é exceção no caminho; {@code completa} false, alguma consulta falhou. */
+    static final java.util.function.Predicate<CVECorrelationService.Correlacao> CVE_RESPONDEU =
+            c -> c != null && c.completa();
+
     /**
      * Estado de um módulo: completou dentro do orçamento da fase (sucesso ou fallback
      * via exceptionally) = "OK"; não completou a tempo = "TIMEOUT" (não verificado —
@@ -686,6 +714,21 @@ public class ScanOrchestrator {
      */
     private static String moduleState(CompletableFuture<?> f) {
         return f.isDone() ? "OK" : "TIMEOUT";
+    }
+
+    /**
+     * Estado de um módulo que depende de serviço externo (NVD, logs de CT): terminar a
+     * tempo não basta, a resposta precisa ter vindo. Quando o serviço não respondeu, o
+     * módulo sai "ERROR" e entra no aviso de resultado parcial.
+     *
+     * Antes saía "OK" com lista vazia, e "sem CVE" era igual a "o NVD não respondeu"
+     * (BUG-16 do cyberaudit-qa). O future já trocou exceção por null (exceptionally),
+     * então o getNow não lança.
+     */
+    static <T> String moduleStateVerificado(CompletableFuture<T> f,
+                                            java.util.function.Predicate<T> respondeu) {
+        if (!f.isDone()) return "TIMEOUT";
+        return respondeu.test(f.getNow(null)) ? "OK" : "ERROR";
     }
 
     /**

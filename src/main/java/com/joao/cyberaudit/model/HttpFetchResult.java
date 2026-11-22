@@ -22,4 +22,13 @@ public class HttpFetchResult {
      * usado uma vez e descartado.
      */
     private FormSurfaceResult formSurface;
+
+    /**
+     * Nada aceitou a conexão: o domínio não resolveu, a porta recusou, a conexão não
+     * abriu a tempo ou não há rota. É diferente de "respondeu com erro" (TLS que falha,
+     * servidor que aceita e não responde), em que o alvo existe e está no ar.
+     *
+     * O orchestrator usa isto para recusar o alvo sem resposta, sem laudo (BUG-16).
+     */
+    private boolean semConexao;
 }

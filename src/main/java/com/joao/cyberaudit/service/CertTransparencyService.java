@@ -77,8 +77,11 @@ public class CertTransparencyService {
     public CertTransparencyResult scan(String host, DnsSecurityResult dnsSecurityResult) {
         if (host == null || host.isBlank()) return emptyResult();
 
-        // Usa CrtShService — retorna do cache se SubdomainTakeover já buscou
-        List<JsonNode> rawCerts = crtShService.fetchCerts(host);
+        // Usa CrtShService — retorna do cache se SubdomainTakeover já buscou.
+        // null = nenhuma fonte de CT respondeu: o scan devolve null, e o orchestrator
+        // marca o módulo como ERROR em vez de "OK, sem certificados" (BUG-16).
+        List<JsonNode> rawCerts = crtShService.fetchCertsOuNull(host);
+        if (rawCerts == null) return null;
         if (rawCerts.isEmpty()) return emptyResult();
 
         Set<String> subdomains      = new LinkedHashSet<>();

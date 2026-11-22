@@ -151,9 +151,16 @@ public class AsyncScanService {
             put(scanId, new AsyncScanStatus(scanId, State.DONE, visivel, null), ownerKey);
         } catch (Exception e) {
             com.joao.cyberaudit.exception.OwnershipNotVerifiedException ownership = findOwnership(e);
+            com.joao.cyberaudit.exception.TargetUnreachableException semAlvo = findUnreachable(e);
             put(scanId, ownership != null
                     ? new AsyncScanStatus(scanId, State.ERROR, null, ownership.getMessage(),
                             "OWNERSHIP_REQUIRED", ownership.getHost())
+                    : semAlvo != null
+                    // Código estruturado (TARGET_NOT_FOUND / TARGET_UNREACHABLE), como o
+                    // da posse: a tela mostra o aviso de domínio inacessível sem
+                    // procurar texto na mensagem (BUG-16).
+                    ? new AsyncScanStatus(scanId, State.ERROR, null, semAlvo.getMessage(),
+                            semAlvo.getCodigo(), semAlvo.getHost())
                     : new AsyncScanStatus(scanId, State.ERROR, null, safeErrorMessage(e)),
                     ownerKey);
         } finally {
@@ -187,6 +194,16 @@ public class AsyncScanService {
             }
         }
         return "Erro ao executar o scan. Verifique a URL e tente novamente.";
+    }
+
+    /** Alvo que não existe ou não respondeu, na cadeia de causas (BUG-16). */
+    private com.joao.cyberaudit.exception.TargetUnreachableException findUnreachable(Throwable error) {
+        for (Throwable t = error; t != null && t != t.getCause(); t = t.getCause()) {
+            if (t instanceof com.joao.cyberaudit.exception.TargetUnreachableException semAlvo) {
+                return semAlvo;
+            }
+        }
+        return null;
     }
 
     /**

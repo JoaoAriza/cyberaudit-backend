@@ -8,6 +8,7 @@ import com.joao.cyberaudit.model.Role;
 import com.joao.cyberaudit.model.ScanResult;
 import com.joao.cyberaudit.repository.AccountRepository;
 import com.joao.cyberaudit.repository.AppUserRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -43,8 +45,9 @@ import static org.mockito.Mockito.when;
  * Nenhum scan de verdade roda aqui. O primeiro passo de um scan é o {@code SSLService}, e
  * aqui ele é um mock que lança {@link ScanRodou}. Então "lançou ScanRodou" quer dizer "o
  * cache não acertou e o scan começou", e devolver um objeto quer dizer "acertou o cache".
- * Os hosts são {@code .invalid}: o SsrfGuard deixa passar quem não resolve, e nada sai
- * para a rede.
+ * O host é {@code 127.0.0.1}, liberado no SsrfGuard só durante a classe: é um IP literal,
+ * então ninguém consulta DNS, e o SSL de mentira impede que algo conecte. Antes eram hosts
+ * {@code .invalid}, que agora o motor recusa antes do cache (BUG-16).
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -55,8 +58,8 @@ class ScanCacheChaveIntegrationTest {
         ScanRodou() { super("o scan começou: o cache não acertou"); }
     }
 
-    private static final String HOME  = "http://cache-teste.invalid:3000/";
-    private static final String BUSCA = "http://cache-teste.invalid:3000/rest/products/search?q=apple";
+    private static final String HOME  = "http://127.0.0.1:3000/";
+    private static final String BUSCA = "http://127.0.0.1:3000/rest/products/search?q=apple";
 
     @MockitoBean    private SSLService sslService;
     @MockitoSpyBean private ScanCacheService cache;
@@ -67,7 +70,13 @@ class ScanCacheChaveIntegrationTest {
 
     @BeforeEach
     void scanFalhaNoPrimeiroPasso() {
+        SsrfGuard.setTestAllowlist(Set.of("127.0.0.1"));
         when(sslService.checkSSL(anyString())).thenThrow(new ScanRodou());
+    }
+
+    @AfterEach
+    void fechaAllowlist() {
+        SsrfGuard.setTestAllowlist(Set.of());
     }
 
     private Account novaConta() {
@@ -138,7 +147,7 @@ class ScanCacheChaveIntegrationTest {
     void queryEntraNaChave() {
         AppUser cliente = novoUsuario(novaConta());
         assertNotEquals(chaveUsada(BUSCA, cliente),
-                chaveUsada("http://cache-teste.invalid:3000/rest/products/search?q=banana", cliente));
+                chaveUsada("http://127.0.0.1:3000/rest/products/search?q=banana", cliente));
     }
 
     @Test
@@ -146,7 +155,7 @@ class ScanCacheChaveIntegrationTest {
     void portaEntraNaChave() {
         AppUser cliente = novoUsuario(novaConta());
         assertNotEquals(chaveUsada(HOME, cliente),
-                chaveUsada("http://cache-teste.invalid:8080/", cliente));
+                chaveUsada("http://127.0.0.1:8080/", cliente));
     }
 
     @Test
@@ -164,8 +173,8 @@ class ScanCacheChaveIntegrationTest {
     void mesmoEnderecoMesmaChave() {
         AppUser cliente = novoUsuario(novaConta());
         String chave = chaveUsada(HOME, cliente);
-        assertEquals(chave, chaveUsada("http://cache-teste.invalid:3000", cliente));
-        assertEquals(chave, chaveUsada("http://cache-teste.invalid:3000/#topo", cliente));
+        assertEquals(chave, chaveUsada("http://127.0.0.1:3000", cliente));
+        assertEquals(chave, chaveUsada("http://127.0.0.1:3000/#topo", cliente));
     }
 
     @Test

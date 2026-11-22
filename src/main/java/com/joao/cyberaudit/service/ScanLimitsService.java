@@ -24,23 +24,28 @@ public class ScanLimitsService {
     private final GuestRateLimitService guestRateLimitService;
     private final PlanLimitService      planLimitService;
     private final ClientIpResolver      clientIpResolver;
+    private final ScanTargetService     scanTarget;
 
     public ScanLimitsService(RateLimitService rateLimitService,
                              GuestRateLimitService guestRateLimitService,
                              PlanLimitService planLimitService,
-                             ClientIpResolver clientIpResolver) {
+                             ClientIpResolver clientIpResolver,
+                             ScanTargetService scanTarget) {
         this.rateLimitService      = rateLimitService;
         this.guestRateLimitService = guestRateLimitService;
         this.planLimitService      = planLimitService;
         this.clientIpResolver      = clientIpResolver;
+        this.scanTarget            = scanTarget;
     }
 
     /**
-     * Rate limit e depois os limites de custo. Nessa ordem: um 429 não gasta cota.
+     * Rate limit, depois a existência do alvo, depois os limites de custo. Nessa ordem:
+     * um 429 não gasta cota, e um domínio que não resolve também não (BUG-16).
      */
     public void checkBeforeScan(String url, boolean active,
                                 AppUser currentUser, HttpServletRequest request) {
         checkRateLimit(request, currentUser);
+        scanTarget.exigeQueResolva(url);
         enforceScanLimits(url, active, currentUser, request);
     }
 

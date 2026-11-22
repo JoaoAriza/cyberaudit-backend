@@ -88,11 +88,28 @@ public class CVECorrelationService {
     @Value("${nvd.api-key:}")
     private String nvdApiKey;
 
+    /**
+     * Resultado da correlação: os CVEs achados e se todas as consultas ao NVD responderam.
+     *
+     * {@code completa} false é "não verificado", não "sem CVE": o NVD não respondeu (timeout,
+     * 429 depois da segunda tentativa, 5xx). Antes a falha virava lista vazia, e o módulo
+     * marcava "OK" do mesmo jeito (BUG-16 do cyberaudit-qa). Os achados das consultas que
+     * responderam continuam na lista.
+     */
+    public record Correlacao(List<CVEFinding> achados, boolean completa) {
+        public static Correlacao semConsulta() { return new Correlacao(List.of(), true); }
+    }
+
+    /** Só os achados; quem precisa saber se o NVD respondeu usa {@link #correlacionar}. */
     public List<CVEFinding> correlate(TechFingerprintResult fingerprint) {
-        if (fingerprint == null) return List.of();
+        return correlacionar(fingerprint).achados();
+    }
+
+    public Correlacao correlacionar(TechFingerprintResult fingerprint) {
+        if (fingerprint == null) return Correlacao.semConsulta();
 
         Map<String, String> versions = fingerprint.getDetectedVersions();
-        if (versions == null || versions.isEmpty()) return List.of();
+        if (versions == null || versions.isEmpty()) return Correlacao.semConsulta();
 
         // O SO do ALVO decide uma vez, no início: é o mesmo para todos os CVEs deste
         // scan e não muda entre consultas.
@@ -100,6 +117,7 @@ public class CVECorrelationService {
 
         List<CVEFinding> findings = new ArrayList<>();
         int queryCount = 0;
+        boolean completa = true;
 
         for (Map.Entry<String, String> entry : versions.entrySet()) {
             if (queryCount >= MAX_QUERIES || findings.size() >= MAX_TOTAL) break;
@@ -111,8 +129,11 @@ public class CVECorrelationService {
             // do produto (ruído massivo). Pulamos.
             if (version == null || version.isBlank()) continue;
 
-            List<CVEFinding> cves = queryByCpe(software, version, alvo);
-            findings.addAll(cves);
+            try {
+                findings.addAll(queryByCpe(software, version, alvo));
+            } catch (ConsultaFalhou e) {
+                completa = false;
+            }
             queryCount++;
 
             if (queryCount < Math.min(versions.size(), MAX_QUERIES)) {
@@ -121,7 +142,12 @@ public class CVECorrelationService {
         }
 
         findings.sort((a, b) -> Double.compare(b.getCvssScore(), a.getCvssScore()));
-        return findings.stream().limit(MAX_TOTAL).collect(Collectors.toList());
+        return new Correlacao(findings.stream().limit(MAX_TOTAL).collect(Collectors.toList()), completa);
+    }
+
+    /** O NVD não respondeu a uma consulta: o produto ficou sem verificação. */
+    private static final class ConsultaFalhou extends RuntimeException {
+        ConsultaFalhou(String motivo, Throwable causa) { super(motivo, causa); }
     }
 
     /**
@@ -172,12 +198,23 @@ public class CVECorrelationService {
                 resp = client.send(req, ScannerHttp.limitedString(ScannerHttp.MAX_JSON_BODY_BYTES));
             }
 
-            if (resp.statusCode() != 200) return List.of();
+            // 404: o NVD não conhece esse cpeName, então não há CVE registrado para ele.
+            // É resposta, não falha. Qualquer outro código diferente de 200 é falha.
+            if (resp.statusCode() == 404) return List.of();
+            if (resp.statusCode() != 200) {
+                throw new ConsultaFalhou("NVD HTTP " + resp.statusCode(), null);
+            }
 
             return parseResponse(resp.body(), software + " " + ver, cpe, alvo);
 
+        } catch (ConsultaFalhou e) {
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ConsultaFalhou("interrompido", e);
         } catch (Exception e) {
-            return List.of();
+            // Timeout de 12 s, falha de rede: antes virava lista vazia, igual a "sem CVE".
+            throw new ConsultaFalhou(e.getClass().getSimpleName(), e);
         }
     }
 

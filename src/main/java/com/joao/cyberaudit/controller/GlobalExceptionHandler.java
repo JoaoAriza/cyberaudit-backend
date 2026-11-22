@@ -5,6 +5,7 @@ import com.joao.cyberaudit.exception.DomainOwnershipRequiredException;
 import com.joao.cyberaudit.exception.GuestDailyLimitException;
 import com.joao.cyberaudit.exception.OwnershipNotVerifiedException;
 import com.joao.cyberaudit.exception.ScanCapacityException;
+import com.joao.cyberaudit.exception.TargetUnreachableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -100,6 +101,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
                 "error",   ex.getStatusCode().toString(),
                 "message", ex.getReason() != null ? ex.getReason() : "Erro interno"
+        ));
+    }
+
+    /**
+     * Alvo que não existe ou não aceitou conexão (BUG-16): 422, sem laudo. O {@code error}
+     * diz qual dos dois ({@code TARGET_NOT_FOUND} ou {@code TARGET_UNREACHABLE}), e a tela
+     * mostra o aviso de domínio inacessível pelos dois.
+     */
+    @ExceptionHandler(TargetUnreachableException.class)
+    public ResponseEntity<Map<String, Object>> handleTargetUnreachable(TargetUnreachableException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                "error",     ex.getCodigo(),
+                "message",   ex.getMessage(),
+                "host",      ex.getHost(),
+                "timestamp", LocalDateTime.now().toString()
         ));
     }
 

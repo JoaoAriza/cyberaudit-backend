@@ -58,8 +58,57 @@ public class HttpFetchService {
 
         } catch (Exception e) {
             return new HttpFetchResult(0, url, Map.of(), List.of(),
-                    "Erro ao conectar: " + e.getMessage(), FormSurfaceResult.vazio());
+                    "Erro ao conectar: " + motivo(e), FormSurfaceResult.vazio(), semConexao(e));
         }
+    }
+
+    /**
+     * Nada aceitou a conexão (ver {@link HttpFetchResult#isSemConexao()}). Percorre a
+     * cadeia de causas: o HttpClient embrulha a falha de rede em outra exceção.
+     */
+    static boolean semConexao(Throwable e) {
+        return naCadeia(e, java.net.http.HttpConnectTimeoutException.class,
+                java.net.UnknownHostException.class,
+                java.net.ConnectException.class,
+                java.net.NoRouteToHostException.class,
+                java.nio.channels.UnresolvedAddressException.class);
+    }
+
+    /**
+     * O motivo da falha em texto. Era o {@code getMessage()} cru, que é nulo na falha de
+     * conexão do HttpClient: a tela mostrava "Erro ao conectar: null" (BUG-16).
+     *
+     * Procura cada causa na cadeia inteira, da mais específica para a mais geral. O
+     * HttpClient embrulha a falha de DNS numa {@code ConnectException}
+     * ({@code UnresolvedAddressException} por dentro): parar na primeira exceção da cadeia
+     * dizia "conexão recusada" para um domínio que nem existe.
+     */
+    static String motivo(Throwable e) {
+        if (naCadeia(e, java.net.UnknownHostException.class,
+                java.nio.channels.UnresolvedAddressException.class)) {
+            return "o domínio não resolve no DNS";
+        }
+        if (naCadeia(e, java.net.http.HttpConnectTimeoutException.class)) {
+            return "a conexão não abriu a tempo";
+        }
+        if (naCadeia(e, java.net.NoRouteToHostException.class)) return "sem rota até o host";
+        if (naCadeia(e, java.net.ConnectException.class))       return "conexão recusada";
+        if (naCadeia(e, java.net.http.HttpTimeoutException.class)) {
+            return "o servidor aceitou a conexão, mas não respondeu a tempo";
+        }
+        if (naCadeia(e, javax.net.ssl.SSLException.class)) return "falha no TLS";
+        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    }
+
+    /** Alguma exceção da cadeia de causas é de um dos tipos. */
+    @SafeVarargs
+    private static boolean naCadeia(Throwable e, Class<? extends Throwable>... tipos) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            for (Class<? extends Throwable> tipo : tipos) {
+                if (tipo.isInstance(t)) return true;
+            }
+        }
+        return false;
     }
 
     public Map<String, String> fetchWithOrigin(String url, String origin) {
@@ -148,7 +197,7 @@ public class HttpFetchService {
                 ? formSurfaceService.analyze(body, finalUrl)
                 : FormSurfaceResult.vazio();
 
-        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null, superficie);
+        return new HttpFetchResult(status, finalUrl, normalized, rawSetCookies, null, superficie, false);
     }
 
     /** Extrai a CSP de uma tag &lt;meta http-equiv="Content-Security-Policy"&gt; no HTML. */

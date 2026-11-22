@@ -86,26 +86,7 @@ public final class SsrfGuard {
      * domínio, como a verificação de posse.
      */
     public static void validateHost(String host) {
-        if (host == null || host.isBlank()) {
-            throw new DomainBlockedException("Host inválido para scan: host ausente.");
-        }
-
-        String bare = stripPort(host.trim());
-        if (bare.isBlank()) {
-            throw new DomainBlockedException("Host inválido para scan: host ausente.");
-        }
-
-        String normalized = bare.toLowerCase(Locale.ROOT);
-        if (normalized.endsWith(".")) normalized = normalized.substring(0, normalized.length() - 1);
-        for (String suffix : BLOCKED_SUFFIXES) {
-            if (normalized.equals(suffix) || normalized.endsWith(suffix)) {
-                throw new DomainBlockedException(
-                        "Scan bloqueado: '" + host + "' é um nome de rede interna. "
-                                + "Apenas alvos públicos são permitidos.");
-            }
-        }
-
-        rejectNonCanonicalIpv4(normalized, host);
+        String normalized = validateName(host);
 
         InetAddress[] addresses;
         try {
@@ -138,6 +119,52 @@ public final class SsrfGuard {
      * fragmento) e espaço/controle. Nenhum aparece num host de verdade.
      */
     private static final Pattern URL_DELIMITERS = Pattern.compile("[@/?#\\\\\\s\\p{Cntrl}]");
+
+    /**
+     * O host seria recusado só pelo nome, sem consultar DNS: sufixo de rede interna
+     * ({@code .internal}, {@code .local}...) ou IPv4 fora do formato canônico.
+     *
+     * Usado pelo {@code ScanTargetService}, que confere se o domínio resolve ANTES deste
+     * guard rodar. Sem esta consulta, {@code metadata.google.internal} ou
+     * {@code http://2130706433}, que não resolvem, sairiam como "domínio não encontrado"
+     * (422) em vez de "bloqueado" (403).
+     */
+    static boolean refusesByName(String host) {
+        try {
+            validateName(host);
+            return false;
+        } catch (DomainBlockedException e) {
+            return true;
+        }
+    }
+
+    /**
+     * As checagens que não dependem de DNS. Devolve o host normalizado: sem porta, em
+     * minúsculas e sem o ponto final.
+     */
+    private static String validateName(String host) {
+        if (host == null || host.isBlank()) {
+            throw new DomainBlockedException("Host inválido para scan: host ausente.");
+        }
+
+        String bare = stripPort(host.trim());
+        if (bare.isBlank()) {
+            throw new DomainBlockedException("Host inválido para scan: host ausente.");
+        }
+
+        String normalized = bare.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".")) normalized = normalized.substring(0, normalized.length() - 1);
+        for (String suffix : BLOCKED_SUFFIXES) {
+            if (normalized.equals(suffix) || normalized.endsWith(suffix)) {
+                throw new DomainBlockedException(
+                        "Scan bloqueado: '" + host + "' é um nome de rede interna. "
+                                + "Apenas alvos públicos são permitidos.");
+            }
+        }
+
+        rejectNonCanonicalIpv4(normalized, host);
+        return normalized;
+    }
 
     /**
      * Separa a porta de {@code host:porta} e {@code [ipv6]:porta} (e tira os colchetes
