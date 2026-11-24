@@ -31,6 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * o {@code user_pref} ("user"). E o card chamava de sessão o analytics do Hotjar
  * ({@code _hjSession_1873402}, por "session"), que o painel já descartava.
  *
+ * BUG-22: com a regra única, os dois passaram a errar juntos em analytics e anúncio
+ * com fragmento de sessão no nome: {@code AMP_TOKEN} (Google Analytics, "token"),
+ * {@code s_sess} (Adobe Analytics, "sess") e {@code _pin_unauth} (tag do Pinterest,
+ * "auth"). Saíam HIGH e custavam 10 pontos.
+ *
  * A tabela abaixo é a resposta certa para cada nome, e os dois lados são conferidos
  * contra ela. O {@code CookieFinding} sai do {@code CookieSecurityService} real, como
  * no scan.
@@ -86,6 +91,12 @@ class CookieDeSessaoTest {
                 Arguments.of("_hjSessionRejected", false),
                 Arguments.of("_hjIncludedInSessionSample_1873402", false),
                 Arguments.of("_hjAbsoluteSessionInProgress", false),
+                // Os dois chamavam de sessão (BUG-22).
+                Arguments.of("AMP_TOKEN", false),
+                Arguments.of("s_sess", false),
+                Arguments.of("_pin_unauth", false),
+                // Chat: dá acesso às conversas do visitante. Continua sessão (BUG-22).
+                Arguments.of("intercom-session-qa123", true),
                 // Os dois já concordavam.
                 Arguments.of("__cf_bm", false),
                 Arguments.of("_ga_9XKQ2R", false),
@@ -153,6 +164,20 @@ class CookieDeSessaoTest {
                 "user_pref=escuro; Path=/",
                 "_hjSession_1873402=qa-hotjar; Path=/",
                 "laravel_session=qa-sessao; Path=/"));
+    }
+
+    @Test
+    @DisplayName("o alvo /analytics do cookies-mock: os três no card, LOW, e nada no painel")
+    void alvoAnalytics() {
+        String[] setCookies = {
+                "AMP_TOKEN=%24NOT_FOUND; Path=/",
+                "s_sess=%20s_cc%3Dtrue; Path=/",
+                "_pin_unauth=dWlkPXFh; Path=/"};
+        // Controle: os três continuam no card (o cookie foi lido); só deixaram de ser sessão.
+        List<String> riscos = cookies.analyze(List.of(setCookies)).stream()
+                .map(c -> c.getName() + ":" + c.getRisk()).toList();
+        assertEquals(List.of("AMP_TOKEN:LOW", "s_sess:LOW", "_pin_unauth:LOW"), riscos);
+        assertEquals(List.of(), painel(setCookies));
     }
 
     @Test

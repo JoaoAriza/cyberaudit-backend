@@ -236,6 +236,15 @@ class CookieAtributosTest {
         }
 
         @Test
+        @DisplayName("AMP_TOKEN, s_sess e _pin_unauth sem flag não custam ponto (BUG-22)")
+        void analyticsComNomeDeSessaoNaoCusta() {
+            ScoreResult r = score("AMP_TOKEN=%24NOT_FOUND; Path=/", "s_sess=%20s_cc%3Dtrue; Path=/",
+                    "_pin_unauth=dWlkPXFh; Path=/");
+            assertTrue(issue(r).isEmpty(), "analytics é LOW: " + r.getIssues());
+            assertEquals(100, r.getScore());
+        }
+
+        @Test
         @DisplayName("o título conta só os cookies que custam ponto")
         void tituloContaOsQueCustam() {
             ScoreResult r = score("PHPSESSID=abc; path=/; secure", "visitante=1; Path=/");

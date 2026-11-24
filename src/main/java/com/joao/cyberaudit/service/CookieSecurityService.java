@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 @Service
 public class CookieSecurityService {
@@ -21,6 +22,17 @@ public class CookieSecurityService {
 
     /** Todo cookie do Hotjar começa assim. */
     private static final String PREFIXO_HOTJAR = "_hj";
+
+    /**
+     * Analytics e anúncio com fragmento de sessão no nome, pelo nome inteiro e sem
+     * caixa (BUG-22): {@code AMP_TOKEN} (Google Analytics), {@code s_sess} (Adobe
+     * Analytics) e {@code _pin_unauth} (tag do Pinterest). Nome novo entra com caso no
+     * {@code CookieDeSessaoTest}.
+     *
+     * O {@code intercom-session-*} fica de fora de propósito: é o chat, e dá acesso às
+     * conversas do visitante.
+     */
+    private static final Set<String> ANALYTICS_COM_NOME_DE_SESSAO = Set.of("amp_token", "s_sess", "_pin_unauth");
 
     private final MessageCatalog catalog;
 
@@ -140,10 +152,10 @@ public class CookieSecurityService {
         // CSRF antes de sessão: XSRF-TOKEN e csrftoken contêm "token" e caíam como
         // sessão — o XSRF-TOKEN do Laravel perdia 10 pontos por não ter HttpOnly.
         if (l.contains("csrf") || l.contains("xsrf")) return Tipo.CSRF;
-        // Hotjar (_hjSession_1873402, _hjSessionUser_..., _hjIncludedInSessionSample_...):
-        // analytics gravado pelo JavaScript da página, que nunca terá HttpOnly e não
-        // abre conta nenhuma. O "session" do nome é a visita, não o login (BUG-21).
-        if (l.startsWith(PREFIXO_HOTJAR)) return Tipo.OUTRO;
+        // Analytics gravado pelo JavaScript da página, que nunca terá HttpOnly e não abre
+        // conta nenhuma. O "session"/"token"/"auth" do nome é a visita ou o visitante,
+        // não o login. Hotjar pelo prefixo (BUG-21); os outros pelo nome (BUG-22).
+        if (l.startsWith(PREFIXO_HOTJAR) || ANALYTICS_COM_NOME_DE_SESSAO.contains(l)) return Tipo.OUTRO;
         return isSessionCookie(l) ? Tipo.SESSAO : Tipo.OUTRO;
     }
 
