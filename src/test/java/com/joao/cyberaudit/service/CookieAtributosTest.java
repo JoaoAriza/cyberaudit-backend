@@ -227,6 +227,15 @@ class CookieAtributosTest {
         }
 
         @Test
+        @DisplayName("cookie do Hotjar sem flag não custa ponto (BUG-21)")
+        void hotjarNaoCusta() {
+            // "session" no nome é a visita do analytics, não o login. Saía HIGH e custava 10.
+            ScoreResult r = score("_hjSession_1873402=x; Path=/", "_hjSessionUser_1873402=y; Path=/");
+            assertTrue(issue(r).isEmpty(), "analytics é LOW: " + r.getIssues());
+            assertEquals(100, r.getScore());
+        }
+
+        @Test
         @DisplayName("o título conta só os cookies que custam ponto")
         void tituloContaOsQueCustam() {
             ScoreResult r = score("PHPSESSID=abc; path=/; secure", "visitante=1; Path=/");

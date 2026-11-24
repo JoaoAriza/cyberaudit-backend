@@ -19,6 +19,9 @@ public class CookieSecurityService {
     public static final String SEM_SAMESITE               = "COOKIE_SEM_SAMESITE";
     public static final String SAMESITE_NONE_SEM_SECURE   = "COOKIE_SAMESITE_NONE_SEM_SECURE";
 
+    /** Todo cookie do Hotjar começa assim. */
+    private static final String PREFIXO_HOTJAR = "_hj";
+
     private final MessageCatalog catalog;
 
     public CookieSecurityService(MessageCatalog catalog) {
@@ -126,12 +129,21 @@ public class CookieSecurityService {
         };
     }
 
+    /**
+     * A regra única de "que cookie é este". O card (risco e nota) e o painel "O que
+     * está em jogo" ({@link ImpactLabelService}) leem daqui. O painel tinha lista
+     * própria e as duas divergiam (BUG-21).
+     */
     static Tipo tipo(String name) {
         if (name == null) return Tipo.OUTRO;
         String l = name.toLowerCase(Locale.ROOT);
         // CSRF antes de sessão: XSRF-TOKEN e csrftoken contêm "token" e caíam como
         // sessão — o XSRF-TOKEN do Laravel perdia 10 pontos por não ter HttpOnly.
         if (l.contains("csrf") || l.contains("xsrf")) return Tipo.CSRF;
+        // Hotjar (_hjSession_1873402, _hjSessionUser_..., _hjIncludedInSessionSample_...):
+        // analytics gravado pelo JavaScript da página, que nunca terá HttpOnly e não
+        // abre conta nenhuma. O "session" do nome é a visita, não o login (BUG-21).
+        if (l.startsWith(PREFIXO_HOTJAR)) return Tipo.OUTRO;
         return isSessionCookie(l) ? Tipo.SESSAO : Tipo.OUTRO;
     }
 

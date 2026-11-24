@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -69,23 +68,6 @@ public class ImpactLabelService {
             "bigcommerce",    "BigCommerce",
             "loja integrada", "Loja Integrada",
             "tray",           "Tray");
-
-    /**
-     * Cookies de CDN, bot-management e analytics — comparados por PREFIXO, porque
-     * vários carregam sufixo dinâmico ({@code _hjSession_1873402}).
-     *
-     * Os do fim da lista são os que importam: {@code _hjSession} contém "sess" e
-     * {@code ajs_user_id} contém "user", os mesmos fragmentos que identificam
-     * sessão logo abaixo.
-     */
-    private static final Set<String> COOKIES_INFRA = Set.of(
-            "__cf_bm", "_cfuvid", "cf_clearance", "__cfruid", "__cflb",
-            "_ga", "_gid", "_gat", "_gcl_au", "_fbp", "_fbc", "_clck", "_clsk",
-            "_hjsession", "_hjsessionuser", "ajs_user_id", "ajs_anonymous_id");
-
-    /** Fragmentos que identificam cookie de sessão/autenticação. */
-    private static final Set<String> COOKIES_SESSAO = Set.of(
-            "sess", "sid", "auth", "token", "login", "usuario", "user");
 
     /** Teto de indícios por origem — dez cookies de sessão não explicam mais que três. */
     private static final int MAX_POR_ORIGEM = 3;
@@ -173,27 +155,21 @@ public class ImpactLabelService {
                 .orElse(null);
     }
 
+    /**
+     * Sessão pela regra do card ({@link CookieSecurityService#tipo}), a mesma que
+     * decide o risco e a nota do cookie. Havia aqui uma lista própria, por "contém",
+     * que chamava de sessão o token CSRF, o {@code inside_banner} e o
+     * {@code user_pref}, e não via o {@code jwt} (BUG-21).
+     */
     private List<String> cookiesDeSessao(List<CookieFinding> cookies) {
         if (cookies == null) return List.of();
         return cookies.stream()
                 .map(CookieFinding::getName)
                 .filter(nome -> nome != null && !nome.isBlank())
-                .filter(nome -> {
-                    String lower = nome.toLowerCase(Locale.ROOT);
-                    return !ehInfra(lower) && COOKIES_SESSAO.stream().anyMatch(lower::contains);
-                })
+                .filter(nome -> CookieSecurityService.tipo(nome) == CookieSecurityService.Tipo.SESSAO)
                 .distinct()
                 .limit(MAX_POR_ORIGEM)
                 .toList();
-    }
-
-    /**
-     * Por PREFIXO, não por igualdade: {@code _hjSession_1873402} e
-     * {@code _ga_XYZ123} trazem sufixo dinâmico e nunca casariam com uma lista de
-     * nomes exatos.
-     */
-    private boolean ehInfra(String nome) {
-        return COOKIES_INFRA.stream().anyMatch(nome::startsWith);
     }
 
     /**
