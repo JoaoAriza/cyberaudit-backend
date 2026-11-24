@@ -152,11 +152,12 @@ class ApiKeyCiGateLimitesIntegrationTest {
     // ── Rate limit por minuto ───────────────────────────────────────────────
 
     @Test
-    @DisplayName("membro de equipe (60/min) — a 61ª chamada no minuto dá 429")
+    @DisplayName("membro de conta FREE (5/min) — a 6ª chamada no minuto dá 429")
     void rateLimitValeNoGate() throws Exception {
-        // Membro de conta ENTERPRISE: cota ilimitada, então só o rate limit pode barrar.
-        AppUser membro = novoUsuario(AccountType.COMPANY, Plan.ENTERPRISE, Role.FREE_EMPLOYEE);
-        for (int i = 0; i < RateLimitService.EMPLOYEE_RPM; i++) {
+        // O limite segue o plano da conta (BUG-20). O FREE tem 5 por minuto e 10 scans por
+        // dia: as 5 primeiras passam (403 DOMAIN_BLOCKED) e a 6ª é barrada antes da cota.
+        AppUser membro = novoUsuario(AccountType.COMPANY, Plan.FREE, Role.FREE_EMPLOYEE);
+        for (int i = 0; i < RateLimitService.FREE_RPM; i++) {
             gate(membro, false).andExpect(status().isForbidden());
         }
         gate(membro, false).andExpect(status().isTooManyRequests());
