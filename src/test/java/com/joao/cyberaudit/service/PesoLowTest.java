@@ -241,8 +241,10 @@ class PesoLowTest {
             ScoreResult r = score(a -> {
                 a.headers.put("Strict-Transport-Security", "MISSING");
                 a.versao = true;
-                a.cookies.add(new CookieFinding("PHPSESSID", false, true, "MISSING", "HIGH", "sem HttpOnly"));
-                a.cookies.add(new CookieFinding("visitante", false, false, "MISSING", "LOW", "sem flags"));
+                a.cookies.add(new CookieFinding("PHPSESSID", false, true, "MISSING", "HIGH", "sem HttpOnly",
+                        List.of("COOKIE_SEM_HTTPONLY", "COOKIE_SEM_SAMESITE")));
+                a.cookies.add(new CookieFinding("visitante", false, false, "MISSING", "LOW", "sem flags",
+                        List.of("COOKIE_SEM_SECURE", "COOKIE_SEM_HTTPONLY", "COOKIE_SEM_SAMESITE")));
                 a.robots.add("/admin/");
                 a.securityTxt = false;
                 a.dns = spoofing("MEDIUM");

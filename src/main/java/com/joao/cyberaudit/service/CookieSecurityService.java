@@ -10,6 +10,15 @@ import java.util.Locale;
 @Service
 public class CookieSecurityService {
 
+    /** Como o {@code sameSite} do {@link CookieFinding} registra "sem SameSite válido". */
+    public static final String SAMESITE_AUSENTE = "MISSING";
+
+    // Códigos de CookieFinding.problems. São as chaves do texto no catálogo (evidence.*).
+    public static final String SEM_SECURE                 = "COOKIE_SEM_SECURE";
+    public static final String SEM_HTTPONLY               = "COOKIE_SEM_HTTPONLY";
+    public static final String SEM_SAMESITE               = "COOKIE_SEM_SAMESITE";
+    public static final String SAMESITE_NONE_SEM_SECURE   = "COOKIE_SAMESITE_NONE_SEM_SECURE";
+
     private final MessageCatalog catalog;
 
     public CookieSecurityService(MessageCatalog catalog) {
@@ -54,7 +63,7 @@ public class CookieSecurityService {
 
         boolean httpOnly = false;
         boolean secure   = false;
-        String  sameSite = "MISSING";
+        String  sameSite = SAMESITE_AUSENTE;
         for (int i = 1; i < parts.length; i++) {
             String av    = parts[i].trim();
             int    igual = av.indexOf('=');
@@ -72,31 +81,35 @@ public class CookieSecurityService {
         Tipo tipo     = tipo(name);
         boolean sessao = tipo == Tipo.SESSAO;
 
-        List<String> problems = new ArrayList<>();
+        // O veredito do card. Cada problema entra duas vezes: o código, em `problems`,
+        // e o texto do catálogo, em `issues` (o que a tela e o laudo mostram). Quem
+        // precisa saber o que está errado lê o código (BUG-13).
+        List<String> codigos = new ArrayList<>();
         String risk = "LOW";
 
-        // Os problemas vêm do catálogo: esta lista é o que aparece dentro do card do
-        // cookie na tela e no campo "Issues" do laudo.
         if (!secure) {
-            problems.add(catalog.evidence("COOKIE_SEM_SECURE"));
+            codigos.add(SEM_SECURE);
             risk = escalate(risk, sessao ? "HIGH" : "LOW");
         }
+        // Token CSRF é feito para o JavaScript ler (double-submit): HttpOnly quebraria.
         if (!httpOnly && tipo != Tipo.CSRF) {
-            problems.add(catalog.evidence("COOKIE_SEM_HTTPONLY"));
+            codigos.add(SEM_HTTPONLY);
             risk = escalate(risk, sessao ? "HIGH" : "LOW");
         }
-        if ("MISSING".equals(sameSite)) {
-            problems.add(catalog.evidence("COOKIE_SEM_SAMESITE"));
+        if (SAMESITE_AUSENTE.equals(sameSite)) {
+            codigos.add(SEM_SAMESITE);
             risk = escalate(risk, sessao ? "MEDIUM" : "LOW");
         } else if ("None".equals(sameSite) && !secure) {
-            problems.add(catalog.evidence("COOKIE_SAMESITE_NONE_SEM_SECURE"));
+            codigos.add(SAMESITE_NONE_SEM_SECURE);
             risk = escalate(risk, sessao ? "HIGH" : "LOW");
         }
 
-        if (problems.isEmpty()) return null;
+        if (codigos.isEmpty()) return null;
 
+        List<String> textos = new ArrayList<>();
+        for (String codigo : codigos) textos.add(catalog.evidence(codigo));
         return new CookieFinding(name, httpOnly, secure, sameSite, risk,
-                String.join("; ", problems));
+                String.join("; ", textos), List.copyOf(codigos));
     }
 
     /**
@@ -109,7 +122,7 @@ public class CookieSecurityService {
             case "strict" -> "Strict";
             case "lax"    -> "Lax";
             case "none"   -> "None";
-            default       -> "MISSING";
+            default       -> SAMESITE_AUSENTE;
         };
     }
 

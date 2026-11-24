@@ -122,11 +122,11 @@ public class ComplianceMappingService {
         // Art. 49 — Segurança por padrão (privacy by design)
         {
             List<String> findings = new ArrayList<>();
-            if (hasCookiesWithoutSecure(r))
+            if (algumCookieCom(r, CookieSecurityService.SEM_SECURE))
                 findings.add(achado("COOKIE_SECURE"));
-            if (hasCookiesWithoutHttpOnly(r))
+            if (algumCookieCom(r, CookieSecurityService.SEM_HTTPONLY))
                 findings.add(achado("COOKIE_HTTPONLY"));
-            if (hasCookiesWithoutSameSite(r))
+            if (algumCookieCom(r, CookieSecurityService.SEM_SAMESITE))
                 findings.add(achado("COOKIE_SAMESITE"));
             if (r.isReflectedXssSuspected())
                 findings.add(achado("XSS"));
@@ -332,22 +332,17 @@ public class ComplianceMappingService {
                 .noneMatch(k -> k.equalsIgnoreCase(headerName));
     }
 
-    private boolean hasCookiesWithoutSecure(ScanResult r) {
+    /**
+     * Algum card de cookie lista esse problema ({@link CookieFinding#getProblems()}).
+     *
+     * O compliance diz o mesmo que o card (BUG-13). Antes refazia a conta pelas flags:
+     * procurava SameSite {@code null}, e o serviço grava {@code "MISSING"}, então o item
+     * de SameSite nunca aparecia; e cobrava HttpOnly do token CSRF, que o card isenta.
+     */
+    private boolean algumCookieCom(ScanResult r, String problema) {
         if (r.getCookieIssues() == null) return false;
         return r.getCookieIssues().stream()
-                .anyMatch(c -> !c.isSecure());
-    }
-
-    private boolean hasCookiesWithoutHttpOnly(ScanResult r) {
-        if (r.getCookieIssues() == null) return false;
-        return r.getCookieIssues().stream()
-                .anyMatch(c -> !c.isHttpOnly());
-    }
-
-    private boolean hasCookiesWithoutSameSite(ScanResult r) {
-        if (r.getCookieIssues() == null) return false;
-        return r.getCookieIssues().stream()
-                .anyMatch(c -> c.getSameSite() == null || c.getSameSite().isBlank());
+                .anyMatch(c -> c.getProblems() != null && c.getProblems().contains(problema));
     }
 
     private boolean notEmpty(List<?> list) {
